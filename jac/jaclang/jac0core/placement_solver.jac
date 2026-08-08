@@ -129,6 +129,23 @@ def native_default_verdict(module: uni.Module) -> tuple[bool, str] {
         _is_demoted_native,
         native_pipeline_available
     }
+    # In a web-app project the logic layer belongs to the client/server
+    # split: a markerless pure module that happens to lower natively must
+    # not be claimed by the native default — its client importers would
+    # see wasm stubs instead of ES modules (jacblocks dogfood #31). Native
+    # stays opt-in there (extern anchors, pins, nacompile).
+    try {
+        import from jaclang.project.config { get_config }
+        _cfg = get_config();
+        if (
+            _cfg is not None
+            and getattr(getattr(_cfg, 'project', None), 'kind', '') == 'web-app'
+        ) {
+            return (False, "web-app project: native is opt-in");
+        }
+    } except Exception {
+        ;
+    }
     (env_ok, env_reason) = native_pipeline_available();
     if not env_ok {
         return (False, env_reason);
