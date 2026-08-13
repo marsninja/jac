@@ -1291,6 +1291,24 @@ impl NaIRGenPass._apply_flow_narrowing(nd: uni.UniNode, val: ir.Value) -> ir.Val
     if _src_opt is not None {
         return self.builder.extract_value(val, 1, name="opt.narrowed");
     }
+    # The source is a jacval, so the value crossed the boxing boundary, and
+    # a bare-container narrow (`isinstance(x, list)`) carries no element
+    # type. The canonical layout for an any-held container is heterogeneous
+    # (tagged list slots, str-keyed jacval dict values) -- the same layout
+    # any-subscript and any-iteration assume -- so the narrowed unbox must
+    # take that flavor, not the bare container's unboxed i64 default.
+    if not (_nt.private.type_args or []) {
+        _cn = _nt.shared.class_name;
+        if _cn == "list" {
+            self._emit_list_helpers("jacval", self.jacval_type);
+            _want = self.list_types["jacval"].as_pointer();
+        } elif _cn == "dict" {
+            self._emit_dict_helpers(
+                "ptr", "jacval", ir.IntType(8).as_pointer(), self.jacval_type
+            );
+            _want = self.dict_types["ptr:jacval"].as_pointer();
+        }
+    }
     _ub_want = _want;
     if self._str_desc_ty is not None and _want == self._str_desc_ty {
         _ub_want = ir.IntType(8).as_pointer();
