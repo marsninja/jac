@@ -1291,10 +1291,6 @@ impl NaIRGenPass._apply_flow_narrowing(nd: uni.UniNode, val: ir.Value) -> ir.Val
     if _src_opt is not None {
         return self.builder.extract_value(val, 1, name="opt.narrowed");
     }
-    # A bare `dict` narrow is the same boxing-boundary case as the bare
-    # `list` narrow above: an any-held dict is str-keyed over jacval
-    # values -- the layout any-subscript assumes -- not the unboxed i64
-    # default.
     if _nt.shared.class_name == "dict" and not (_nt.private.type_args or []) {
         self._emit_dict_helpers(
             "ptr", "jacval", ir.IntType(8).as_pointer(), self.jacval_type
