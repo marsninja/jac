@@ -1293,11 +1293,7 @@ impl JacCompiler.run_schedule(
             self.resolve_absorb_imports(mod, target_program);
         }
         run_pass(
-            current_pass,
-            mod,
-            target_program,
-            cancel_token=cancel_token,
-            policy=_policy
+            current_pass, mod, target_program, cancel_token=cancel_token, policy=_policy
         );
         for _prov in (getattr(current_pass, 'PROVIDES', ()) or ()) {
             provided.add(_prov);

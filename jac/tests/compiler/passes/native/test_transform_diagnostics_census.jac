@@ -116,8 +116,7 @@ def _own_seams -> dict[(str, str)] {
     (census, _ir, _prog) = _census();
     rec = census.get(os.path.realpath(TRANSFORM_JAC));
     assert rec is not None , (
-        "transform.jac never entered the native census -- the measurement "
-        "is vacuous"
+        "transform.jac never entered the native census -- the measurement " "is vacuous"
     );
     assert rec["outcome"] == "native" , (
         f"transform.jac did not stay native ({rec['outcome']}: "
@@ -213,8 +212,8 @@ test "residual native errors are exactly the known constructor gaps" {
         if not any(marker in e for marker in KNOWN_CONSTRUCTOR_GAPS)
     ];
     assert not unexpected , (
-        f"{len(unexpected)} native error(s) beyond the known constructor "
-        "gaps:\n" + "\n".join(f"  {e}" for e in unexpected)
+        f"{len(unexpected)} native error(s) beyond the known constructor " "gaps:\n"
+        + "\n".join(f"  {e}" for e in unexpected)
     );
     assert len(errs) == len(KNOWN_CONSTRUCTOR_GAPS) , (
         f"constructor-gap inventory drifted (expected "

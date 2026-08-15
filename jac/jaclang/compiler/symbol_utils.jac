@@ -606,12 +606,6 @@ def decl_has_access(source_mod: uni.Module, item: uni.ModuleItem) -> bool {
     return owner?.access is not None;
 }
 
-"""Whether an alert with this code already targets the node's location.
-
-Scans the program ledger (alerts delivered by earlier passes) and the
-reporter's own in-flight accumulation lists (alerts of the running pass,
-delivered only when it finishes).
-"""
 def _already_reported(reporter: any, diag: any, nd: uni.UniNode) -> bool {
     for pool in (
         reporter.prog.errors_had,

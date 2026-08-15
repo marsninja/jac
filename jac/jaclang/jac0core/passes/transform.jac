@@ -34,10 +34,7 @@ obj DiagnosticPolicy {
         lint_ignore: list[str] = [],
         _inline_cache: dict[(tuple[str, int], list[str])] = {};
 
-    def is_suppressed(
-        diag: DiagnosticInfo, loc: (CodeLocInfo | None) = None
-    ) -> bool;
-
+    def is_suppressed(diag: DiagnosticInfo, loc: (CodeLocInfo | None) = None) -> bool;
     def _inline_suppressed(diag: DiagnosticInfo, loc: CodeLocInfo) -> bool;
 }
 
@@ -51,7 +48,6 @@ obj BaseTransform[T_in, T_out](ABC) {
         ir_out: T_out postinit;
 
     def postinit -> None;
-
     def timed_transform(ir_in: T_in) -> T_out {
         start_time = time.time();
         ir_out = self.transform(ir_in=ir_in);
@@ -61,7 +57,6 @@ obj BaseTransform[T_in, T_out](ABC) {
 
     def pre_transform -> None;
     def post_transform -> None;
-
     def transform(ir_in: T_in) -> T_out {
         ;
     }

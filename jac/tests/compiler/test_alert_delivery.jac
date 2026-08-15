@@ -16,12 +16,7 @@ though the constructor never returns.
 
 import jaclang.jac0core.unitree as uni;
 import from jaclang.jac0core.compiler { deliver_alerts, run_pass }
-import from jaclang.jac0core.diagnostics {
-    Category,
-    DiagnosticInfo,
-    E1030,
-    Severity
-}
+import from jaclang.jac0core.diagnostics { Category, DiagnosticInfo, E1030, Severity }
 import from jaclang.jac0core.passes { Transform }
 import from jaclang.jac0core.passes.transform { DiagnosticPolicy }
 import from jaclang.jac0core.program { JacProgram }
@@ -115,9 +110,7 @@ test "a policy stamped on the pass suppresses at emit time" {
     assert inst.emit_results == [False, True, False] , (
         f"suppressed emits must report False: {inst.emit_results}"
     );
-    assert not inst.errors_had , (
-        "suppressed alerts must not accumulate on the pass"
-    );
+    assert not inst.errors_had , ("suppressed alerts must not accumulate on the pass");
     assert not prog.errors_had , (
         f"suppressed alerts leaked into delivery: {[str(a) for a in prog.errors_had]}"
     );
@@ -132,9 +125,7 @@ test "an unstamped pass accumulates everything and delivery suppresses" {
     assert len(inst.errors_had) == 2 , (
         "a policy-free pass must accumulate every emission"
     );
-    assert not prog.errors_had , (
-        "direct construction must not deliver by itself"
-    );
+    assert not prog.errors_had , ("direct construction must not deliver by itself");
     deliver_alerts(
         inst.errors_had,
         inst.warnings_had,
@@ -150,10 +141,7 @@ test "an unstamped pass accumulates everything and delivery suppresses" {
 
 test "inline jac:ignore suppression holds through the policy object" {
     prog = JacProgram();
-    mod = _parse(
-        prog,
-        "with entry {\n    x = 1;  # jac:ignore[E1030]\n}\n"
-    );
+    mod = _parse(prog, "with entry {\n    x = 1;  # jac:ignore[E1030]\n}\n");
     policy = DiagnosticPolicy();
     assert policy.is_suppressed(E1030, mod.loc) is False , (
         "module-level loc (line 1) must not inherit the line-2 ignore"
@@ -184,7 +172,11 @@ test "ice records its E9001 and still raises through the driver" {
         assert "probe detonation" in str(e);
     }
     assert blew_up , "Transform.ice must still raise";
-    codes = [a.code.code for a in prog.errors_had if a.code is not None];
+    codes = [
+        a.code.code
+        for a in prog.errors_had
+        if a.code is not None
+    ];
     assert "E9001" in codes , (
         f"the ICE alert was lost when the constructor raised: "
         f"{[str(a) for a in prog.errors_had]}"
