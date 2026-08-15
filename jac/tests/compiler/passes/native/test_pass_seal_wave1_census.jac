@@ -83,6 +83,7 @@ glob WAVE1_CLOSURES: dict[(str, tuple)] = {
          "jac0core/passes/annex_pass.jac": (
              "jac0core/constant.jac",
              "jac0core/passes/annex_pass.jac",
+             "jac0core/passes/annex_weave.jac",
              "jac0core/srcloc.jac",
              "jac0core/unitree.jac"
          ),

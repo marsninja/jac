@@ -144,17 +144,21 @@ impl DiagnosticPolicy._inline_suppressed(
 }
 
 impl _require_native_pass_tier(pass_type: type) -> None {
-    verdict = _NATIVE_PASS_TIER_MEMO.get(pass_type);
-    if verdict is None {
+    if pass_type not in _NATIVE_PASS_TIER_MEMO {
         fullname = getattr(pass_type, "__module__", "") or "";
-        verdict = "";
+        fresh = "";
         if fullname.startswith("jaclang.") {
             import from jaclang.jac0core.sealed { native_artifact_for }
             if native_artifact_for(fullname) is not None {
-                verdict = fullname;
+                fresh = fullname;
             }
         }
-        _NATIVE_PASS_TIER_MEMO[pass_type] = verdict;
+        _NATIVE_PASS_TIER_MEMO[pass_type] = fresh;
+    }
+    verdict = _NATIVE_PASS_TIER_MEMO[pass_type];
+    if verdict and verdict not in _NATIVE_SERVED_PASSES {
+        import from jaclang.jac0core.passes.pass_serve { bind_sealed_pass_artifacts }
+        bind_sealed_pass_artifacts();
     }
     if verdict and verdict not in _NATIVE_SERVED_PASSES {
         raise RuntimeError(
