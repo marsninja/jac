@@ -285,15 +285,22 @@ def seal_bootstrap(pkg_dir: Path, out_dir: Path, embed_src: bool) -> int {
 
 glob NATIVE_SEAL_ROOTS: tuple = (
          "jac0core/unitree.jac",
+         "jac0core/passes/annex_pass.jac",
+         "jac0core/passes/module_codegen_pass.jac",
+         "jac0core/passes/uni_pass.jac",
+         "jac0core/passes/endpoint_effect_pass.jac",
          "compiler/native_materialize.jac",
 
-     );
-
-glob NATIVE_SEAL_CLOSURE: tuple = (
+     ),
+     NATIVE_SEAL_CLOSURE: tuple = (
          "jac0core/constant.jac",
          "jac0core/parser/lexer.jac",
          "jac0core/parser/parser.jac",
          "jac0core/parser/tokens.jac",
+         "jac0core/passes/annex_pass.jac",
+         "jac0core/passes/endpoint_effect_pass.jac",
+         "jac0core/passes/module_codegen_pass.jac",
+         "jac0core/passes/uni_pass.jac",
          "jac0core/srcloc.jac",
          "jac0core/unitree.jac",
          "compiler/native_materialize.jac",
@@ -318,9 +325,38 @@ glob _UNITREE_SEAM_WAIVERS: tuple = (
          "jac0core/unitree.jac::Ellipsis.lit_value.__get__",
 
      ),
+     _MODULE_CODEGEN_SEAM_WAIVERS: tuple = (
+         "jac0core/passes/module_codegen_pass.jac::ModuleCodegenPass.iter_context_stmts",
+         "jac0core/passes/module_codegen_pass.jac::ModuleCodegenPass.iter_module_imports",
+         "jac0core/passes/module_codegen_pass.jac::ModuleCodegenPass.iter_nested_imports",
+         "jac0core/passes/module_codegen_pass.jac::ModuleCodegenPass.has_native_context_stmts",
+         "jac0core/passes/module_codegen_pass.jac::ModuleCodegenPass.shared_archetypes_for_context",
+         "jac0core/passes/module_codegen_pass.jac::client_capability_violations",
+
+     ),
+     _UNI_PASS_SEAM_WAIVERS: tuple = (
+         "jac0core/passes/uni_pass.jac::UniPass.get_all_sub_nodes",
+         "jac0core/passes/uni_pass.jac::UniPass.find_parent_of_type",
+
+     ),
+     _ENDPOINT_EFFECT_SEAM_WAIVERS: tuple = (
+         "jac0core/passes/endpoint_effect_pass.jac::EndpointEffectPass.enter_ability",
+         "jac0core/passes/endpoint_effect_pass.jac::EndpointEffectPass.enter_archetype",
+
+     ),
      NATIVE_SEAL_DEMOTION_WAIVERS: dict[str, tuple] = {
          "compiler/native_materialize.jac": _UNITREE_SEAM_WAIVERS,
-         "jac0core/unitree.jac": _UNITREE_SEAM_WAIVERS
+         "jac0core/unitree.jac": _UNITREE_SEAM_WAIVERS,
+         "jac0core/passes/annex_pass.jac": _UNITREE_SEAM_WAIVERS,
+         "jac0core/passes/module_codegen_pass.jac": (
+             _UNITREE_SEAM_WAIVERS + _MODULE_CODEGEN_SEAM_WAIVERS
+         ),
+         "jac0core/passes/uni_pass.jac": (
+             _UNITREE_SEAM_WAIVERS + _UNI_PASS_SEAM_WAIVERS
+         ),
+         "jac0core/passes/endpoint_effect_pass.jac": (
+             _UNITREE_SEAM_WAIVERS + _ENDPOINT_EFFECT_SEAM_WAIVERS
+         )
      };
 
 def _seal_module_label(path: str, pkg_path: (Path | None)) -> str {
