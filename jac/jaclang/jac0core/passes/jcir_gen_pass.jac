@@ -11,6 +11,7 @@ import from jaclang.jac0core.constant {
 import from jaclang.jac0core.constant { Constants as Con }
 import from jaclang.jac0core.constant { Tokens as Tok }
 import from jaclang.jac0core.codegen_ir { CodegenIrWriter }
+import from jaclang.jac0core.codeinfo { BoundaryTypeInfo, InteropBinding }
 import from jaclang.jac0core.passes.ast_gen { BaseAstGenPass }
 import from jaclang.jac0core.diagnostics {
     E5001,
@@ -116,7 +117,8 @@ obj CgNode {
 
 obj CgSplice {
     has src: str,
-        offset: int = 0;
+        offset: int = 0,
+        bound_names: list = [];
 }
 
 def write_ir_value(w: CodegenIrWriter, v: object) {
@@ -229,7 +231,34 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
     def _drain_module_hoists -> list;
     def _report_leaked_hoisted_lambdas -> None;
     def _function_expr_from_def(func_def: CgNode, jac_node: uni.UniNode) -> CgNode;
-    def _check_sem_decorator(nd: uni.UniNode) -> None;
+    def _get_sem_decorator(nd: uni.UniNode) -> (CgNode | None);
+    def _gen_native_interop_stubs(nd: uni.UniNode) -> None;
+    def _native_import_registration_map -> dict;
+    def _top_level_bound_names(items: any) -> list;
+    def _native_test_shim_stmts(nd: uni.Test) -> list;
+    def _generate_sv_to_sv_stubs(nd: uni.Import) -> bool;
+    def _gen_py_sv_func_stub(
+        local_name: str,
+        func_name: str,
+        module_name: str,
+        binding: InteropBinding,
+        boundary_types: dict[(str, BoundaryTypeInfo)]
+    ) -> str;
+
+    def _gen_py_sv_walker_stub(
+        local_name: str,
+        walker_name: str,
+        module_name: str,
+        binding: InteropBinding,
+        boundary_types: dict[(str, BoundaryTypeInfo)]
+    ) -> str;
+
+    def _gen_py_boundary_stub_class(class_name: str, info: BoundaryTypeInfo) -> str;
+    def _invoke_llm_call(
+        model: CgNode, caller: CgNode, args: CgNode, is_async: bool = False
+    ) -> CgNode;
+
+    def gen_llm_body(nd: uni.Ability) -> list;
     def _is_edge_ref_target(target: uni.UniNode) -> bool;
     def _cmp_op_str(op: CgNode) -> (str | None);
     def _query_filter_kws(fc: uni.FilterCompr, type_arg: str, preds_arg: str) -> list;

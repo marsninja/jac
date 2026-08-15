@@ -602,7 +602,7 @@ with entry {
     exec_both(ref_tree, got_tree, "super_fixture.jac", ["d", "ks", "left"]);
 }
 
-test "native test shims refuse loudly in phase 1" {
+test "native test shims lower identically via splice" {
     src = """
 def double(x: int) -> int {
     return x * 2;
@@ -612,22 +612,66 @@ test "doubles correctly" {
     assert double(2) == 4;
 }
 """;
-    prog = JacProgram();
-    mod = prog.compile(
-        use_str=src,
-        file_path="testblock_fixture.jac",
-        options=CompileOptions(
-            force_codespace="server", skip_native_engine=True, suppress_codes=["E5092"]
-        )
+    (ref_tree, got_tree, blob) = dual_compile(src, "testblock_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    result = compile_ir(blob);
+    assert len(result.diags) == 0;
+    assert_bytecode_equal(
+        ref_tree, "testblock_fixture.jac", result.modules[0].bytecode
     );
-    assert len(prog.errors_had) == 0;
-    caught = "";
-    try {
-        JcirGenPass(ir_in=mod, prog=prog);
-    } except NotImplementedError as e {
-        caught = str(e);
+    dumped = pyast.dump(got_tree);
+    assert "invoke_native_test" in dumped;
+}
+
+test "sem strings lower to sem decorators" {
+    src = """
+obj Greeter {
+    has name: str = "anon";
+
+    def hello -> str {
+        return "hi " + self.name;
     }
-    assert "native codespace test shim" in caught;
+}
+
+sem Greeter = "A friendly greeter.";
+sem Greeter.name = "The name to greet with.";
+
+with entry {
+    g = Greeter(name="zed");
+    msg = g.hello();
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "sem_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    dumped = pyast.dump(got_tree);
+    assert "A friendly greeter." in dumped;
+    exec_both(ref_tree, got_tree, "sem_fixture.jac", ["msg"]);
+}
+
+test "llm ability bodies lower to call_llm recipes" {
+    src = """
+obj FakeModel {
+    has call_params: dict = {};
+}
+
+def make_model -> FakeModel {
+    return FakeModel();
+}
+
+def summarize(text: str) -> str by make_model();
+
+obj Helper {
+    def rate(text: str) -> int by make_model();
+}
+""";
+    (ref_tree, got_tree, blob) = dual_compile(src, "llm_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    dumped = pyast.dump(got_tree);
+    assert "call_llm" in dumped;
+    assert "get_mtir" in dumped;
+    result = compile_ir(blob);
+    assert len(result.diags) == 0;
+    assert_bytecode_equal(ref_tree, "llm_fixture.jac", result.modules[0].bytecode);
 }
 
 test "real repo file srcloc lowers identically end to end" {
@@ -661,7 +705,9 @@ walker Traveler {
     }
 
     can step with Spot entry {
-        self.seen.append(here.name);
+        -> Spot {
+            self.seen.append(here.name);
+        }
         self.hops += 1;
         if self.hops > 3 {
             skip;
@@ -682,7 +728,9 @@ def build_map -> list {
     a +>:Road():+> b;
     a del --> b;
     named = [root-->[?:Spot]][?name == "a"];
-    return named;
+    first_two = [root-->][0:2];
+    tagged = [root-->[?:Spot]](=name="seen");
+    return named + first_two + tagged;
 }
 
 def launch -> Traveler {
@@ -827,40 +875,25 @@ with entry {
     }
 }
 
-test "phase boundaries refuse loudly" {
-    sem_src = """
-obj Greeter {
-    has name: str = "";
+test "concurrency flow and wait lower identically" {
+    src = """
+def slow(n: int) -> int {
+    return n + 1;
 }
 
-sem Greeter = "A friendly greeter.";
-""";
-    prog = JacProgram();
-    mod = prog.compile(use_str=sem_src, file_path="sem_fixture.jac");
-    caught = "";
-    try {
-        JcirGenPass(ir_in=mod, prog=prog);
-    } except NotImplementedError as e {
-        caught = str(e);
-    }
-    assert "sem-string decorator" in caught;
-    flow_src = """
-def slow -> int {
-    return 1;
+def run_pair -> int {
+    t1 = flow slow(1);
+    t2 = flow slow(2);
+    a = wait t1;
+    b = wait t2;
+    return int(a) + int(b);
 }
 
 with entry {
-    t = flow slow();
-    r = wait t;
+    r = run_pair();
 }
 """;
-    prog2 = JacProgram();
-    mod2 = prog2.compile(use_str=flow_src, file_path="flow_fixture.jac");
-    caught2 = "";
-    try {
-        JcirGenPass(ir_in=mod2, prog=prog2);
-    } except NotImplementedError as e {
-        caught2 = str(e);
-    }
-    assert "concurrent flow/wait expression" in caught2;
+    (ref_tree, got_tree, _) = dual_compile(src, "flow_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "flow_fixture.jac", ["r"]);
 }
