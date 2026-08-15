@@ -1,16 +1,17 @@
 # Compact Codegen IR (JCIR)
 
-Status: design plus reference implementation, plus the phase 1 through 3
-producer. This is the first lane 2 deliverable of the zero-bytecode
+Status: design plus reference implementation, plus the complete producer
+(phases 1 through 4). This is the first lane 2 deliverable of the zero-bytecode
 endgame (epic #8201): it fixes the Step 4 shim's contract and is the
 proof that the intermediate annotated-state materializer is skippable at
 all. The format module, the Python reference shim, and the round-trip
 suite landed together with this document; the emitter pass
 (`jac0core/passes/jcir_gen_pass.jac`) now produces this format for the
 core language (phase 1), object-spatial codegen, match, and async
-(phase 2), plus interop stubs, native test shims, sem decorators, llm
-bodies, and concurrency (phase 3) directly from the annotated unitree,
-verified against
+(phase 2), interop stubs, native test shims, sem decorators, llm bodies,
+and concurrency (phase 3), plus jsx lowering (phase 4) directly from the
+annotated unitree, with genai call expressions the single remaining
+refusal (deliberately refused in both lanes), verified against
 `pyast_gen` by the differential suite
 (`tests/compiler/test_jcir_gen_pass.jac`). An opt-in pipeline flag
 (section 11.1) runs the whole codegen tail through this lane. The sealed
@@ -469,11 +470,25 @@ assumed away.
   all via `OP_PARSE_SPLICE` exactly as section 8 planned, with producer
   bookkeeping of splice-bound names for registration placement),
   sem-string decorators, llm ability bodies (`get_mtir`/`call_llm`
-  recipes, the `by` operator), and concurrency flow/wait. The remaining
-  refusals are jsx lowering (audited as mechanically portable, pending)
-  and genai call expressions (which `pyast_gen` also refuses); both raise
-  a `NotImplementedError` naming the construct and its source location,
-  never silently skip.
+  recipes, the `by` operator), and concurrency flow/wait. Phase 4 ported
+  jsx lowering per the PyJsxProcessor audit (element lowering to jaclib
+  `jsx(tag, attrs, children)` calls, component-vs-tag element names,
+  spread-attribute Dict merging, attribute and text entity unescaping,
+  fragments, slots, comments). The single remaining refusal is genai
+  call expressions, which both lanes now refuse deliberately (the
+  emitter with its NotImplementedError naming the construct and
+  location, `pyast_gen` with its "temporarily disabled" ice; the parser
+  currently never produces the construct, and the differential suite
+  pins both refusals on a synthetic node).
+
+  Sealed-lane producer caveats (producer-side facts or string transforms
+  that the dev lane satisfies through ordinary Python; the sealing wave
+  must supply them natively): the builtin-name set read from
+  `jaclang.runtimelib.builtin.__all__` (bake at seal time), the ambient
+  typing names (already an ast-free text scan of `typing_ambient.pyi`),
+  `textwrap.dedent` for `::py::` blocks, and `html.unescape` for jsx
+  text and string attributes (na `html` shim or a vendored entity
+  table).
 - `jac0core/passes/jcir_bc_gen_pass.jac` (+impl): the shim-seat pipeline
   pass. Reads `gen.jcir`, transcribes through the reference shim into
   `gen.py_ast`, unparses the tree into `gen.py` (so tooling consumers of
@@ -518,6 +533,41 @@ differences from the default tail:
 The differential suite's pipeline test compiles the same source with and
 without the flag and asserts tree and code-object equality between the
 two lanes.
+
+### 11.2 Flag-lane validation manifest
+
+The named suites below have been validated end to end under
+`JAC_CODEGEN=jcir` (each run as
+`JAC_CODEGEN=jcir JAC_TEST_JOBS=0 jac test -x <file>`, one file at a
+time), including a full from-clean-cache build of the dev CLI toolchain
+itself on the jcir lane. This list is the manifest for the standing
+cross-lane canary; the cutover CI job can lift it verbatim.
+
+- tests/compiler/test_compilation.jac
+- tests/compiler/test_codegen_ir.jac
+- tests/compiler/test_jcir_gen_pass.jac
+- tests/compiler/test_importer.jac
+- tests/compiler/test_archetype_runtime.jac
+- tests/compiler/test_client_codegen.jac
+- tests/compiler/test_codespace_inference.jac
+- tests/compiler/test_placement_evidence.jac
+- tests/compiler/test_interop_manifest.jac
+- tests/compiler/test_front_end_native_idioms.jac
+- tests/runtimelib/test_graph_query.jac
+- tests/runtimelib/test_osp_edges_contract.jac
+- tests/runtimelib/test_closures.jac
+- tests/runtimelib/test_serve.jac
+- tests/runtimelib/test_serve_bridged_endpoints.jac
+- tests/runtimelib/test_client_bundle.jac
+- tests/langserve/test_server.jac
+- tests/language/test_language.jac
+- tests/language/test_bugs.jac
+
+Known exclusion: tests/compiler/test_micro_suite.jac asserts `jac_link`
+on every generated node, the tooling-only back-reference the jcir tail
+omits by design (this section, first bullet). It stays on the pyast
+lane until the cutover decides whether that assertion becomes
+lane-conditional.
 
 ## 12. Cutover fit
 
