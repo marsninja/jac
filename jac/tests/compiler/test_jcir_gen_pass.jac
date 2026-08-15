@@ -1,0 +1,685 @@
+"""Differential harness for the JCIR emitter (epic #8201 lane 2, phase 1).
+
+Every fixture is compiled BOTH ways: through the standard pipeline
+(PyastGenPass building CPython ast) and through JcirGenPass emitting JCIR
+bytes that the reference shim (codegen_shim) transcribes back into ast.
+The harness asserts exact `ast.dump(include_attributes=True)` equality
+between the two trees, and behavioral equality (exec both code objects,
+compare selected globals) on executable fixtures. Any mismatch is a bug
+in the emitter, the shim, or the design doc, never in the fixture.
+"""
+
+import ast as pyast;
+import marshal;
+import os;
+import types;
+import from builtins { compile as pycompile, exec as pyexec }
+import from tests.support { JAC_ROOT }
+import from jaclang.jac0core.program { JacProgram }
+import from jaclang.jac0core.compile_options { CompileOptions }
+import from jaclang.jac0core.passes.jcir_gen_pass { JcirGenPass }
+import from jaclang.jac0core.codegen_shim { compile_ir, transcribe }
+
+def dual_compile(src: str, path: str) -> tuple {
+    prog = JacProgram();
+    mod = prog.compile(
+        use_str=src,
+        file_path=path,
+        options=CompileOptions(
+            force_codespace="server", skip_native_engine=True, suppress_codes=["E5092"]
+        )
+    );
+    assert len(prog.errors_had) == 0 , str([str(e) for e in prog.errors_had]);
+    ref_tree = mod.gen.py_ast[0];
+    emitter = JcirGenPass(ir_in=mod, prog=prog);
+    blob = emitter.ir_bytes();
+    (mods, diags) = transcribe(blob);
+    assert diags == [];
+    assert len(mods) == 1;
+    assert mods[0][0] == path;
+    return (ref_tree, mods[0][1], blob);
+}
+
+def dual_compile_file(path: str) -> tuple {
+    prog = JacProgram();
+    mod = prog.compile(path);
+    assert len(prog.errors_had) == 0 , str([str(e) for e in prog.errors_had]);
+    ref_tree = mod.gen.py_ast[0];
+    emitter = JcirGenPass(ir_in=mod, prog=prog);
+    blob = emitter.ir_bytes();
+    (mods, diags) = transcribe(blob);
+    assert diags == [];
+    assert len(mods) == 1;
+    return (ref_tree, mods[0][1], blob);
+}
+
+def assert_dump_equal(ref_tree: object, got_tree: object) {
+    want = pyast.dump(ref_tree, include_attributes=True);
+    got = pyast.dump(got_tree, include_attributes=True);
+    if want != got {
+        i = 0;
+        n = min(len(want), len(got));
+        while (i < n and want[i] == got[i]) {
+            i += 1;
+        }
+        lo = max(0, i - 120);
+        raise AssertionError(
+            "tree mismatch near offset "
+                + str(i)
+                + "\nwant: ..."
+                + want[lo:i + 200]
+                + "\ngot:  ..."
+                + got[lo:i + 200]
+        );
+    }
+}
+
+def code_diffs(a: any, b: any, path: str, out: list) -> list {
+    for attr in [
+        "co_name",
+        "co_qualname",
+        "co_filename",
+        "co_firstlineno",
+        "co_argcount",
+        "co_posonlyargcount",
+        "co_kwonlyargcount",
+        "co_nlocals",
+        "co_stacksize",
+        "co_flags",
+        "co_code",
+        "co_names",
+        "co_varnames",
+        "co_freevars",
+        "co_cellvars",
+        "co_linetable",
+        "co_exceptiontable"
+    ] {
+        av = getattr(a, attr, None);
+        bv = getattr(b, attr, None);
+        if av != bv {
+            out.append(f"{path}.{attr}: pyast {av!r} vs jcir {bv!r}");
+        }
+    }
+    if len(a.co_consts) != len(b.co_consts) {
+        out.append(f"{path}.co_consts length {len(a.co_consts)} vs {len(b.co_consts)}");
+        return out;
+    }
+    for (i, (x, y)) in enumerate(zip(a.co_consts, b.co_consts)) {
+        if (isinstance(x, types.CodeType) and isinstance(y, types.CodeType)) {
+            code_diffs(x, y, f"{path}.consts[{i}]", out);
+        } elif (x != y or type(x) is not type(y)) {
+            out.append(f"{path}.consts[{i}]: pyast {x!r} vs jcir {y!r}");
+        }
+    }
+    return out;
+}
+
+def assert_bytecode_equal(ref_tree: object, mod_path: str, bytecode: bytes) {
+    ref_code = pycompile(ref_tree, mod_path, "exec");
+    jcir_code = marshal.loads(bytecode);
+    diffs = code_diffs(ref_code, jcir_code, "module", []);
+    assert diffs == [] , "\n".join(diffs);
+}
+
+def exec_both(ref_tree: object, got_tree: object, path: str, names: list) {
+    ref_ns: dict = {};
+    got_ns: dict = {};
+    pyexec(pycompile(ref_tree, path, "exec"), ref_ns);
+    pyexec(pycompile(got_tree, path, "exec"), got_ns);
+    for name in names {
+        assert name in ref_ns , f"{name} missing from pyast lane";
+        assert name in got_ns , f"{name} missing from jcir lane";
+        assert ref_ns[name] == got_ns[name] , (
+            f"{name}: pyast lane {ref_ns[name]!r} != jcir lane {got_ns[name]!r}"
+        );
+    }
+}
+
+glob ROUND_TRIP_FIXTURE: str = """
+\"\"\"Round trip fixture.\"\"\"
+def greet(name: str, excited: bool = False) -> str {
+    msg = f"hello {name}";
+    if excited {
+        msg = msg + "!";
+    }
+    return msg;
+}
+
+obj Counter {
+    has total: int = 0;
+
+    def add(n: int) -> int {
+        for i in range(n) {
+            self.total = self.total + 1;
+        }
+        return self.total;
+    }
+}
+
+with entry {
+    result = greet("world", True);
+    count = Counter().add(3);
+}
+""";
+
+test "round trip fixture matches pyast lane exactly" {
+    (ref_tree, got_tree, blob) = dual_compile(ROUND_TRIP_FIXTURE, "rt_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    result = compile_ir(blob);
+    assert len(result.diags) == 0;
+    assert len(result.modules) == 1;
+    assert len(result.modules[0].bytecode) > 0;
+    assert_bytecode_equal(ref_tree, "rt_fixture.jac", result.modules[0].bytecode);
+    exec_both(ref_tree, got_tree, "rt_fixture.jac", ["result", "count"]);
+}
+
+test "module scaffolding docstring and imports match" {
+    src = """
+\"\"\"Module docstring survives.\"\"\"
+import os;
+import sys as system;
+import from os.path { join, basename as base }
+import from __future__ { annotations }
+
+with entry {
+    p = join("a", "b");
+    b = base(p);
+    e = os.sep;
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "scaffold_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "scaffold_fixture.jac", ["p", "b", "e"]);
+    assert isinstance(got_tree.body[0], pyast.Expr);
+    assert got_tree.body[0].value.value == "Module docstring survives.";
+}
+
+test "typed imports wrap in TYPE_CHECKING" {
+    src = """
+import type from os { path }
+
+def f(p: str) -> str {
+    return p;
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "typed_import_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    found = [
+        stmt
+        for stmt in got_tree.body
+        if isinstance(stmt, pyast.If)
+            and isinstance(stmt.test, pyast.Name)
+            and stmt.test.id == "TYPE_CHECKING"
+    ];
+    assert len(found) == 1;
+}
+
+test "functions defaults decorators and scope directives match" {
+    src = """
+glob counter: int = 0;
+
+def outer(a: int, b: int = 2, *args: int, c: int = 5, **kw: int) -> int {
+    counter += 1;
+    return a + b + c + len(args) + len(kw);
+}
+
+def deco(fn: any) -> any {
+    return fn;
+}
+
+@deco
+def decorated(x: int) -> int {
+    return x * 2;
+}
+
+with entry {
+    r1 = outer(1);
+    r2 = outer(1, 3, 9, 9, c=7, d=1);
+    r3 = decorated(21);
+    r4 = counter;
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "funcs_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "funcs_fixture.jac", ["r1", "r2", "r3", "r4"]);
+}
+
+test "archetype has-field lowering keeps the field contract" {
+    src = """
+obj Point {
+    has x: int = 0,
+        y: int = 0,
+        tags: list[str] = [],
+        label: str = "p";
+
+    def size -> int {
+        return self.x + self.y + len(self.tags);
+    }
+}
+
+class Plain {
+    has z: int = 4;
+}
+
+obj Deferred {
+    has ready: bool postinit;
+
+    def postinit {
+        self.ready = True;
+    }
+}
+
+with entry {
+    pt = Point(x=1, y=2);
+    pt.tags.append("a");
+    s1 = pt.size();
+    s2 = Point().tags;
+    s3 = Plain().z;
+    s4 = Deferred().ready;
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "arch_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "arch_fixture.jac", ["s1", "s2", "s3", "s4"]);
+    dumped = pyast.dump(got_tree);
+    assert "factory" in dumped;
+    assert dumped.count("field(") == 0;
+}
+
+test "statement forms match" {
+    src = """
+def stmts(n: int) -> list[int] {
+    out: list[int] = [];
+    i = 0;
+    while i < n {
+        i += 1;
+        if i == 2 {
+            continue;
+        } elif i > 4 {
+            break;
+        } else {
+            out.append(i);
+        }
+    }
+    for j in range(2) {
+        out.append(j * 10);
+    }
+    for k = 0 while k < 2 with k += 1 {
+        out.append(k + 100);
+    }
+    try {
+        raise ValueError("boom");
+    } except ValueError as e {
+        out.append(len(str(e)));
+    } finally {
+        out.append(-1);
+    }
+    (a, b) = (1, 2);
+    a += b;
+    x = y = a;
+    del y;
+    assert x == a, "mirror";
+    return out;
+}
+
+with entry {
+    r = stmts(6);
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "stmts_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "stmts_fixture.jac", ["r"]);
+}
+
+test "with statement and yield match" {
+    src = """
+import io;
+
+def gen(n: int) -> any {
+    for i in range(n) {
+        yield i * 2;
+    }
+}
+
+def consume -> int {
+    total = 0;
+    with io.StringIO("ab") as fh {
+        total += len(fh.read());
+    }
+    for v in gen(3) {
+        total += v;
+    }
+    return total;
+}
+
+with entry {
+    r = consume();
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "with_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "with_fixture.jac", ["r"]);
+}
+
+test "expression forms match" {
+    src = """
+def exprs(a: int, b: int) -> dict {
+    lst = [a, b, a + b];
+    st = {a, b};
+    tp = (a, b);
+    dc = {"a": a, "b": b};
+    comp = [x * 2 for x in lst if x > 1];
+    genc = sum(x for x in lst);
+    setc = {x % 3 for x in lst};
+    dictc = {str(x): x for x in lst};
+    tern = a if a > b else b;
+    chain = a < b < 100;
+    boolop = (a > 0 and b > 0) or a == b;
+    fstr = f"{a} and {b:>3} and {a + b!r}";
+    sliced = lst[1:];
+    stepped = lst[::2];
+    idx = lst[0];
+    star = [*lst, 99];
+    kwargs_d = dict(x=a, **dc);
+    walrus = (w := a + b) + w;
+    neg = -a + (~b) + (not a);
+    powed = a ** 2 // (b % 5 + 1);
+    shifted = (a << 2) >> 1 | a & b ^ 3;
+    return {
+        "lst": lst, "st": sorted(st), "tp": tp, "dc": dc, "comp": comp,
+        "genc": genc, "setc": sorted(setc), "dictc": dictc, "tern": tern,
+        "chain": chain, "boolop": boolop, "fstr": fstr, "sliced": sliced,
+        "stepped": stepped, "idx": idx, "star": star, "kwargs_d": kwargs_d,
+        "walrus": walrus, "neg": neg, "powed": powed, "shifted": shifted
+    };
+}
+
+with entry {
+    r = exprs(3, 8);
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "exprs_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "exprs_fixture.jac", ["r"]);
+}
+
+test "attribute chains null-ok and multistring match" {
+    src = """
+obj Box {
+    has inner: (Box | None) = None,
+        label: str = "leaf";
+}
+
+def probe(b: (Box | None)) -> tuple {
+    lab = b?.label;
+    deep = b.inner?.label if b else None;
+    ms = "one "
+        "two "
+        "three";
+    return (lab, deep, ms);
+}
+
+with entry {
+    r1 = probe(None);
+    r2 = probe(Box(inner=Box(label="mid")));
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "nullok_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "nullok_fixture.jac", ["r1", "r2"]);
+}
+
+test "lambdas hoist with concrete locations" {
+    src = """
+def apply(fn: any, v: int) -> int {
+    return fn(v);
+}
+
+def make_adder(n: int) -> any {
+    return lambda (x: int) { x + n; };
+}
+
+def block_lambda_user -> int {
+    fn = lambda (x: int) -> int {
+        y = x * 2;
+        return y + 1;
+    };
+    return apply(fn, 10) + apply(make_adder(5), 1);
+}
+
+def defaulted(cb: any = lambda {
+    z = 40;
+    return z + 2;
+}) -> int {
+    return cb();
+}
+
+with entry {
+    r1 = block_lambda_user();
+    r2 = defaulted();
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "lambda_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "lambda_fixture.jac", ["r1", "r2"]);
+    missing: list = [];
+    for node in pyast.walk(got_tree) {
+        if "lineno" in node._attributes {
+            if (node?.lineno is None or node.lineno < 1) {
+                missing.append(pyast.dump(node)[:60]);
+            }
+        }
+    }
+    assert missing == [] , str(missing);
+}
+
+test "switch lowering duplicates shared recipes" {
+    src = """
+def pick(v: int) -> str {
+    out = "";
+    switch v {
+        case 1:
+            out = "one";
+            break;
+
+        case 2 | 3:
+            out = "few";
+            break;
+
+        default:
+            out = "many";
+
+    }
+    return out;
+}
+
+with entry {
+    r = [pick(1), pick(2), pick(3), pick(9)];
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "switch_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "switch_fixture.jac", ["r"]);
+}
+
+test "enums lower with auto and kind imports" {
+    src = """
+enum Color {
+    RED,
+    GREEN,
+    BLUE
+}
+
+enum Size(int) {
+    S = 1,
+    M = 2
+}
+
+with entry {
+    c = Color.GREEN.name;
+    s = Size.M.value;
+    total = Size.S.value + Size.M.value;
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "enum_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "enum_fixture.jac", ["c", "s", "total"]);
+}
+
+test "python inline splice lands with jac line offsets" {
+    src = """
+with entry {
+    seed = 40;
+}
+
+::py::
+X = seed + 2
+Y = X * 2
+::py::
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "pyinline_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "pyinline_fixture.jac", ["seed", "X", "Y"]);
+}
+
+test "global vars and module code guard match" {
+    src = """
+\"\"\"Doc.\"\"\"
+glob threshold: int = 10,
+     name: str = "mod";
+
+with entry:__main__ {
+    ran_main = True;
+}
+
+with entry {
+    always = threshold + len(name);
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "globals_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "globals_fixture.jac", ["always"]);
+}
+
+test "super calls type aliases and iter-for continue match" {
+    src = """
+type Plain = int;
+type Branded := int;
+
+obj Base {
+    def describe -> str {
+        return "base";
+    }
+}
+
+obj Derived(Base) {
+    def describe -> str {
+        return "derived+" + super.describe();
+    }
+}
+
+def skip_evens(n: Plain) -> list[Branded] {
+    out: list[Branded] = [];
+    for k = 0 while k < n with k += 1 {
+        if k % 2 == 0 {
+            continue;
+        }
+        out.append(k);
+    }
+    return out;
+}
+
+with entry {
+    d = Derived().describe();
+    ks = skip_evens(6);
+    scratch = {"a": 1, "b": 2};
+    del scratch["a"];
+    left = sorted(scratch.keys());
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "super_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "super_fixture.jac", ["d", "ks", "left"]);
+}
+
+test "native test shims refuse loudly in phase 1" {
+    src = """
+def double(x: int) -> int {
+    return x * 2;
+}
+
+test "doubles correctly" {
+    assert double(2) == 4;
+}
+""";
+    prog = JacProgram();
+    mod = prog.compile(
+        use_str=src,
+        file_path="testblock_fixture.jac",
+        options=CompileOptions(
+            force_codespace="server", skip_native_engine=True, suppress_codes=["E5092"]
+        )
+    );
+    assert len(prog.errors_had) == 0;
+    caught = "";
+    try {
+        JcirGenPass(ir_in=mod, prog=prog);
+    } except NotImplementedError as e {
+        caught = str(e);
+    }
+    assert "native codespace test shim" in caught;
+}
+
+test "real repo file srcloc lowers identically end to end" {
+    path = os.path.join(JAC_ROOT, "jaclang", "jac0core", "srcloc.jac");
+    (ref_tree, got_tree, blob) = dual_compile_file(path);
+    assert_dump_equal(ref_tree, got_tree);
+    result = compile_ir(blob);
+    assert len(result.diags) == 0;
+    assert len(result.modules) == 1;
+    assert_bytecode_equal(
+        ref_tree, result.modules[0].mod_path, result.modules[0].bytecode
+    );
+}
+
+test "phase boundaries refuse loudly" {
+    walker_src = """
+node Spot {}
+
+walker W {
+    can go with `root entry {
+        visit [-->];
+    }
+}
+""";
+    prog = JacProgram();
+    mod = prog.compile(use_str=walker_src, file_path="walker_fixture.jac");
+    caught = "";
+    try {
+        JcirGenPass(ir_in=mod, prog=prog);
+    } except NotImplementedError as e {
+        caught = str(e);
+    }
+    assert "JCIR emitter phase 1 does not lower" in caught;
+    match_src = """
+def m(v: int) -> str {
+    match v {
+        case 1: {
+            return "one";
+        }
+        case _: {
+            return "other";
+        }
+    }
+}
+""";
+    prog2 = JacProgram();
+    mod2 = prog2.compile(use_str=match_src, file_path="match_fixture.jac");
+    caught2 = "";
+    try {
+        JcirGenPass(ir_in=mod2, prog=prog2);
+    } except NotImplementedError as e {
+        caught2 = str(e);
+    }
+    assert "match statement" in caught2;
+}

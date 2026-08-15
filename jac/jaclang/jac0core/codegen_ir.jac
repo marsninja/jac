@@ -296,6 +296,20 @@ obj CodegenIrWriter {
         self._loc_set = True;
     }
 
+    def emit_loc_needed(first_line: int, col_start: int, last_line: int, col_end: int) {
+        self._require_open();
+        if (
+            self._loc_set
+            and self._loc_l1 == first_line
+            and self._loc_c1 == col_start
+            and self._loc_l2 == last_line
+            and self._loc_c2 == col_end
+        ) {
+            return;
+        }
+        self.emit_loc(first_line, col_start, last_line, col_end);
+    }
+
     def emit_node(class_name: str, field_names: list) {
         self._require_open();
         if not self._loc_set {
