@@ -1,14 +1,16 @@
 # Compact Codegen IR (JCIR)
 
-Status: design plus reference implementation, plus the phase 1 and 2
+Status: design plus reference implementation, plus the phase 1 through 3
 producer. This is the first lane 2 deliverable of the zero-bytecode
 endgame (epic #8201): it fixes the Step 4 shim's contract and is the
 proof that the intermediate annotated-state materializer is skippable at
 all. The format module, the Python reference shim, and the round-trip
 suite landed together with this document; the emitter pass
 (`jac0core/passes/jcir_gen_pass.jac`) now produces this format for the
-core language (phase 1) plus object-spatial codegen, match, and async
-(phase 2) directly from the annotated unitree, verified against
+core language (phase 1), object-spatial codegen, match, and async
+(phase 2), plus interop stubs, native test shims, sem decorators, llm
+bodies, and concurrency (phase 3) directly from the annotated unitree,
+verified against
 `pyast_gen` by the differential suite
 (`tests/compiler/test_jcir_gen_pass.jac`). An opt-in pipeline flag
 (section 11.1) runs the whole codegen tail through this lane. The sealed
@@ -462,15 +464,22 @@ assumed away.
   operators, edge reference chains via `GraphQuery`/`QHop`/`QPred`,
   filter and assign comprehensions, typed context blocks, `root`), match
   statements, and async (abilities, for, with, await, `__jac_async__`
-  archetypes). Constructs still outside scope (jsx, sem-string decorator
-  emission, interop manifest emission incl. native test shims, llm
-  bodies, concurrency flow/wait) raise a `NotImplementedError` naming the
-  construct and its source location, never silently skip.
+  archetypes). Phase 3 added interop manifest emission (native export
+  stubs, the import registration map, sv-to-sv stubs, native test shims;
+  all via `OP_PARSE_SPLICE` exactly as section 8 planned, with producer
+  bookkeeping of splice-bound names for registration placement),
+  sem-string decorators, llm ability bodies (`get_mtir`/`call_llm`
+  recipes, the `by` operator), and concurrency flow/wait. The remaining
+  refusals are jsx lowering (audited as mechanically portable, pending)
+  and genai call expressions (which `pyast_gen` also refuses); both raise
+  a `NotImplementedError` naming the construct and its source location,
+  never silently skip.
 - `jac0core/passes/jcir_bc_gen_pass.jac` (+impl): the shim-seat pipeline
   pass. Reads `gen.jcir`, transcribes through the reference shim into
-  `gen.py_ast`, and compiles into `gen.py_bytecode`. It is the Python
-  side of the crossing (imports ast freely, never sealed) and makes no
-  codegen decisions.
+  `gen.py_ast`, unparses the tree into `gen.py` (so tooling consumers of
+  the Python-source view keep working under the flag), and compiles into
+  `gen.py_bytecode`. It is the Python side of the crossing (imports ast
+  freely, never sealed) and makes no codegen decisions.
 - Tests: `tests/compiler/test_codegen_ir.jac`, string-named, covering the
   full round trip (functions with args and defaults, assignments, calls, a
   class, if/for, f-string), `ast.dump` equality against the source tree,
@@ -499,7 +508,9 @@ differences from the default tail:
 
 - `PyJacAstLinkPass` is absent: `jac_link` back-references are a tooling
   concern that never crosses the production boundary (section 7), and the
-  shim-built tree correctly has none.
+  shim-built tree correctly has none. This is the one standard artifact
+  the flag lane does not provide; suites that assert `jac_link` on every
+  node (the micro suite) fail under the flag by this design.
 - Constructs the emitter refuses (section 11) fail the compile loudly
   instead of lowering; the flag is for the cross-lane parity canary and
   development, not yet a supported default.
