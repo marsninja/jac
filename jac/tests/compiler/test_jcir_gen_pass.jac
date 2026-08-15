@@ -15,7 +15,9 @@ import os;
 import types;
 import from builtins { compile as pycompile, exec as pyexec }
 import from tests.support { JAC_ROOT }
+import jaclang.jac0core.unitree as uni;
 import from jaclang.jac0core.program { JacProgram }
+import from jaclang.jac0core.passes { PyastGenPass }
 import from jaclang.jac0core.compile_options { CompileOptions }
 import from jaclang.jac0core.passes.jcir_gen_pass { JcirGenPass }
 import from jaclang.jac0core.codegen_shim { compile_ir, transcribe }
@@ -26,7 +28,10 @@ def dual_compile(src: str, path: str) -> tuple {
         use_str=src,
         file_path=path,
         options=CompileOptions(
-            force_codespace="server", skip_native_engine=True, suppress_codes=["E5092"]
+            force_codespace="server",
+            skip_native_engine=True,
+            no_ir_cache=True,
+            suppress_codes=["E5092"]
         )
     );
     assert len(prog.errors_had) == 0 , str([str(e) for e in prog.errors_had]);
@@ -42,7 +47,7 @@ def dual_compile(src: str, path: str) -> tuple {
 
 def dual_compile_file(path: str) -> tuple {
     prog = JacProgram();
-    mod = prog.compile(path);
+    mod = prog.compile(path, options=CompileOptions(no_ir_cache=True));
     assert len(prog.errors_had) == 0 , str([str(e) for e in prog.errors_had]);
     ref_tree = mod.gen.py_ast[0];
     emitter = JcirGenPass(ir_in=mod, prog=prog);
@@ -873,6 +878,72 @@ with entry {
     } finally {
         del os.environ["JAC_CODEGEN"];
     }
+}
+
+test "server-side jsx lowers to jaclib jsx calls" {
+    import tempfile;
+    src = """
+def page(title: str, items: list[str], extra: dict) -> JsxElement {
+    rows = [<li key={it}>{it}</li> for it in items];
+    return <div title="box" active data={len(items)}>
+        <h1>Hello &amp; {title}</h1>
+        <ul>{rows}</ul>
+        <span {...extra}>tail</span>
+        <>fragment text</>
+    </div>;
+}
+
+with entry {
+    rendered = page("srv", ["s1", "s2"], {"id": "x"});
+}
+""";
+    tdir = tempfile.mkdtemp(prefix="jcir_jsx_");
+    with open(os.path.join(tdir, "jac.toml"), "w") as f {
+        f.write('[placement.pins]\n"*" = "server"\n');
+    }
+    comp_path = os.path.join(tdir, "comp.jac");
+    with open(comp_path, "w") as f {
+        f.write(src);
+    }
+    (ref_tree, got_tree, blob) = dual_compile_file(comp_path);
+    assert_dump_equal(ref_tree, got_tree);
+    dumped = pyast.dump(got_tree);
+    assert "'jsx'" in dumped;
+    assert "Hello & " in dumped;
+    result = compile_ir(blob);
+    assert len(result.diags) == 0;
+    assert_bytecode_equal(ref_tree, comp_path, result.modules[0].bytecode);
+}
+
+test "genai calls refuse deliberately in both lanes" {
+    src = """
+def g -> int {
+    return 1;
+}
+
+def f -> int {
+    return g();
+}
+""";
+    prog = JacProgram();
+    mod = prog.compile(use_str=src, file_path="genai_fixture.jac", no_cgen=True);
+    calls = mod.get_all_sub_nodes(uni.FuncCall);
+    assert calls;
+    calls[0].genai_call = calls[0].target;
+    caught_py = "";
+    try {
+        PyastGenPass(ir_in=mod, prog=prog);
+    } except Exception as e {
+        caught_py = str(e);
+    }
+    caught_jcir = "";
+    try {
+        JcirGenPass(ir_in=mod, prog=prog);
+    } except NotImplementedError as e {
+        caught_jcir = str(e);
+    }
+    assert "temporarily disabled" in caught_py;
+    assert "genai call expression" in caught_jcir;
 }
 
 test "concurrency flow and wait lower identically" {
