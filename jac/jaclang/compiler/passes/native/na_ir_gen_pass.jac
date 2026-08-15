@@ -172,6 +172,8 @@ obj NaIRGenPass(ModuleCodegenPass) {
         _non_overridden_methods: dict[str, set[str]] = {},
         _struct_source_mod: dict[str, str] = {},
         _native_skipped_methods: set[str] = set(),
+        _capability_demotions: dict[int, list] = {},
+        _claimed_capability_demotions: set[int] = set(),
         _class_name_consts: dict[str, ir.Value] = {},
         _isa_fn: (ir.Function | None) = None,
         _runtime_class_name_fn: (ir.Function | None) = None,
@@ -514,6 +516,15 @@ obj NaIRGenPass(ModuleCodegenPass) {
     def _get_fmt_string(fmt: str) -> ir.GlobalVariable;
     def _get_snprintf_fmt(fmt: str) -> ir.GlobalVariable;
     def _resolve_jac_type(type_expr: (uni.UniNode | None)) -> ir.Type;
+    def _resolve_decl_type(
+        type_expr: (uni.UniNode | None), value: (uni.UniNode | None)
+    ) -> ir.Type;
+
+    def _widened_tuple_decl_type(
+        type_expr: (uni.UniNode | None), value: (uni.UniNode | None)
+    ) -> (ir.Type | None);
+
+    def _tuple_struct_of(elem_types: list) -> ir.Type;
     def _resolve_sig_type(type_expr: (uni.UniNode | None)) -> ir.Type;
     def _resolve_field_type(var: uni.UniNode) -> ir.Type;
     def _foreign_optional_field(tb: any) -> bool;
@@ -831,13 +842,14 @@ obj NaIRGenPass(ModuleCodegenPass) {
     ) -> (ir.Function | None);
 
     def _demote_method_if_unlowerable(
-        full_name: str,
-        func: ir.Function,
-        err_mark: int,
-        local_mark: int,
-        keep_func: bool = False
+        full_name: str, func: ir.Function, local_mark: int, keep_func: bool = False
     ) -> bool;
 
+    def _predemote_capability_unit(
+        full_name: str, func: ir.Function, viols: list, keep_func: bool = False
+    ) -> bool;
+
+    def _rename_demoted_symbol(name: str, func: ir.Function) -> None;
     def _codegen_no_sig_method(arch_name: str, method: uni.Ability) -> None;
     def _forward_declare_event_method(arch_name: str, method: uni.Ability) -> None;
     def _codegen_event_method(arch_name: str, method: uni.Ability) -> None;
@@ -1095,7 +1107,7 @@ obj NaIRGenPass(ModuleCodegenPass) {
     def _infer_compr_elem_struct(compr: object) -> (str | None);
     def _infer_unpack_struct_ptr(nd: object) -> (ir.Type | None);
     def _codegen_string_index(
-        target_val: ir.Value, index_val: ir.Value
+        target_val: ir.Value, index_val: ir.Value, len_val: (ir.Value | None) = None
     ) -> (ir.Value | None);
 
     def _emit_is_strip_char(ch: ir.Value, charset: (ir.Value | None)) -> ir.Value;
