@@ -113,6 +113,8 @@ import from jaclang.compiler.passes.main.pyast_load_pass { PyastBuildPass }
 import from jaclang.jac0core.passes.sym_tab_build_pass { SymTabBuildPass }
 import from jaclang.compiler.type_system.types {
     AnyType,
+    ClassDetailsPrivate,
+    ClassDetailsShared,
     ClassType,
     EnumMemberInfo,
     EnumMemberType,
@@ -351,6 +353,8 @@ obj TypeEvaluator {
         js_globals_module: Module postinit;
 
     def postinit -> None;
+    def _read_dunder_all(path: str) -> (set[str] | None);
+    def _read_ambient_imports_by_module(path: str) -> dict[str, set[str]];
     def _load_stub_module(path: str) -> Module;
     def _get_type_from_module(module: Module, name: str) -> TypeBase;
     def _prefetch_types;
@@ -651,7 +655,8 @@ obj TypeEvaluator {
     def validate_typevar_in_type_expr(expr: Expr) -> None;
     def validate_typevar_scope(expr: Expr, type_var: TypeVarType) -> None;
     def validate_typevar_variance(func: Ability) -> None;
-    def _get_enclosing_class_type_params(node_: UniNode) -> list[TypeVarType];
+    def _type_var_bound_in_scope(node_: UniNode, name: str) -> bool;
+    def _get_signature_type_params(sig: FuncSignature) -> list[TypeVarType];
     def _get_function_type_params(func: Ability) -> list[TypeVarType];
     def _get_outer_scope_type_params(node_: UniNode) -> list[TypeVarType];
     def create_key_for_reference(expr: Expr) -> str | None;

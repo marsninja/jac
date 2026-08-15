@@ -154,6 +154,8 @@ obj NaIRGenPass(ModuleCodegenPass) {
         struct_field_types: dict[str, dict] = {},
         struct_field_defaults: dict[str, object] = {},
         struct_field_foreign: dict[str, set] = {},
+        struct_field_erased_tv: dict[str, dict] = {},
+        arch_type_params: dict[str, list] = {},
         struct_field_inline: dict[str, set] = {},
         method_funcs: dict[str, ir.Function] = {},
         static_methods: dict[str, bool] = {},
@@ -180,6 +182,8 @@ obj NaIRGenPass(ModuleCodegenPass) {
         _isa_fn: (ir.Function | None) = None,
         _isa_seq_fn: (ir.Function | None) = None,
         _runtime_class_name_fn: (ir.Function | None) = None,
+        _vtable_less_reach: (set[str] | None) = None,
+        _short_mro_reach: (dict[str, list[str]] | None) = None,
         osp_type_tag_field: dict[str, int] = {},
         osp_reports_field: dict[str, int] = {},
         osp_thunk_funcs: dict[str, ir.Function] = {},
@@ -400,6 +404,10 @@ obj NaIRGenPass(ModuleCodegenPass) {
     def _container_type_args(t: any) -> list;
     def _unwrap_cfg_expr(e: any) -> any;
     def _spec_from_container_ptr(t: (ir.Type | None)) -> (str | None);
+    def _call_args_lowered(
+        nd: uni.UniNode, func: ir.Function, func_name: str, coerced: list
+    ) -> bool;
+
     def _emit_new(nd: uni.FuncCall) -> (ir.Value | None);
 
     has lambda_captures: dict[str, list[tuple]] = {},
@@ -547,6 +555,13 @@ obj NaIRGenPass(ModuleCodegenPass) {
     def _resolve_sig_type(type_expr: (uni.UniNode | None)) -> ir.Type;
     def _resolve_field_type(var: uni.UniNode) -> ir.Type;
     def _foreign_optional_field(tb: any) -> bool;
+    def _typevar_optional_field(tb: any) -> bool;
+    def _erased_typevar_names(tb: any) -> list[str];
+    def _reject_scalar_type_args(nd: uni.UniNode, type_name: str) -> bool;
+    def _emit_scalar_type_arg_refusal(
+        nd: uni.UniNode, type_name: str, fname: str, tv_name: str, arg: any
+    ) -> bool;
+
     def _type_base_is_unknown(tb: any) -> bool;
     def _emit_unlowerable_type(type_expr: uni.UniNode, tb: any) -> ir.Type;
     def _lower_type(t: any) -> (ir.Type | None);
@@ -561,6 +576,7 @@ obj NaIRGenPass(ModuleCodegenPass) {
     def _tuple_key_of(expr: (uni.UniNode | None)) -> (str | None);
     def _set_spec_of(expr: (uni.UniNode | None)) -> (str | None);
     def _dict_key_of(expr: (uni.UniNode | None)) -> (str | None);
+    def _peer_dict_key -> (str | None);
     def _list_spec_of(expr: (uni.UniNode | None)) -> (str | None);
     def _spec_of(
         expr: (uni.UniNode | None), names: tuple, registry: dict
@@ -673,6 +689,12 @@ obj NaIRGenPass(ModuleCodegenPass) {
     def _emit_jacval_eq(left: ir.Value, right: ir.Value) -> ir.Value;
     def _opt_membership_operand(left: ir.Value, slot_type: ir.Type) -> tuple;
     def _opt_unwrap_attr(obj_val: ir.Value) -> ir.Value;
+    def _opt_unwrap_guarded(
+        val: (ir.Value | None), what: str, msg: str
+    ) -> (ir.Value | None);
+
+    def _opt_unwrap_iterable(coll_val: (ir.Value | None)) -> (ir.Value | None);
+    def _opt_unwrap_subscript(val: (ir.Value | None)) -> (ir.Value | None);
     def _codegen_int_pow(base: ir.Value, exp: ir.Value) -> ir.Value;
     def _codegen_int_floor_divmod(
         left: ir.Value, right: ir.Value
@@ -919,6 +941,11 @@ obj NaIRGenPass(ModuleCodegenPass) {
         full_name: str, func: ir.Function, viols: list, keep_func: bool = False
     ) -> bool;
 
+    def _constructor_slots -> tuple;
+    def _constructor_ability_for(cls: str, slot: str) -> (uni.Ability | None);
+    def _predemote_capability_constructors -> None;
+    def _codegen_constructors_first(archetypes: list) -> None;
+    def _demoted_init_of(type_name: str) -> (str | None);
     def _rename_demoted_symbol(name: str, func: ir.Function) -> None;
     def _codegen_no_sig_method(arch_name: str, method: uni.Ability) -> None;
     def _forward_declare_event_method(arch_name: str, method: uni.Ability) -> None;
@@ -1150,6 +1177,15 @@ obj NaIRGenPass(ModuleCodegenPass) {
     def _emit_vtable_global(arch_name: str) -> None;
     def _vtable_global_for(arch_name: str) -> (ir.GlobalVariable | None);
     def _vtable_candidates(names: list[str]) -> list[ir.GlobalVariable];
+    def _isinstance_needs_class_name(names: list[str]) -> bool;
+    def _isinstance_unprovable_class(
+        names: list[str], operand_arch: (str | None)
+    ) -> (str | None);
+
+    def _isinstance_class_name_hit(
+        obj_ptr: ir.Value, names: list[str]
+    ) -> (ir.Value | None);
+
     def _emit_class_name_const(arch_name: str) -> ir.Value;
     def _emit_runtime_class_name_fn -> (ir.Function | None);
     def _codegen_runtime_class_name(obj_val: ir.Value) -> (ir.Value | None);

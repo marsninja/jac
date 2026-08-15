@@ -15,11 +15,16 @@ This census compiles `transform.jac` natively, the same measurement
 the emission path stays seam-free: none of its callables demote, and none of
 the module's residual native errors touch them. Callables off the emission
 path that reach real Python machinery (console rendering, the cancel-token
-handle, `RuntimeError` construction in `ice`) remain legal per-callable
-seams and are waived one at a time. The remaining module-fatal gaps are
-backend limitations in the constructor family (a foreign class-typed field
-and `super` dispatch inside postinit), pinned here so the sealing lane sees
-exactly what is left.
+handle, `RuntimeError` construction in `ice`, and the constructor's generic
+load plus `super` dispatch) remain legal per-callable seams and are waived
+one at a time. What is left module-fatal is the foreign class-typed field on
+the pass declaration, pinned here so the sealing lane sees exactly what
+remains.
+
+The measurement is a source-lane one. Under a sealed jaclang image every
+method of an imported jaclang-internal archetype is untrusted by design, so
+the census would read the image's trust boundary rather than the emission
+path's own coupling; `_census` skips there.
 """
 
 import os;
@@ -29,7 +34,7 @@ import from pathlib { Path }
 import from jaclang.jac0core.compile_options { CompileOptions }
 import from jaclang.jac0core.compiler { na_census_begin, na_census_end }
 import from jaclang.jac0core.program { JacProgram }
-import from jaclang.jac0core.sealed { native_artifact_for }
+import from jaclang.jac0core.sealed { _jaclang_image, native_artifact_for }
 
 glob TRANSFORM_JAC = str(
          Path(jaclang.__file__).parent / "jac0core" / "passes" / "transform.jac"
@@ -65,21 +70,33 @@ glob TRANSFORM_SEAM_WAIVERS: dict[(str, str)] = {
          "Transform.ice": (
              "backend gap: constructs the `RuntimeError` it returns for the "
              "caller to raise."
+         ),
+         "Transform.__post_init__": (
+             "backend gap in the constructor: postinit's generic field load "
+             "and its `super` dispatch. Runs once per pass construction, "
+             "which the Python driver performs anyway, so it is off the "
+             "emission path. #8244 gave the constructor its own violations, "
+             "so these demote the callable instead of the module."
          )
      };
 
-"""Module-fatal backend gaps in the constructor family (not demotable, not
-emission): the foreign `JacProgram`-typed field and postinit's generic load
-plus `super` dispatch. Keyed by the construct the diagnostic names."""
-glob KNOWN_CONSTRUCTOR_GAPS: tuple = (
-         "'JacProgram'",
-         "'AtomTrailer'",
-         "'super.__post_init__'"
-     );
+"""Module-fatal backend gaps (not demotable, not emission): the foreign
+`JacProgram`-typed field on the pass declaration. Keyed by the construct the
+diagnostic names."""
+glob KNOWN_CONSTRUCTOR_GAPS: tuple = ("'JacProgram'", );
 
 glob _CENSUS_MEMO: list = [];
 
 def _census -> tuple {
+    if _jaclang_image() is not None {
+        pytest.skip(
+            "this runtime is a sealed jaclang image, so na_ir_gen_pass "
+            "untrusts every method of an imported jaclang-internal archetype "
+            "that the image's layout does not carry; a source census here "
+            "measures that trust boundary instead of the emission path's own "
+            "coupling, which is what this file pins"
+        );
+    }
     if native_artifact_for("jaclang.jac0core.passes.transform") is not None {
         pytest.skip(
             "transform.jac is served from this runtime's native seal; the "

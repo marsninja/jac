@@ -86,22 +86,19 @@ glob UNITREE_CLOSURE: tuple = ("constant.jac", "srcloc.jac", "unitree.jac"),
              "walks the filesystem. Read by the compile driver, not a parse."
          ),
          "unitree.jac::Import.__jac_detected.__get__": (
-             "Python-only: resolves each import path through "
-             "`ModulePath.resolve_relative_path`, itself waived above."
+             "Python-only, two layers: the census reports E5090 on its import "
+             "of `jac0core.ext_registry`, one of the plain-Python pre-runtime "
+             "modules (with `cache_paths` and `sealed`) the bootstrap loads "
+             "before any Jac runtime exists; beneath it every branch resolves "
+             "through `ModulePath.resolve_relative_path`, itself waived above."
          ),
          "unitree.jac::Import.is_service_import.__get__": (
              "Python-only: calls `is_service_module_stem` from "
-             "`jac0core.ext_registry`, outside unitree's native closure."
-         ),
-         "unitree.jac::ModulePath.string_path_value.__get__": (
-             "Python-only: indexes `self.path` and reads `String.lit_value`, "
-             "itself waived below."
-         ),
-         "unitree.jac::ModulePath.dot_path_str.__get__": (
-             "Python-only: built on `string_path_value`, waived above."
-         ),
-         "unitree.jac::ModulePath.base_module_name.__get__": (
-             "Python-only: built on `string_path_value`, waived above."
+             "`jac0core.service_cut`, which stats and parses `jac.toml` "
+             "(`os.path.getmtime` + `tomllib`), memoizes into a module-global "
+             "dict, and resolves the project root through "
+             "`jac0core.modresolver`. The census reports E5092 -- the call "
+             "will not lower -- not an E5090 import."
          ),
          "unitree.jac::DeleteStmt.py_ast_targets.__get__": (
              "Python-only: reads `gen.py_ast`, a list of CPython `ast` "

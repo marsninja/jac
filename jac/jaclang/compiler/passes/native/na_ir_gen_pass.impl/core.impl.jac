@@ -960,12 +960,14 @@ impl NaIRGenPass._register_imported_hierarchy(imported_mod: uni.Module) -> None 
     _imp_reg = get_layout_registry(imported_mod, self.prog);
     _cons_reg = get_layout_registry(self.ir_in, self.prog);
     for (_name, _parents) in _imp_reg.class_parents.items() {
-        if _name not in _cons_reg.class_parents {
+        if _name not in _cons_reg.class_parents
+            or (_name in _imp_reg.layouts and _name not in _cons_reg.layouts) {
             _cons_reg.class_parents[_name] = _parents;
         }
     }
     for (_name, _mro) in _imp_reg.mro_order.items() {
-        if _name not in _cons_reg.mro_order {
+        if _name not in _cons_reg.mro_order
+            or (_name in _imp_reg.layouts and _name not in _cons_reg.layouts) {
             _cons_reg.mro_order[_name] = _mro;
         }
     }
@@ -1339,7 +1341,28 @@ impl NaIRGenPass._dispatch_primitive_method(
     _ctx = self._native_emit_ctx_class(
         pass_ref=self, type_key=type_key, call_kwargs=(kwargs or {})
     );
-    return _emit_fn(_ctx, target, args);
+    try {
+        return _emit_fn(_ctx, target, args);
+    } except Exception as _pm_exc {
+        if self._na_debug_on() {
+            import sys as _pm_sys;
+            import traceback as _pm_tb;
+            _pm_sys.stderr.write(f"NA_DEBUG primitive {type_name}.{method_name}\n");
+            _pm_tb.print_exc(file=_pm_sys.stderr);
+        }
+        self.emit(
+            E5092,
+            node_override=kw_node,
+            kind="primitive method",
+            name=f"{type_name}.{method_name}",
+            help_text=f"The emitter for this builtin method raised "
+            f"{type(_pm_exc).__name__} on the operands it was given, which "
+            "means an argument did not reach the shape it expects -- most "
+            "often a container or tuple where a scalar or string is "
+            f"required. Original error: {_pm_exc}"
+        );
+        return None;
+    }
 }
 
 impl NaIRGenPass._dispatch_builtin(
