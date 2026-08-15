@@ -120,6 +120,19 @@ enum ExprCtx { LOAD = 'load', STORE = 'store', DEL = 'del' }
 
 enum OwnershipKind: int { NONE = 0, OWN = 1, BORROW = 2, MUT_BORROW = 3, IMM = 4 }
 
+"""Comptime typing markers, hosted here so native units can read them.
+
+These lived in `codeinfo`, which can never share a native unit with the
+tree modules (LLVM binding and estree handles, and it imports `unitree`
+back). `constant` is in every native closure, so membership tests against
+these sets lower instead of demoting. `codeinfo` re-exports both names
+for its existing importers.
+"""
+glob TYPE_PARAM_CONSTRUCTORS: frozenset = frozenset(
+         {"TypeVar", "ParamSpec", "TypeVarTuple"}
+     ),
+     NATIVE_COMPTIME_TYPE_MARKERS: frozenset = frozenset({"TypeAlias"});
+
 glob BROWSER_SEED_GLOBALS: frozenset[str] = frozenset(
          {
              "window",
