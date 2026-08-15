@@ -105,7 +105,25 @@ impl JcirGenPass.enter_node(nd: uni.UniNode) -> None {
         and not isinstance(nd, (uni.Import, uni.Test))
         and not self._is_native_ext_module()
     ) {
-        self._refuse(nd, 'native codespace interop stub generation');
+        first_native = True;
+        for sib in self.ir_in.body {
+            if sib is nd {
+                break;
+            }
+            if (
+                isinstance(sib, uni.ContextAwareNode)
+                and sib.code_context == CodeContext.NATIVE
+                and not isinstance(sib, uni.Import)
+            ) {
+                first_native = False;
+                break;
+            }
+        }
+        if first_native {
+            self._gen_native_interop_stubs(nd);
+        }
+        self.prune();
+        return;
     }
     if (
         isinstance(nd, uni.ContextAwareNode)
@@ -136,6 +154,15 @@ impl JcirGenPass.exit_node(nd: uni.UniNode) -> None {
         and (nd.code_context == CodeContext.CLIENT)
         and not nd.codespace_dual
         and ((nd.parent is None) or isinstance(nd.parent, uni.Module))
+    ) {
+        return;
+    }
+    if (
+        isinstance(nd, uni.ContextAwareNode)
+        and (nd.code_context == CodeContext.NATIVE)
+        and ((nd.parent is None) or isinstance(nd.parent, uni.Module))
+        and not isinstance(nd, (uni.Import, uni.Test))
+        and not self._is_native_ext_module()
     ) {
         return;
     }
@@ -378,7 +405,7 @@ impl JcirGenPass._function_expr_from_def(
     );
 }
 
-impl JcirGenPass._check_sem_decorator(nd: uni.UniNode) -> None {
+impl JcirGenPass._get_sem_decorator(nd: uni.UniNode) -> (CgNode | None) {
     semstr: str = '';
     inner_semstr: dict = {};
     if isinstance(nd, uni.Archetype) {
@@ -427,9 +454,27 @@ impl JcirGenPass._check_sem_decorator(nd: uni.UniNode) -> None {
     if (
         not semstr and (not inner_semstr or all(not v for v in inner_semstr.values()))
     ) {
-        return;
+        return None;
     }
-    self._refuse(nd, 'sem-string decorator emission');
+    return self.nod(
+        'Call',
+        ['func', 'args', 'keywords'],
+        [
+            self.jaclib_obj('sem'),
+            [
+                self.const_of(semstr),
+                self.nod(
+                    'Dict',
+                    ['keys', 'values'],
+                    [
+                        [self.const_of(k) for k in inner_semstr],
+                        [self.const_of(v) for v in inner_semstr.values()]
+                    ]
+                )
+            ],
+            []
+        ]
+    );
 }
 
 impl JcirGenPass.resolve_switch_pattern(
@@ -647,10 +692,6 @@ impl JcirGenPass.exit_module(nd: uni.Module) -> None {
             )
         );
     }
-    manifest = self.ir_in.gen.interop_manifest;
-    if (manifest and manifest.bindings and manifest.native_imports) {
-        self._refuse(nd, 'native interop import registration map');
-    }
     merged_body = self._merge_module_bodies(nd);
     body_items: list = [];
     if nd.doc {
@@ -660,8 +701,24 @@ impl JcirGenPass.exit_module(nd: uni.Module) -> None {
     }
     body_items.extend(self.preamble);
     body_items.extend(self._drain_module_hoists());
+    reg_map = self._native_import_registration_map();
+    emitted: set = set();
     for item in merged_body {
         body_items.extend(self.outs(item));
+        if not reg_map {
+            continue;
+        }
+        for bound in self._top_level_bound_names(self.outs(item)) {
+            if (bound in reg_map and bound not in emitted) {
+                body_items.extend(reg_map[bound]);
+                emitted.add(bound);
+            }
+        }
+    }
+    for (reg_name, stmts) in reg_map.items() {
+        if reg_name not in emitted {
+            body_items.extend(stmts);
+        }
     }
     new_body = self._flatten_ast_list(body_items);
     module = self.nod('Module', ['body', 'type_ignores'], [new_body, []]);
@@ -736,9 +793,10 @@ impl JcirGenPass.exit_test(nd: uni.Test) -> None {
     import from jaclang.jac0core.ext_registry { is_test }
     test_name = nd.name.sym_name;
     if nd.code_context == CodeContext.NATIVE {
-        self._refuse(nd, 'native codespace test shim');
+        body_stmts = self._native_test_shim_stmts(nd);
+    } else {
+        body_stmts = self.resolve_stmt_block(nd.body, doc=nd.doc);
     }
-    body_stmts = self.resolve_stmt_block(nd.body, doc=nd.doc);
     test_directives = self.scope_directive_stmts([nd]);
     if test_directives {
         insert_at = 1
@@ -928,18 +986,9 @@ impl JcirGenPass.exit_import(nd: uni.Import) -> None {
         and nd.items
         and nd.is_service_import
         and nd.code_context != CodeContext.CLIENT
+        and self._generate_sv_to_sv_stubs(nd)
     ) {
-        manifest = self.ir_in.gen.interop_manifest;
-        sv_module_name = nd.from_loc.base_module_name
-            if (manifest and nd.from_loc.path)
-            else None;
-        if (manifest and sv_module_name) {
-            for b in manifest.server_exports_to_server {
-                if b.source_module == sv_module_name {
-                    self._refuse(nd, 'service-to-service import stubs');
-                }
-            }
-        }
+        return;
     }
     py_nodes: list = [];
     if nd.doc {
@@ -1072,7 +1121,6 @@ impl JcirGenPass.enter_archetype(nd: uni.Archetype) -> None {
 }
 
 impl JcirGenPass.exit_archetype(nd: uni.Archetype) -> None {
-    self._check_sem_decorator(nd);
     inner: Sequence[uni.CodeBlockStmt] | Sequence[uni.EnumBlockStmt] | None = None;
     if isinstance(nd.body, uni.ImplDef) {
         inner = nd.body.body if not isinstance(nd.body.body, uni.Expr) else None;
@@ -1104,6 +1152,9 @@ impl JcirGenPass.exit_archetype(nd: uni.Archetype) -> None {
             )
         );
     }
+    if (sem_decorator := self._get_sem_decorator(nd)) {
+        decorators.append(sem_decorator);
+    }
     base_classes = [self.val(i) for i in nd.base_classes];
     if (nd.arch_type.name != Tok.KW_CLASS) {
         base_classes.append(self.jaclib_obj(nd.arch_type.value.capitalize()));
@@ -1132,7 +1183,6 @@ impl JcirGenPass.enter_enum(nd: uni.Enum) -> None {
 }
 
 impl JcirGenPass.exit_enum(nd: uni.Enum) -> None {
-    self._check_sem_decorator(nd);
     inner: Sequence[uni.CodeBlockStmt] | Sequence[uni.EnumBlockStmt] | None = None;
     if isinstance(nd.body, uni.ImplDef) {
         inner = nd.body.body if not isinstance(nd.body.body, uni.Expr) else None;
@@ -1141,6 +1191,9 @@ impl JcirGenPass.exit_enum(nd: uni.Enum) -> None {
     }
     decorators = [self.val(i) for i in nd.decorators] if nd.decorators else [];
     body = self.resolve_stmt_block(inner, doc=nd.doc);
+    if (sem_decorator := self._get_sem_decorator(nd)) {
+        decorators.append(sem_decorator);
+    }
     trailing_kind: str = "Enum";
     extra_bases: list = [];
     if nd.value_type {
@@ -1172,7 +1225,6 @@ impl JcirGenPass.enter_ability(nd: uni.Ability) -> None {
 
 impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
     func_type = 'AsyncFunctionDef' if nd.is_async else 'FunctionDef';
-    self._check_sem_decorator(nd);
     has_by_in_return = (
         isinstance(nd.signature, uni.FuncSignature)
         and nd.signature.return_type
@@ -1180,13 +1232,6 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
         and isinstance(nd.signature.return_type.op, uni.Token)
         and (nd.signature.return_type.op.name == Tok.KW_BY)
     );
-    if (
-        isinstance(nd.body, uni.Expr)
-        or (isinstance(nd.body, uni.ImplDef) and isinstance(nd.body.body, uni.Expr))
-        or has_by_in_return
-    ) {
-        self._refuse(nd, 'llm-backed ability body');
-    }
     scope_frame = self._hoist_frames.pop() if self._hoist_frames else [];
     if not self._hoist_frames {
         self._hoist_frames = [[]];
@@ -1214,26 +1259,35 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
             prop_owner_name = hv.name.value;
         }
     }
-    body = [
-        self.nod('Expr', ['value'], [self.val(nd.doc)], jac_node=nd.doc),
-        self.nod('Pass', [], [], jac_node=nd.body)
-    ]
-        if (nd.doc and nd.is_abstract)
-        else [self.nod('Pass', [], [], jac_node=nd.body)]
-            if nd.is_abstract
-            else self.resolve_stmt_block(
-                nd.body.body
-                    if (
-                        isinstance(nd.body, uni.ImplDef)
-                        and not isinstance(nd.body.body, uni.Expr)
-                    )
-                    else nd.body if not isinstance(nd.body, uni.Expr) else None,
-                doc=nd.doc
-            );
+    body = self.gen_llm_body(nd)
+        if (
+            isinstance(nd.body, uni.Expr)
+            or (isinstance(nd.body, uni.ImplDef) and isinstance(nd.body.body, uni.Expr))
+            or has_by_in_return
+        )
+        else [
+            self.nod('Expr', ['value'], [self.val(nd.doc)], jac_node=nd.doc),
+            self.nod('Pass', [], [], jac_node=nd.body)
+        ]
+            if (nd.doc and nd.is_abstract)
+            else [self.nod('Pass', [], [], jac_node=nd.body)]
+                if nd.is_abstract
+                else self.resolve_stmt_block(
+                    nd.body.body
+                        if (
+                            isinstance(nd.body, uni.ImplDef)
+                            and not isinstance(nd.body.body, uni.Expr)
+                        )
+                        else nd.body if not isinstance(nd.body, uni.Expr) else None,
+                    doc=nd.doc
+                );
     if (nd.is_abstract and nd.body) {
         self.emit(E5004, node_override=nd, name=str(nd.sym_name));
     }
     decorator_list = [self.val(i) for i in nd.decorators] if nd.decorators else [];
+    if (sem_decorator := self._get_sem_decorator(nd)) {
+        decorator_list.append(sem_decorator);
+    }
     if isinstance(nd.signature, uni.EventSignature) {
         event_sig = nd.signature;
         decorator_list.append(
@@ -1366,7 +1420,15 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
     }
     ast_returns: CgNode = self.const_of(None);
     if (isinstance(nd.signature, uni.FuncSignature) and nd.signature.return_type) {
-        ast_returns = self.val(nd.signature.return_type);
+        if (
+            isinstance(nd.signature.return_type, uni.BinaryExpr)
+            and isinstance(nd.signature.return_type.op, uni.Token)
+            and (nd.signature.return_type.op.name == Tok.KW_BY)
+        ) {
+            ast_returns = self.val(nd.signature.return_type.left);
+        } else {
+            ast_returns = self.val(nd.signature.return_type);
+        }
     }
     if (
         is_prop_acc
@@ -1874,7 +1936,50 @@ impl JcirGenPass.exit_expr_stmt(nd: uni.ExprStmt) -> None {
 }
 
 impl JcirGenPass.exit_concurrent_expr(nd: uni.ConcurrentExpr) -> None {
-    self._refuse(nd, 'concurrent flow/wait expression');
+    func = '';
+    if nd.tok {
+        if nd.tok.value == 'flow' {
+            func = 'thread_run';
+        } elif nd.tok.value == 'wait' {
+            func = 'thread_wait';
+        }
+    }
+    if func {
+        lambda_ex = [
+            self.nod(
+                'Lambda',
+                ['args', 'body'],
+                [
+                    self.nod(
+                        'arguments',
+                        [
+                            'posonlyargs',
+                            'args',
+                            'kwonlyargs',
+                            'kw_defaults',
+                            'defaults'
+                        ],
+                        [[], [], [], [], []]
+                    ),
+                    self.val(nd.target)
+                ]
+            )
+        ];
+        self.set_out(
+            nd,
+            [
+                self.nod(
+                    'Call',
+                    ['func', 'args', 'keywords'],
+                    [
+                        self.jaclib_obj(func),
+                        lambda_ex if (func == 'thread_run') else [self.val(nd.target)],
+                        []
+                    ]
+                )
+            ]
+        );
+    }
 }
 
 impl JcirGenPass.exit_try_stmt(nd: uni.TryStmt) -> None {
@@ -2431,7 +2536,17 @@ impl JcirGenPass.translate_jac_bin_op(nd: uni.BinaryExpr) -> list {
         self.exit_func_call(func_node);
         return self.outs(func_node);
     } elif (nd.op.name in [Tok.KW_BY]) {
-        self._refuse(nd, 'llm by operator');
+        return [
+            self.nod(
+                'Call',
+                ['func', 'args', 'keywords'],
+                [
+                    self.jaclib_obj('by_operator'),
+                    [self.val(nd.left), self.val(nd.right)],
+                    []
+                ]
+            )
+        ];
     } elif ((nd.op.name == Tok.PIPE_FWD) and isinstance(nd.right, uni.TupleVal)) {
         self.emit(E5006);
     } else {
@@ -3958,4 +4073,473 @@ impl JcirGenPass.exit_semi(nd: uni.Semi) -> None {
 
 impl JcirGenPass.exit_comment_token(nd: uni.CommentToken) -> None {
     ;
+}
+
+impl JcirGenPass._gen_native_interop_stubs(nd: uni.UniNode) -> None {
+    manifest = self.ir_in.gen.interop_manifest;
+    parts: list = [];
+    names: list = [];
+    if (manifest and manifest.bindings) {
+        import from jaclang.jac0core.interop_bridge { JAC_TO_CTYPES_STR }
+        for binding in manifest.native_exports {
+            params = ', '.join(binding.param_names);
+            ret_ct = JAC_TO_CTYPES_STR.get(binding.ret_type, 'ctypes.c_int64');
+            arg_cts = ', '.join(
+                JAC_TO_CTYPES_STR.get(pt, 'ctypes.c_int64')
+                for pt in binding.param_types
+            );
+            parts.append(
+                f"def {binding.name}({params}):\n"
+                    + f"    import ctypes\n"
+                    + f"    _addr = __jac_native_engine__"
+                    + f".get_function_address('{binding.name}')\n"
+                    + f"    _fn = ctypes.CFUNCTYPE({ret_ct}, {arg_cts})(_addr)\n"
+                    + f"    return _fn({params})"
+            );
+            names.append(binding.name);
+        }
+    }
+    if parts {
+        self.set_out(nd, [CgSplice(src='\n'.join(parts), offset=0, bound_names=names)]);
+    }
+}
+
+impl JcirGenPass._native_import_registration_map -> dict {
+    manifest = self.ir_in.gen.interop_manifest;
+    if not (manifest and manifest.bindings and manifest.native_imports) {
+        return {};
+    }
+    reg_map: dict = {};
+    for binding in manifest.native_imports {
+        if binding.name in reg_map {
+            continue;
+        }
+        src = (
+            f"if '__jac_interop_py_funcs__' in globals() "
+            + f"and '{binding.name}' in globals():\n"
+            + f"    __jac_interop_py_funcs__['{binding.name}'] = {binding.name}"
+        );
+        reg_map[binding.name] = [CgSplice(src=src, offset=0)];
+    }
+    return reg_map;
+}
+
+impl JcirGenPass._top_level_bound_names(items: any) -> list {
+    stmts = items if isinstance(items, list) else [items];
+    names: list = [];
+    for stmt in stmts {
+        if isinstance(stmt, list) {
+            names.extend(self._top_level_bound_names(stmt));
+        } elif isinstance(stmt, CgSplice) {
+            names.extend(stmt.bound_names);
+        } elif isinstance(stmt, CgNode) {
+            if stmt.cls in ('FunctionDef', 'AsyncFunctionDef', 'ClassDef') {
+                names.append(stmt.get('name'));
+            } elif stmt.cls in ('Import', 'ImportFrom') {
+                for alias in stmt.get('names') {
+                    asname = alias.get('asname') if alias.hasf('asname') else None;
+                    names.append(asname or alias.get('name'));
+                }
+            } elif stmt.cls == 'Assign' {
+                for target in stmt.get('targets') {
+                    if (isinstance(target, CgNode) and target.cls == 'Name') {
+                        names.append(target.get('id'));
+                    }
+                }
+            }
+        }
+    }
+    return names;
+}
+
+impl JcirGenPass._native_test_shim_stmts(nd: uni.Test) -> list {
+    import from jaclang.jac0core.codeinfo { native_test_symbol, native_safe_sym }
+    test_name = nd.name.sym_name;
+    line = nd.loc.first_line if nd.loc else 0;
+    symbol = native_test_symbol(test_name, line);
+    manifest = self.ir_in.gen.interop_manifest if self.ir_in?.gen else None;
+    dep_sources = manifest.native_transitive_sources if manifest else [];
+    init_syms: list = [];
+    for dep_src in (dep_sources or []) {
+        if dep_src {
+            dep_init = f"__jac_glob_init_{native_safe_sym(dep_src)}";
+            if dep_init not in init_syms {
+                init_syms.append(dep_init);
+            }
+        }
+    }
+    init_syms.append("__jac_glob_init");
+    init_list = "[" + ", ".join(f"'{sy}'" for sy in init_syms) + "]";
+    src_lines = [
+        "from jaclang.runtimelib.test import invoke_native_test as _jac_invoke",
+        "_jac_invoke(globals().get('__jac_native_engine__'), '"
+            + symbol
+            + "', '"
+            + test_name
+            + "', "
+            + init_list
+            + ")"
+    ];
+    return [CgSplice(src='\n'.join(src_lines), offset=0)];
+}
+
+impl JcirGenPass._generate_sv_to_sv_stubs(nd: uni.Import) -> bool {
+    manifest = self.ir_in.gen.interop_manifest;
+    if (not manifest) {
+        return False;
+    }
+    if (not nd.from_loc or not nd.from_loc.path) {
+        return False;
+    }
+    module_name = nd.from_loc.base_module_name;
+    if not module_name {
+        return False;
+    }
+    sv_to_sv_names: set = set();
+    for b in manifest.server_exports_to_server {
+        if b.source_module == module_name {
+            sv_to_sv_names.add(b.name);
+        }
+    }
+    if not sv_to_sv_names {
+        return False;
+    }
+    boundary_types = manifest.boundary_types;
+    parts: list = [
+        "from jaclang.runtimelib import sv_client as __jac_sv_client",
+        "__jac_sv_client._declare_consumer_provider(__name__, '" + module_name + "')"
+    ];
+    names: list = ['__jac_sv_client'];
+    for item in nd.items {
+        if not isinstance(item, uni.ModuleItem) {
+            continue;
+        }
+        item_name = getattr(item.name, 'value', str(item.name));
+        local_name = item.alias.sym_name if item.alias else item_name;
+        if item_name in boundary_types {
+            info = boundary_types[item_name];
+            parts.append(self._gen_py_boundary_stub_class(local_name, info));
+            names.append(local_name);
+            continue;
+        }
+        if item_name not in sv_to_sv_names {
+            continue;
+        }
+        binding = None;
+        for b in manifest.server_exports_to_server {
+            if (b.name == item_name and b.source_module == module_name) {
+                binding = b;
+                break;
+            }
+        }
+        if binding is None {
+            continue;
+        }
+        if binding.kind == 'walker' {
+            parts.append(
+                self._gen_py_sv_walker_stub(
+                    local_name, item_name, module_name, binding, boundary_types
+                )
+            );
+            names.append(local_name);
+            continue;
+        }
+        parts.append(
+            self._gen_py_sv_func_stub(
+                local_name, item_name, module_name, binding, boundary_types
+            )
+        );
+        names.append(local_name);
+    }
+    if (len(parts) <= 1) {
+        return False;
+    }
+    self.set_out(nd, [CgSplice(src='\n\n'.join(parts), offset=0, bound_names=names)]);
+    return True;
+}
+
+impl JcirGenPass._gen_py_sv_func_stub(
+    local_name: str,
+    func_name: str,
+    module_name: str,
+    binding: InteropBinding,
+    boundary_types: dict[(str, BoundaryTypeInfo)]
+) -> str {
+    params = ', '.join(binding.param_names) if binding.param_names else '';
+    args_kvs: list = [];
+    for i in range(len(binding.param_names)) {
+        pname = binding.param_names[i];
+        ptype = binding.param_types[i] if i < len(binding.param_types) else '';
+        if (ptype in boundary_types and boundary_types[ptype].kind != "enum") {
+            args_kvs.append(
+                "'"
+                    + pname
+                    + "': ("
+                    + pname
+                    + "._to_wire() if hasattr("
+                    + pname
+                    + ", '_to_wire') else "
+                    + pname
+                    + ")"
+            );
+        } else {
+            args_kvs.append("'" + pname + "': " + pname);
+        }
+    }
+    args_dict = '{' + ', '.join(args_kvs) + '}';
+    ret_type = binding.ret_type;
+    raw_call = (
+        "__jac_sv_client.call('"
+        + module_name
+        + "', '"
+        + func_name
+        + "', "
+        + args_dict
+        + ")"
+    );
+    if (ret_type in boundary_types and boundary_types[ret_type].kind != "enum") {
+        ret_expr = ret_type + '._from_wire(' + raw_call + ')';
+    } else {
+        ret_expr = raw_call;
+    }
+    return 'def ' + local_name + '(' + params + '):\n    return ' + ret_expr;
+}
+
+impl JcirGenPass._gen_py_sv_walker_stub(
+    local_name: str,
+    walker_name: str,
+    module_name: str,
+    binding: InteropBinding,
+    boundary_types: dict[(str, BoundaryTypeInfo)]
+) -> str {
+    field_names = list(binding.param_names);
+    field_types = list(binding.param_types);
+    fields_repr_pieces: list = [];
+    for fname in field_names {
+        fields_repr_pieces.append("'" + fname + "'");
+    }
+    fields_repr = '[' + ', '.join(fields_repr_pieces) + ']';
+    boundary_pairs: list = [];
+    for i in range(len(field_names)) {
+        ptype = field_types[i] if i < len(field_types) else '';
+        if (ptype in boundary_types and boundary_types[ptype].kind != "enum") {
+            boundary_pairs.append("'" + field_names[i] + "': " + ptype);
+        }
+    }
+    boundary_map = '{' + ', '.join(boundary_pairs) + '}';
+    args_kvs: list = [];
+    for i in range(len(field_names)) {
+        pname = field_names[i];
+        ptype = field_types[i] if i < len(field_types) else '';
+        if (ptype in boundary_types and boundary_types[ptype].kind != "enum") {
+            args_kvs.append(
+                "'"
+                    + pname
+                    + "': ("
+                    + pname
+                    + "._to_wire() if hasattr("
+                    + pname
+                    + ", '_to_wire') else "
+                    + pname
+                    + ")"
+            );
+        } else {
+            args_kvs.append("'" + pname + "': " + pname);
+        }
+    }
+    args_dict = '{' + ', '.join(args_kvs) + '}';
+    init_params = ', '.join(
+        ['cls'] + [field_names[i] + '=None' for i in range(len(field_names))]
+    );
+    lines: list = [];
+    lines.append('class ' + local_name + ':');
+    lines.append('    __jac_fields__ = ' + fields_repr);
+    lines.append('    __jac_walker_name__ = ' + "'" + walker_name + "'");
+    lines.append('    __jac_provider_module__ = ' + "'" + module_name + "'");
+    lines.append('    __jac_boundary_types__ = ' + boundary_map);
+    lines.append('    def __new__(' + init_params + '):');
+    lines.append('        kwargs = ' + args_dict);
+    if field_names {
+        lines.append(
+            '        kwargs = {k: v for k, v in kwargs.items() if v is not None}'
+        );
+    }
+    lines.append(
+        '        return globals()["__jac_sv_client"].spawn_walker('
+            + "'"
+            + module_name
+            + "', '"
+            + walker_name
+            + "', kwargs, cls)"
+    );
+    lines.append('    def __init__(self, *args, **kwargs):');
+    lines.append('        pass');
+    lines.append('    def _to_wire(self):');
+    lines.append(
+        '        return {f: getattr(self, f, None) for f in self.__jac_fields__}'
+    );
+    lines.append('    @classmethod');
+    lines.append('    def _from_wire(cls, d):');
+    lines.append('        if d is None:');
+    lines.append('            return None');
+    lines.append('        if isinstance(d, list):');
+    lines.append('            return [cls._from_wire(i) for i in d]');
+    lines.append('        if not isinstance(d, dict):');
+    lines.append('            return d');
+    lines.append('        inst = object.__new__(cls)');
+    lines.append('        for k, v in d.items():');
+    lines.append('            if k in cls.__jac_boundary_types__ and v is not None:');
+    lines.append('                v = cls.__jac_boundary_types__[k]._from_wire(v)');
+    lines.append('            setattr(inst, k, v)');
+    lines.append('        if not hasattr(inst, "reports"):');
+    lines.append('            inst.reports = []');
+    lines.append('        return inst');
+    return '\n'.join(lines);
+}
+
+impl JcirGenPass._gen_py_boundary_stub_class(
+    class_name: str, info: BoundaryTypeInfo
+) -> str {
+    field_names: list = [];
+    for f in info.fields {
+        field_names.append(f[0]);
+    }
+    fields_pieces: list = [];
+    for fname in field_names {
+        fields_pieces.append("'" + fname + "'");
+    }
+    fields_repr = '[' + ', '.join(fields_pieces) + ']';
+    lines: list = [];
+    lines.append('class ' + class_name + ':');
+    lines.append('    __jac_fields__ = ' + fields_repr);
+    lines.append('    def __init__(self, **kw):');
+    lines.append('        for k, v in kw.items():');
+    lines.append('            setattr(self, k, v)');
+    lines.append('    def _to_wire(self):');
+    lines.append(
+        '        return {f: getattr(self, f, None) for f in self.__jac_fields__}'
+    );
+    lines.append('    @classmethod');
+    lines.append('    def _from_wire(cls, d):');
+    lines.append('        if d is None:');
+    lines.append('            return None');
+    lines.append('        if isinstance(d, list):');
+    lines.append('            return [cls._from_wire(i) for i in d]');
+    lines.append('        if not isinstance(d, dict):');
+    lines.append('            return d');
+    lines.append('        inst = cls.__new__(cls)');
+    lines.append('        for k, v in d.items():');
+    lines.append('            setattr(inst, k, v)');
+    lines.append('        return inst');
+    return '\n'.join(lines);
+}
+
+impl JcirGenPass._invoke_llm_call(
+    model: CgNode, caller: CgNode, args: CgNode, is_async: bool = False
+) -> CgNode {
+    mtir_ast = self.nod(
+        'Call',
+        ['func', 'args', 'keywords'],
+        [
+            self.jaclib_obj('get_mtir'),
+            [],
+            [
+                self.nod('keyword', ['arg', 'value'], ['caller', caller]),
+                self.nod('keyword', ['arg', 'value'], ['args', args]),
+                self.nod(
+                    'keyword',
+                    ['arg', 'value'],
+                    [
+                        'call_params',
+                        self.nod(
+                            'Attribute',
+                            ['value', 'attr', 'ctx'],
+                            [model, 'call_params', self.nod('Load', [], [])]
+                        )
+                    ]
+                )
+            ]
+        ]
+    );
+    hook_name = 'acall_llm' if is_async else 'call_llm';
+    call = self.nod(
+        'Call',
+        ['func', 'args', 'keywords'],
+        [
+            self.jaclib_obj(hook_name),
+            [],
+            [
+                self.nod('keyword', ['arg', 'value'], ['model', model]),
+                self.nod('keyword', ['arg', 'value'], ['mt_run', mtir_ast])
+            ]
+        ]
+    );
+    if is_async {
+        return self.nod('Await', ['value'], [call]);
+    }
+    return call;
+}
+
+impl JcirGenPass.gen_llm_body(nd: uni.Ability) -> list {
+    assert isinstance(nd.signature, uni.FuncSignature);
+    model_expr: CgNode;
+    if (
+        nd.signature.return_type
+        and isinstance(nd.signature.return_type, uni.BinaryExpr)
+        and isinstance(nd.signature.return_type.op, uni.Token)
+        and (nd.signature.return_type.op.name == Tok.KW_BY)
+    ) {
+        model_expr = self.val(nd.signature.return_type.right);
+    } elif isinstance(nd.body, uni.Expr) {
+        model_expr = self.val(nd.body);
+    } else {
+        raise self.ice('gen_llm_body called without model expression');
+    }
+    caller: CgNode;
+    if nd.method_owner {
+        owner = self.nod(
+            'Name',
+            ['id', 'ctx'],
+            [
+                'self' if not nd.is_static else nd.method_owner.sym_name,
+                self.nod('Load', [], [], jac_node=nd.method_owner)
+            ],
+            jac_node=nd.method_owner
+        );
+        caller = self.nod(
+            'Attribute',
+            ['value', 'attr', 'ctx'],
+            [
+                owner,
+                self._py_name(nd.name_ref),
+                self.nod('Load', [], [], jac_node=nd.method_owner)
+            ],
+            jac_node=nd.method_owner
+        );
+    } else {
+        caller = self.name_load(self._py_name(nd.name_ref));
+    }
+    args = self.nod(
+        'Dict',
+        ['keys', 'values'],
+        [
+            [self.const_of(param.name.sym_name) for param in nd.signature.params],
+            [self.name_load(param.name.sym_name) for param in nd.signature.params]
+        ]
+    );
+    llm_call = self._invoke_llm_call(
+        model=model_expr, caller=caller, args=args, is_async=nd.is_async
+    );
+    statements: list = [];
+    if nd.doc {
+        statements.append(
+            self.nod(
+                'Expr',
+                ['value'],
+                [self.nod('Constant', ['value'], [nd.doc.lit_value], jac_node=nd.doc)]
+            )
+        );
+    }
+    statements.append(self.nod('Return', ['value'], [llm_call]));
+    return statements;
 }
