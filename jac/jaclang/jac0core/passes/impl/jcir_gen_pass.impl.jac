@@ -4064,7 +4064,148 @@ impl JcirGenPass.exit_ellipsis(nd: uni.Ellipsis) -> None {
 }
 
 impl JcirGenPass.exit_jsx_element(nd: uni.JsxElement) -> None {
-    self._refuse(nd, 'jsx element');
+    tag_arg: CgNode;
+    if nd.dynamic_tag is not None {
+        tag_arg = self.val(nd.dynamic_tag);
+    } elif (nd.is_fragment or not nd.name) {
+        tag_arg = self.const_of(None, jac_node=nd);
+    } else {
+        tag_arg = self.val(nd.name);
+    }
+    attrs_expr: CgNode;
+    if not nd.attributes {
+        attrs_expr = self.nod('Dict', ['keys', 'values'], [[], []], jac_node=nd);
+    } elif any(isinstance(attr, uni.JsxSpreadAttribute) for attr in nd.attributes) {
+        attrs_expr = self.nod('Dict', ['keys', 'values'], [[], []], jac_node=nd);
+        for attr in nd.attributes {
+            if isinstance(attr, uni.JsxSpreadAttribute) {
+                attrs_expr = self.nod(
+                    'Dict',
+                    ['keys', 'values'],
+                    [[None, None], [attrs_expr, self.val(attr)]],
+                    jac_node=attr
+                );
+            } elif isinstance(attr, uni.JsxNormalAttribute) {
+                attr_tuple = self.val(attr);
+                attrs_expr = self.nod(
+                    'Dict',
+                    ['keys', 'values'],
+                    [
+                        [None, attr_tuple.get('elts')[0]],
+                        [attrs_expr, attr_tuple.get('elts')[1]]
+                    ],
+                    jac_node=attr
+                );
+            }
+        }
+    } else {
+        dkeys: list = [];
+        dvalues: list = [];
+        for attr in nd.attributes {
+            if isinstance(attr, uni.JsxNormalAttribute) {
+                attr_tuple = self.val(attr);
+                dkeys.append(attr_tuple.get('elts')[0]);
+                dvalues.append(attr_tuple.get('elts')[1]);
+            }
+        }
+        attrs_expr = self.nod(
+            'Dict', ['keys', 'values'], [dkeys, dvalues], jac_node=nd
+        );
+    }
+    children_arg: CgNode;
+    if nd.children {
+        kept_children = [
+            c
+            for c in nd.children
+            if not isinstance(c, uni.JsxComment)
+                and not (isinstance(c, uni.JsxText) and not c.get_normalized_text())
+        ];
+        children_arg = self.nod(
+            'List',
+            ['elts', 'ctx'],
+            [
+                [self.val(c) for c in kept_children],
+                self.nod('Load', [], [], jac_node=nd)
+            ],
+            jac_node=nd
+        );
+    } else {
+        children_arg = self.nod(
+            'List',
+            ['elts', 'ctx'],
+            [[], self.nod('Load', [], [], jac_node=nd)],
+            jac_node=nd
+        );
+    }
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'Call',
+                ['func', 'args', 'keywords'],
+                [self.jaclib_obj('jsx'), [tag_arg, attrs_expr, children_arg], []],
+                jac_node=nd
+            )
+        ]
+    );
+}
+
+impl JcirGenPass.exit_jsx_element_name(nd: uni.JsxElementName) -> None {
+    name_str = '.'.join(part.value for part in nd.parts);
+    if (nd.parts and nd.parts[0].value[0].isupper()) {
+        self.set_out(nd, [self.name_load(name_str, jac_node=nd)]);
+    } else {
+        self.set_out(nd, [self.const_of(name_str, jac_node=nd)]);
+    }
+}
+
+impl JcirGenPass.exit_jsx_spread_attribute(nd: uni.JsxSpreadAttribute) -> None {
+    self.set_out(nd, [self.val(nd.expr)]);
+}
+
+impl JcirGenPass.exit_jsx_normal_attribute(nd: uni.JsxNormalAttribute) -> None {
+    if not nd.name {
+        self.set_out(nd, []);
+        return;
+    }
+    key_ast = self.const_of(nd.name.value, jac_node=nd.name);
+    value_ast: CgNode;
+    if (nd.value and isinstance(nd.value, uni.String)) {
+        value_ast = self.const_of(html.unescape(nd.value.lit_value), jac_node=nd.value);
+    } elif (nd.value and self.outs(nd.value)) {
+        value_ast = self.val(nd.value);
+    } else {
+        value_ast = self.const_of(True, jac_node=nd);
+    }
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'Tuple',
+                ['elts', 'ctx'],
+                [[key_ast, value_ast], self.nod('Load', [], [], jac_node=nd)],
+                jac_node=nd
+            )
+        ]
+    );
+}
+
+impl JcirGenPass.exit_jsx_text(nd: uni.JsxText) -> None {
+    self.set_out(
+        nd, [self.const_of(html.unescape(nd.get_normalized_text()), jac_node=nd)]
+    );
+}
+
+impl JcirGenPass.exit_jsx_expression(nd: uni.JsxExpression) -> None {
+    self.set_out(nd, [self.val(nd.expr)]);
+}
+
+impl JcirGenPass.exit_jsx_slot(nd: uni.JsxSlot) -> None {
+    self.set_out(nd, [self.const_of(None, jac_node=nd)]);
+}
+
+impl JcirGenPass.exit_jsx_comment(nd: uni.JsxComment) -> None {
+    self.set_out(nd, []);
 }
 
 impl JcirGenPass.exit_semi(nd: uni.Semi) -> None {
