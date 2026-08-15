@@ -2,7 +2,13 @@ import textwrap;
 import from typing { ClassVar }
 import from collections.abc { Sequence }
 import jaclang.jac0core.unitree as uni;
-import from jaclang.jac0core.constant { CodeContext, is_borrow_kind, OwnershipKind }
+import from jaclang.jac0core.constant {
+    CodeContext,
+    EdgeDir,
+    is_borrow_kind,
+    OwnershipKind
+}
+import from jaclang.jac0core.constant { Constants as Con }
 import from jaclang.jac0core.constant { Tokens as Tok }
 import from jaclang.jac0core.codegen_ir { CodegenIrWriter }
 import from jaclang.jac0core.passes.ast_gen { BaseAstGenPass }
@@ -15,6 +21,7 @@ import from jaclang.jac0core.diagnostics {
     E5006,
     E5007,
     E5008,
+    E5094,
     E5098
 }
 
@@ -223,6 +230,10 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
     def _report_leaked_hoisted_lambdas -> None;
     def _function_expr_from_def(func_def: CgNode, jac_node: uni.UniNode) -> CgNode;
     def _check_sem_decorator(nd: uni.UniNode) -> None;
+    def _is_edge_ref_target(target: uni.UniNode) -> bool;
+    def _cmp_op_str(op: CgNode) -> (str | None);
+    def _query_filter_kws(fc: uni.FilterCompr, type_arg: str, preds_arg: str) -> list;
+    def _recipe_contains_root(v: any) -> bool;
     def resolve_switch_pattern(pattern: uni.MatchPattern, target: uni.Expr) -> CgNode;
     def resolve_switch_stmt(nd: uni.SwitchStmt) -> list;
     def resolve_stmt_block(
@@ -327,6 +338,17 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
     def exit_filter_compr(nd: uni.FilterCompr) -> None;
     def exit_assign_compr(nd: uni.AssignCompr) -> None;
     def exit_match_stmt(nd: uni.MatchStmt) -> None;
+    def exit_match_case(nd: uni.MatchCase) -> None;
+    def exit_match_or(nd: uni.MatchOr) -> None;
+    def exit_match_as(nd: uni.MatchAs) -> None;
+    def exit_match_wild(nd: uni.MatchWild) -> None;
+    def exit_match_value(nd: uni.MatchValue) -> None;
+    def exit_match_singleton(nd: uni.MatchSingleton) -> None;
+    def exit_match_sequence(nd: uni.MatchSequence) -> None;
+    def exit_match_mapping(nd: uni.MatchMapping) -> None;
+    def exit_match_k_v_pair(nd: uni.MatchKVPair) -> None;
+    def exit_match_star(nd: uni.MatchStar) -> None;
+    def exit_match_arch(nd: uni.MatchArch) -> None;
     def exit_token(nd: uni.Token) -> None;
     def exit_name(nd: uni.Name) -> None;
     def exit_float(nd: uni.Float) -> None;

@@ -642,44 +642,225 @@ test "real repo file srcloc lowers identically end to end" {
     );
 }
 
-test "phase boundaries refuse loudly" {
-    walker_src = """
-node Spot {}
+test "walkers edges and visit lower identically" {
+    src = """
+node Spot {
+    has name: str = "";
+}
 
-walker W {
-    can go with `root entry {
-        visit [-->];
+edge Road {}
+
+walker Traveler {
+    has seen: list[str] = [],
+        hops: int = 0;
+
+    can begin with Root entry {
+        visit [-->[?:Spot]] else {
+            disengage;
+        }
+    }
+
+    can step with Spot entry {
+        self.seen.append(here.name);
+        self.hops += 1;
+        if self.hops > 3 {
+            skip;
+        }
+        report here.name;
+        visit [->:Road:->[?:Spot]];
+    }
+
+    can wrap with Root exit {
+        report self.seen;
     }
 }
+
+def build_map -> list {
+    a = Spot(name="a");
+    b = Spot(name="b");
+    root ++> a;
+    a +>:Road():+> b;
+    a del --> b;
+    named = [root-->[?:Spot]][?name == "a"];
+    return named;
+}
+
+def launch -> Traveler {
+    return root spawn Traveler();
+}
+""";
+    (ref_tree, got_tree, blob) = dual_compile(src, "walker_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    result = compile_ir(blob);
+    assert len(result.diags) == 0;
+    assert_bytecode_equal(ref_tree, "walker_fixture.jac", result.modules[0].bytecode);
+}
+
+test "match statements lower identically" {
+    src = """
+obj Point {
+    has x: int = 0,
+        y: int = 0;
+}
+
+def classify(v: any) -> str {
+    match v {
+        case 1 | 2:
+            return "small";
+
+        case [first, *rest] if first == 9:
+            return f"nine-led {rest}";
+
+        case {"kind": k, **extra}:
+            return f"map {k}/{extra}";
+
+        case Point(x=0, y=0):
+            return "origin";
+
+        case Point(x=xx):
+            return f"x {xx}";
+
+        case str() as sv:
+            return f"str {sv}";
+
+        case None:
+            return "none";
+
+        case _:
+            return "other";
+
+    }
+}
+
+with entry {
+    r = [
+        classify(1),
+        classify([9, 8, 7]),
+        classify({"kind": "z", "extra": 1}),
+        classify(Point()),
+        classify(Point(x=5, y=2)),
+        classify("hi"),
+        classify(None),
+        classify(3.5)
+    ];
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "match_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "match_fixture.jac", ["r"]);
+}
+
+test "async constructs lower identically" {
+    src = """
+import asyncio;
+
+async def worker(n: int) -> int {
+    await asyncio.sleep(0);
+    return n * 2;
+}
+
+async def gather_all -> int {
+    total = 0;
+    a = await worker(2);
+    b = await worker(3);
+    lock = asyncio.Lock();
+    async with lock {
+        total = a + b;
+    }
+    return total;
+}
+
+with entry {
+    r = asyncio.run(gather_all());
+}
+""";
+    (ref_tree, got_tree, _) = dual_compile(src, "async_fixture.jac");
+    assert_dump_equal(ref_tree, got_tree);
+    exec_both(ref_tree, got_tree, "async_fixture.jac", ["r"]);
+}
+
+test "real repo walker file social_graph lowers identically" {
+    path = os.path.join(JAC_ROOT, "examples", "littleX", "social_graph.jac");
+    (ref_tree, got_tree, blob) = dual_compile_file(path);
+    assert_dump_equal(ref_tree, got_tree);
+    result = compile_ir(blob);
+    assert len(result.diags) == 0;
+    assert_bytecode_equal(
+        ref_tree, result.modules[0].mod_path, result.modules[0].bytecode
+    );
+}
+
+test "jcir pipeline flag swaps the codegen tail" {
+    src = """
+\"\"\"Flag fixture.\"\"\"
+def double(x: int) -> int {
+    return x * 2;
+}
+
+with entry {
+    r = double(21);
+}
+""";
+    (ref_tree, _, _) = dual_compile(src, "flag_fixture.jac");
+    os.environ["JAC_CODEGEN"] = "jcir";
+    try {
+        prog = JacProgram();
+        mod = prog.compile(
+            use_str=src,
+            file_path="flag_fixture.jac",
+            options=CompileOptions(
+                force_codespace="server",
+                skip_native_engine=True,
+                suppress_codes=["E5092"]
+            )
+        );
+        assert len(prog.errors_had) == 0 , str([str(e) for e in prog.errors_had]);
+        assert mod.gen.jcir;
+        assert mod.gen.py_bytecode;
+        assert_dump_equal(ref_tree, mod.gen.py_ast[0]);
+        ref_code = pycompile(ref_tree, "flag_fixture.jac", "exec");
+        piped_code = marshal.loads(mod.gen.py_bytecode);
+        diffs = code_diffs(ref_code, piped_code, "module", []);
+        assert diffs == [] , "\n".join(diffs);
+    } finally {
+        del os.environ["JAC_CODEGEN"];
+    }
+}
+
+test "phase boundaries refuse loudly" {
+    sem_src = """
+obj Greeter {
+    has name: str = "";
+}
+
+sem Greeter = "A friendly greeter.";
 """;
     prog = JacProgram();
-    mod = prog.compile(use_str=walker_src, file_path="walker_fixture.jac");
+    mod = prog.compile(use_str=sem_src, file_path="sem_fixture.jac");
     caught = "";
     try {
         JcirGenPass(ir_in=mod, prog=prog);
     } except NotImplementedError as e {
         caught = str(e);
     }
-    assert "JCIR emitter phase 1 does not lower" in caught;
-    match_src = """
-def m(v: int) -> str {
-    match v {
-        case 1: {
-            return "one";
-        }
-        case _: {
-            return "other";
-        }
-    }
+    assert "sem-string decorator" in caught;
+    flow_src = """
+def slow -> int {
+    return 1;
+}
+
+with entry {
+    t = flow slow();
+    r = wait t;
 }
 """;
     prog2 = JacProgram();
-    mod2 = prog2.compile(use_str=match_src, file_path="match_fixture.jac");
+    mod2 = prog2.compile(use_str=flow_src, file_path="flow_fixture.jac");
     caught2 = "";
     try {
         JcirGenPass(ir_in=mod2, prog=prog2);
     } except NotImplementedError as e {
         caught2 = str(e);
     }
-    assert "match statement" in caught2;
+    assert "concurrent flow/wait expression" in caught2;
 }

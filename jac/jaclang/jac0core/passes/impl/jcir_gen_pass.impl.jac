@@ -668,6 +668,7 @@ impl JcirGenPass.exit_module(nd: uni.Module) -> None {
     self.set_out(nd, [module]);
     self._module_root = module;
     self._module_path = nd.loc.mod_path;
+    nd.gen.jcir = module_container_bytes(self._module_path, module);
 }
 
 impl JcirGenPass.exit_type_param(nd: uni.TypeParam) -> None {
@@ -1071,9 +1072,6 @@ impl JcirGenPass.enter_archetype(nd: uni.Archetype) -> None {
 }
 
 impl JcirGenPass.exit_archetype(nd: uni.Archetype) -> None {
-    if nd.is_async {
-        self._refuse(nd, 'async archetype');
-    }
     self._check_sem_decorator(nd);
     inner: Sequence[uni.CodeBlockStmt] | Sequence[uni.EnumBlockStmt] | None = None;
     if isinstance(nd.body, uni.ImplDef) {
@@ -1086,6 +1084,25 @@ impl JcirGenPass.exit_archetype(nd: uni.Archetype) -> None {
     if (not body and not isinstance(nd.body, uni.Expr)) {
         self.emit(E5003, node_override=nd);
         body = [self.nod('Pass', [], [], jac_node=nd)];
+    }
+    if nd.is_async {
+        body.insert(
+            0,
+            self.nod(
+                'Assign',
+                ['targets', 'value'],
+                [
+                    [
+                        self.nod(
+                            'Name',
+                            ['id', 'ctx'],
+                            ['__jac_async__', self.nod('Store', [], [])]
+                        )
+                    ],
+                    self.const_of(nd.is_async)
+                ]
+            )
+        );
     }
     base_classes = [self.val(i) for i in nd.base_classes];
     if (nd.arch_type.name != Tok.KW_CLASS) {
@@ -1154,12 +1171,7 @@ impl JcirGenPass.enter_ability(nd: uni.Ability) -> None {
 }
 
 impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
-    if nd.is_async {
-        self._refuse(nd, 'async ability');
-    }
-    if isinstance(nd.signature, uni.EventSignature) {
-        self._refuse(nd, 'walker event signature ability');
-    }
+    func_type = 'AsyncFunctionDef' if nd.is_async else 'FunctionDef';
     self._check_sem_decorator(nd);
     has_by_in_return = (
         isinstance(nd.signature, uni.FuncSignature)
@@ -1222,6 +1234,57 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
         self.emit(E5004, node_override=nd, name=str(nd.sym_name));
     }
     decorator_list = [self.val(i) for i in nd.decorators] if nd.decorators else [];
+    if isinstance(nd.signature, uni.EventSignature) {
+        event_sig = nd.signature;
+        decorator_list.append(
+            self.jaclib_obj(
+                'on_entry' if (event_sig.event.name == Tok.KW_ENTRY) else 'on_exit'
+            )
+        );
+        trigger_arg: CgNode = self.const_of(None);
+        if event_sig.arch_tag_info {
+            tinfo = self.val(event_sig.arch_tag_info);
+            if (
+                tinfo.cls == 'Tuple'
+                and isinstance(event_sig.arch_tag_info, uni.TupleVal)
+            ) {
+                telts = tinfo.get('elts');
+                if (len(telts) > 1) {
+                    trigger_arg = telts[0];
+                    for elem in telts[1:] {
+                        trigger_arg = self.nod(
+                            'BinOp',
+                            ['left', 'op', 'right'],
+                            [trigger_arg, self.nod('BitOr', [], []), elem]
+                        );
+                    }
+                } elif (len(telts) == 1) {
+                    trigger_arg = telts[0];
+                }
+            } else {
+                trigger_arg = tinfo;
+            }
+        }
+        trigger_thunk = self.nod(
+            'Lambda',
+            ['args', 'body'],
+            [
+                self.nod(
+                    'arguments',
+                    ['posonlyargs', 'args', 'kwonlyargs', 'kw_defaults', 'defaults'],
+                    [[], [], [], [], []]
+                ),
+                trigger_arg
+            ]
+        );
+        decorator_list.append(
+            self.nod(
+                'Call',
+                ['func', 'args', 'keywords'],
+                [self.jaclib_obj('set_trigger'), [trigger_thunk], []]
+            )
+        );
+    }
     if isinstance(nd.body, uni.ImplDef) {
         decorator_list.append(
             self.nod(
@@ -1368,7 +1431,7 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
         );
     }
     func_def = self.nod(
-        'FunctionDef',
+        func_type,
         ['name', 'args', 'body', 'decorator_list', 'returns', 'type_params'],
         [func_name_out, func_args_out, body, decorator_list, ast_returns, []]
     );
@@ -1447,7 +1510,90 @@ impl JcirGenPass.exit_func_signature(nd: uni.FuncSignature) -> None {
 }
 
 impl JcirGenPass.exit_event_signature(nd: uni.EventSignature) -> None {
-    self._refuse(nd, 'walker event signature');
+    arch_kw = Con.HERE.value if nd.from_walker else Con.VISITOR.value;
+    annotation: (CgNode | None) = None;
+    if nd.arch_tag_info {
+        tag_recipe = self.val(nd.arch_tag_info);
+        if (tag_recipe.cls == 'Tuple' and isinstance(nd.arch_tag_info, uni.TupleVal)) {
+            telts = tag_recipe.get('elts');
+            if (len(telts) > 1) {
+                annotation = telts[0];
+                for elem in telts[1:] {
+                    annotation = self.nod(
+                        'BinOp',
+                        ['left', 'op', 'right'],
+                        [annotation, self.nod('BitOr', [], []), elem]
+                    );
+                }
+            } elif (len(telts) == 1) {
+                annotation = telts[0];
+            }
+        } else {
+            annotation = tag_recipe;
+        }
+    }
+    if (annotation is not None and self._recipe_contains_root(annotation)) {
+        self.jaclib_imports.add('Root');
+    }
+    arch_arg = self.nod(
+        'arg',
+        ['arg', 'annotation'],
+        [f"{arch_kw}", annotation],
+        jac_node=nd.arch_tag_info or nd
+    );
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'arguments',
+                [
+                    'posonlyargs',
+                    'args',
+                    'kwonlyargs',
+                    'vararg',
+                    'kwarg',
+                    'kw_defaults',
+                    'defaults'
+                ],
+                [
+                    [],
+                    [self.nod('arg', ['arg', 'annotation'], ['self', None]), arch_arg]
+                        if (
+                            (abl := nd.find_parent_of_type(uni.Ability))
+                            and abl.is_method
+                        )
+                        else [arch_arg],
+                    [],
+                    None,
+                    None,
+                    [],
+                    []
+                ]
+            )
+        ]
+    );
+}
+
+impl JcirGenPass._recipe_contains_root(v: any) -> bool {
+    if isinstance(v, CgNode) {
+        if (v.cls == 'Name' and v.hasf('id') and v.get('id') == 'Root') {
+            return True;
+        }
+        for item in v.vals {
+            if self._recipe_contains_root(item) {
+                return True;
+            }
+        }
+        return False;
+    }
+    if isinstance(v, list) {
+        for item in v {
+            if self._recipe_contains_root(item) {
+                return True;
+            }
+        }
+    }
+    return False;
 }
 
 impl JcirGenPass.exit_param_var(nd: uni.ParamVar) -> None {
@@ -1574,7 +1720,25 @@ impl JcirGenPass.exit_has_var(nd: uni.HasVar) -> None {
 }
 
 impl JcirGenPass.exit_typed_ctx_block(nd: uni.TypedCtxBlock) -> None {
-    self._refuse(nd, 'typed context block');
+    loc = self.name_load(Con.HERE.value if nd.from_walker else Con.VISITOR.value);
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'If',
+                ['test', 'body', 'orelse'],
+                [
+                    self.nod(
+                        'Call',
+                        ['func', 'args', 'keywords'],
+                        [self.name_load('isinstance'), [loc, self.val(nd.type_ctx)], []]
+                    ),
+                    self.resolve_stmt_block(nd.body),
+                    []
+                ]
+            )
+        ]
+    );
 }
 
 impl JcirGenPass.exit_open_stmt(nd: uni.OpenStmt) -> None {
@@ -1772,14 +1936,11 @@ impl JcirGenPass.exit_iter_for_stmt(nd: uni.IterForStmt) -> None {
 }
 
 impl JcirGenPass.exit_in_for_stmt(nd: uni.InForStmt) -> None {
-    if nd.is_async {
-        self._refuse(nd, 'async for statement');
-    }
     self.set_out(
         nd,
         [
             self.nod(
-                'For',
+                'AsyncFor' if nd.is_async else 'For',
                 ['target', 'iter', 'body', 'orelse'],
                 [
                     self.val(nd.target),
@@ -1823,14 +1984,11 @@ impl JcirGenPass.exit_forever_stmt(nd: uni.ForeverStmt) -> None {
 }
 
 impl JcirGenPass.exit_with_stmt(nd: uni.WithStmt) -> None {
-    if nd.is_async {
-        self._refuse(nd, 'async with statement');
-    }
     self.set_out(
         nd,
         [
             self.nod(
-                'With',
+                'AsyncWith' if nd.is_async else 'With',
                 ['items', 'body'],
                 [
                     [self.val(item) for item in nd.exprs],
@@ -1897,7 +2055,7 @@ impl JcirGenPass.exit_ctrl_stmt(nd: uni.CtrlStmt) -> None {
             self.set_out(nd, [self.nod('Continue', [], [])]);
         }
     } elif (nd.ctrl.name == Tok.KW_SKIP) {
-        self._refuse(nd, 'walker skip statement');
+        self.set_out(nd, [self.nod('Return', ['value'], [None])]);
     }
 }
 
@@ -1963,7 +2121,22 @@ impl JcirGenPass.exit_delete_stmt(nd: uni.DeleteStmt) -> None {
 }
 
 impl JcirGenPass.exit_report_stmt(nd: uni.ReportStmt) -> None {
-    self._refuse(nd, 'walker report statement');
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'Expr',
+                ['value'],
+                [
+                    self.nod(
+                        'Call',
+                        ['func', 'args', 'keywords'],
+                        [self.jaclib_obj('log_report'), self.outs(nd.expr), []]
+                    )
+                ]
+            )
+        ]
+    );
 }
 
 impl JcirGenPass.exit_return_stmt(nd: uni.ReturnStmt) -> None {
@@ -1992,15 +2165,64 @@ impl JcirGenPass.exit_yield_expr(nd: uni.YieldExpr) -> None {
 }
 
 impl JcirGenPass.exit_visit_stmt(nd: uni.VisitStmt) -> None {
-    self._refuse(nd, 'walker visit statement');
+    loc = self.name_load('self' if nd.from_walker else Con.VISITOR.value);
+    visit_call = self.nod(
+        'Call',
+        ['func', 'args', 'keywords'],
+        [self.jaclib_obj('visit'), [loc, self.val(nd.target)], []]
+    );
+    if (nd.insert_loc is not None) {
+        visit_call.get('keywords').append(
+            self.nod(
+                'keyword', ['arg', 'value'], ['insert_loc', self.val(nd.insert_loc)]
+            )
+        );
+    }
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'If',
+                ['test', 'body', 'orelse'],
+                [
+                    self.nod(
+                        'UnaryOp',
+                        ['op', 'operand'],
+                        [self.nod('Not', [], []), visit_call]
+                    ),
+                    self.outs(nd.else_body),
+                    []
+                ]
+            )
+        ]
+            if nd.else_body
+            else [self.nod('Expr', ['value'], [visit_call])]
+    );
 }
 
 impl JcirGenPass.exit_disengage_stmt(nd: uni.DisengageStmt) -> None {
-    self._refuse(nd, 'walker disengage statement');
+    loc = self.name_load('self' if nd.from_walker else Con.VISITOR.value);
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'Expr',
+                ['value'],
+                [
+                    self.nod(
+                        'Call',
+                        ['func', 'args', 'keywords'],
+                        [self.jaclib_obj('disengage'), [loc], []]
+                    )
+                ]
+            ),
+            self.nod('Return', [], [])
+        ]
+    );
 }
 
 impl JcirGenPass.exit_await_expr(nd: uni.AwaitExpr) -> None {
-    self._refuse(nd, 'await expression');
+    self.set_out(nd, [self.nod('Await', ['value'], [self.val(nd.target)])]);
 }
 
 impl JcirGenPass.exit_cast_expr(nd: uni.CastExpr) -> None {
@@ -2048,8 +2270,92 @@ impl JcirGenPass.exit_assignment(nd: uni.Assignment) -> None {
 }
 
 impl JcirGenPass.exit_binary_expr(nd: uni.BinaryExpr) -> None {
-    if isinstance(nd.op, (uni.ConnectOp, uni.DisconnectOp)) {
-        self._refuse(nd, 'edge connect/disconnect operator');
+    if isinstance(nd.op, uni.ConnectOp) {
+        left = self.val(nd.right)
+            if (nd.op.edge_dir == EdgeDir.IN)
+            else self.val(nd.left);
+        right = self.val(nd.left)
+            if (nd.op.edge_dir == EdgeDir.IN)
+            else self.val(nd.right);
+        keywords = [
+            self.nod('keyword', ['arg', 'value'], ['left', left]),
+            self.nod('keyword', ['arg', 'value'], ['right', right])
+        ];
+        if nd.op.conn_type {
+            keywords.append(
+                self.nod(
+                    'keyword', ['arg', 'value'], ['edge', self.val(nd.op.conn_type)]
+                )
+            );
+        }
+        if (nd.op.edge_dir == EdgeDir.ANY) {
+            keywords.append(
+                self.nod('keyword', ['arg', 'value'], ['undir', self.const_of(True)])
+            );
+        }
+        if nd.op.conn_assign {
+            keywords.append(
+                self.nod(
+                    'keyword',
+                    ['arg', 'value'],
+                    ['conn_assign', self.val(nd.op.conn_assign)]
+                )
+            );
+        }
+        self.set_out(
+            nd,
+            [
+                self.nod(
+                    'Call',
+                    ['func', 'args', 'keywords'],
+                    [self.jaclib_obj('connect'), [], keywords]
+                )
+            ]
+        );
+    } elif isinstance(nd.op, uni.DisconnectOp) {
+        keywords = [
+            self.nod('keyword', ['arg', 'value'], ['left', self.val(nd.left)]),
+            self.nod('keyword', ['arg', 'value'], ['right', self.val(nd.right)])
+        ];
+        if (nd.op.edge_spec.edge_dir != EdgeDir.OUT) {
+            keywords.append(
+                self.nod(
+                    'keyword',
+                    ['arg', 'value'],
+                    [
+                        'dir',
+                        self.nod(
+                            'Attribute',
+                            ['value', 'attr', 'ctx'],
+                            [
+                                self.jaclib_obj('EdgeDir'),
+                                nd.op.edge_spec.edge_dir.name,
+                                self.nod('Load', [], [])
+                            ]
+                        )
+                    ]
+                )
+            );
+        }
+        if nd.op.edge_spec.filter_cond {
+            keywords.append(
+                self.nod(
+                    'keyword',
+                    ['arg', 'value'],
+                    ['filter', self.val(nd.op.edge_spec.filter_cond)]
+                )
+            );
+        }
+        self.set_out(
+            nd,
+            [
+                self.nod(
+                    'Call',
+                    ['func', 'args', 'keywords'],
+                    [self.jaclib_obj('disconnect'), [], keywords]
+                )
+            ]
+        );
     } elif (nd.op.name in [Tok.KW_AND.value, Tok.KW_OR.value]) {
         self.set_out(
             nd,
@@ -2105,7 +2411,13 @@ impl JcirGenPass.translate_jac_bin_op(nd: uni.BinaryExpr) -> list {
         self.exit_func_call(func_node);
         return self.outs(func_node);
     } elif (nd.op.name in [Tok.KW_SPAWN]) {
-        self._refuse(nd, 'walker spawn operator');
+        return [
+            self.nod(
+                'Call',
+                ['func', 'args', 'keywords'],
+                [self.jaclib_obj('spawn'), [self.val(nd.left), self.val(nd.right)], []]
+            )
+        ];
     } elif (nd.op.name in [Tok.PIPE_BKWD, Tok.A_PIPE_BKWD]) {
         func_node = uni.FuncCall(
             target=nd.left,
@@ -2626,9 +2938,85 @@ impl JcirGenPass.exit_atom_trailer(nd: uni.AtomTrailer) -> None {
             self.emit(E5008);
         }
     } elif isinstance(nd.right, uni.FilterCompr) {
-        self._refuse(nd, 'filter comprehension trailer');
+        if self._is_edge_ref_target(nd.target) {
+            target_py = self.val(nd.target);
+            narrow_kws = self._query_filter_kws(nd.right, 'nd', 'preds');
+            target_py.get('args')[0] = self.nod(
+                'Call',
+                ['func', 'args', 'keywords'],
+                [
+                    self.nod(
+                        'Attribute',
+                        ['value', 'attr', 'ctx'],
+                        [target_py.get('args')[0], 'narrow', self.nod('Load', [], [])]
+                    ),
+                    [],
+                    narrow_kws
+                ]
+            );
+            self.set_out(nd, [target_py]);
+        } else {
+            self.set_out(
+                nd,
+                [
+                    self.nod(
+                        'Call',
+                        ['func', 'args', 'keywords'],
+                        [
+                            self.jaclib_obj('filter_on'),
+                            [],
+                            [
+                                self.nod(
+                                    'keyword',
+                                    ['arg', 'value'],
+                                    ['items', self.val(nd.target)]
+                                ),
+                                self.nod(
+                                    'keyword',
+                                    ['arg', 'value'],
+                                    ['func', self.val(nd.right)]
+                                )
+                            ]
+                        ]
+                    )
+                ]
+            );
+        }
     } elif isinstance(nd.right, uni.AssignCompr) {
-        self._refuse(nd, 'assign comprehension trailer');
+        self.set_out(
+            nd,
+            [
+                self.nod(
+                    'Call',
+                    ['func', 'args', 'keywords'],
+                    [
+                        self.jaclib_obj('assign_all'),
+                        [self.val(nd.target), self.val(nd.right)],
+                        []
+                    ]
+                )
+            ]
+        );
+    } elif (
+        isinstance(nd.right, uni.IndexSlice)
+        and nd.right.is_range
+        and len(nd.right.slices) == 1
+        and self._is_edge_ref_target(nd.target)
+    ) {
+        target_py = self.val(nd.target);
+        slc = nd.right.slices[0];
+        start_ast = self.val(slc.start) if slc.start else self.const_of(None);
+        stop_ast = self.val(slc.stop) if slc.stop else self.const_of(None);
+        step_ast = self.val(slc.step) if slc.step else self.const_of(None);
+        slice_call = self.nod(
+            'Call',
+            ['func', 'args', 'keywords'],
+            [self.name_load('slice'), [start_ast, stop_ast, step_ast], []]
+        );
+        target_py.get('keywords').append(
+            self.nod('keyword', ['arg', 'value'], ['slc', slice_call])
+        );
+        self.set_out(nd, [target_py]);
     } else {
         self.set_out(
             nd,
@@ -2676,7 +3064,31 @@ impl JcirGenPass.exit_atom_trailer(nd: uni.AtomTrailer) -> None {
                 ]
             );
         } elif cur.cls == 'Call' {
-            self._refuse(nd, 'null-ok call trailer');
+            cfunc = cur.get('func');
+            if (
+                isinstance(cfunc, CgNode)
+                and (
+                    cfunc.cls == 'Attribute'
+                    or (cfunc.cls == 'Name' and cfunc.get('id') == 'filter_on')
+                )
+            ) {
+                for kw in cur.get('keywords') {
+                    if (isinstance(kw, CgNode) and kw.get('arg') == 'items') {
+                        kw.setf('value', tmp_ref);
+                    }
+                }
+            }
+            if (
+                isinstance(cfunc, CgNode)
+                and (
+                    cfunc.cls == 'Attribute'
+                    or (cfunc.cls == 'Name' and cfunc.get('id') == 'assign_all')
+                )
+                and cur.get('args')
+            ) {
+                cur.get('args')[0] = tmp_ref;
+            }
+            body_expr = cur;
         } elif cur.cls == 'Subscript' {
             body_expr = self.nod(
                 'Call',
@@ -2744,6 +3156,14 @@ impl JcirGenPass.gen_call_args(nd: uni.FuncCall) -> tuple[(list, list)] {
 impl JcirGenPass.exit_func_call(nd: uni.FuncCall) -> None {
     if nd.genai_call {
         self._refuse(nd, 'genai call expression');
+    }
+    if (
+        isinstance(nd.target, uni.SpecialVarRef)
+        and nd.target.name == Tok.KW_ROOT
+        and (nd.params is None or len(nd.params) == 0)
+    ) {
+        self.set_out(nd, self.outs(nd.target));
+        return;
     }
     if (
         isinstance(nd.target, uni.AtomTrailer)
@@ -2857,7 +3277,16 @@ impl JcirGenPass.exit_special_var_ref(nd: uni.SpecialVarRef) -> None {
             ]
         );
     } elif (nd.name == Tok.KW_ROOT) {
-        self._refuse(nd, 'walker root reference');
+        self.set_out(
+            nd,
+            [
+                self.nod(
+                    'Call',
+                    ['func', 'args', 'keywords'],
+                    [self.jaclib_obj('root'), [], []]
+                )
+            ]
+        );
     } else {
         self.set_out(
             nd, [self.nod('Name', ['id', 'ctx'], [self._py_name(nd), self.py_ctx(nd)])]
@@ -2865,32 +3294,495 @@ impl JcirGenPass.exit_special_var_ref(nd: uni.SpecialVarRef) -> None {
     }
 }
 
+impl JcirGenPass._is_edge_ref_target(target: uni.UniNode) -> bool {
+    if isinstance(target, uni.EdgeRefTrailer) {
+        return not target.edges_only and not target.is_async;
+    }
+    if (
+        isinstance(target, uni.AtomTrailer)
+        and isinstance(target.right, uni.FilterCompr)
+    ) {
+        return self._is_edge_ref_target(target.target);
+    }
+    return False;
+}
+
+impl JcirGenPass._cmp_op_str(op: CgNode) -> (str | None) {
+    if op.cls == 'Eq' {
+        return '==';
+    }
+    if op.cls == 'NotEq' {
+        return '!=';
+    }
+    if op.cls == 'Lt' {
+        return '<';
+    }
+    if op.cls == 'LtE' {
+        return '<=';
+    }
+    if op.cls == 'Gt' {
+        return '>';
+    }
+    if op.cls == 'GtE' {
+        return '>=';
+    }
+    if op.cls == 'In' {
+        return 'in';
+    }
+    return None;
+}
+
+impl JcirGenPass._query_filter_kws(
+    fc: uni.FilterCompr, type_arg: str, preds_arg: str
+) -> list {
+    kws: list = [];
+    if fc.f_type {
+        kws.append(
+            self.nod('keyword', ['arg', 'value'], [type_arg, self.val(fc.f_type)])
+        );
+    }
+    preds: list = [];
+    for x in fc.compares {
+        cmp_ast = self.val(x);
+        reason: (str | None) = None;
+        if cmp_ast.cls != 'Compare' {
+            reason = 'not a comparison';
+        } elif len(cmp_ast.get('ops')) != 1 {
+            reason = 'chained comparisons are not admitted';
+        } elif (
+            not isinstance(cmp_ast.get('left'), CgNode)
+            or cmp_ast.get('left').cls != 'Name'
+        ) {
+            reason = 'left side must be a declared field name';
+        } elif self._cmp_op_str(cmp_ast.get('ops')[0]) is None {
+            reason = f"operator '{cmp_ast.get('ops')[0].cls}' is not admitted";
+        }
+        if reason is not None {
+            self.emit(E5094, node_override=x, reason=reason);
+            continue;
+        }
+        preds.append(
+            self.nod(
+                'Call',
+                ['func', 'args', 'keywords'],
+                [
+                    self.jaclib_obj('QPred'),
+                    [],
+                    [
+                        self.nod(
+                            'keyword',
+                            ['arg', 'value'],
+                            ['field', self.const_of(cmp_ast.get('left').get('id'))]
+                        ),
+                        self.nod(
+                            'keyword',
+                            ['arg', 'value'],
+                            [
+                                'op',
+                                self.const_of(self._cmp_op_str(cmp_ast.get('ops')[0]))
+                            ]
+                        ),
+                        self.nod(
+                            'keyword',
+                            ['arg', 'value'],
+                            ['value', cmp_ast.get('comparators')[0]]
+                        )
+                    ]
+                ]
+            )
+        );
+    }
+    if preds {
+        kws.append(
+            self.nod(
+                'keyword',
+                ['arg', 'value'],
+                [
+                    preds_arg,
+                    self.nod('List', ['elts', 'ctx'], [preds, self.nod('Load', [], [])])
+                ]
+            )
+        );
+    }
+    return kws;
+}
+
 impl JcirGenPass.exit_edge_ref_trailer(nd: uni.EdgeRefTrailer) -> None {
-    self._refuse(nd, 'edge reference trailer');
+    origin: (CgNode | None) = None;
+    cur = nd.chain[0];
+    chomp = [*nd.chain[1:]];
+    from_visit = bool(isinstance(nd.parent, uni.VisitStmt));
+    if not isinstance(cur, uni.EdgeOpRef) {
+        origin = self.val(cur);
+        cur = chomp.pop(0);
+    }
+    origin_ast = origin if origin is not None else self.val(cur);
+    hops: list = [];
+    while True {
+        keywords = [
+            self.nod(
+                'keyword', ['arg', 'value'], ['dir', self.const_of(cur.edge_dir.value)]
+            )
+        ];
+        if cur.filter_cond {
+            keywords.extend(self._query_filter_kws(cur.filter_cond, 'edge', 'epreds'));
+        }
+        if (chomp and not isinstance(chomp[0], uni.EdgeOpRef)) {
+            filt = chomp.pop(0);
+            if isinstance(filt, uni.FilterCompr) {
+                keywords.extend(self._query_filter_kws(filt, 'nd', 'preds'));
+            } else {
+                keywords.append(
+                    self.nod('keyword', ['arg', 'value'], ['only', self.val(filt)])
+                );
+            }
+        }
+        hops.append(
+            self.nod(
+                'Call',
+                ['func', 'args', 'keywords'],
+                [self.jaclib_obj('QHop'), [], keywords]
+            )
+        );
+        if chomp {
+            cur = chomp.pop(0);
+        } else {
+            break;
+        }
+    }
+    gq_kws = [
+        self.nod(
+            'keyword',
+            ['arg', 'value'],
+            [
+                'hops',
+                self.nod('List', ['elts', 'ctx'], [hops, self.nod('Load', [], [])])
+            ]
+        )
+    ];
+    if nd.edges_only {
+        gq_kws.append(
+            self.nod('keyword', ['arg', 'value'], ['edges_only', self.const_of(True)])
+        );
+    }
+    pynode = self.nod(
+        'Call',
+        ['func', 'args', 'keywords'],
+        [self.jaclib_obj('GraphQuery'), [origin_ast], gq_kws]
+    );
+    if from_visit {
+        pynode = self.nod(
+            'Call',
+            ['func', 'args', 'keywords'],
+            [
+                self.nod(
+                    'Attribute',
+                    ['value', 'attr', 'ctx'],
+                    [pynode, 'visit', self.nod('Load', [], [])]
+                ),
+                [],
+                []
+            ]
+        );
+    }
+    if nd.is_async {
+        pynode = self.nod(
+            'Call',
+            ['func', 'args', 'keywords'],
+            [self.jaclib_obj('arefs'), [pynode], []]
+        );
+    } else {
+        pynode = self.nod(
+            'Call',
+            ['func', 'args', 'keywords'],
+            [self.jaclib_obj('refs'), [pynode], []]
+        );
+    }
+    self.set_out(nd, [pynode]);
 }
 
 impl JcirGenPass.exit_edge_op_ref(nd: uni.EdgeOpRef) -> None {
-    self._refuse(nd, 'edge operator reference');
+    self.set_out(nd, [self.name_load(Con.HERE.value if nd.from_walker else 'self')]);
 }
 
 impl JcirGenPass.exit_disconnect_op(nd: uni.DisconnectOp) -> None {
-    self._refuse(nd, 'edge disconnect operator');
+    self.set_out(nd, self.outs(nd.edge_spec));
 }
 
 impl JcirGenPass.exit_connect_op(nd: uni.ConnectOp) -> None {
-    self._refuse(nd, 'edge connect operator');
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'Call',
+                ['func', 'args', 'keywords'],
+                [
+                    self.jaclib_obj('build_edge'),
+                    [],
+                    [
+                        self.nod(
+                            'keyword',
+                            ['arg', 'value'],
+                            ['is_undirected', self.const_of(nd.edge_dir == EdgeDir.ANY)]
+                        ),
+                        self.nod(
+                            'keyword',
+                            ['arg', 'value'],
+                            [
+                                'conn_type',
+                                self.val(nd.conn_type)
+                                    if nd.conn_type
+                                    else self.const_of(None)
+                            ]
+                        ),
+                        self.nod(
+                            'keyword',
+                            ['arg', 'value'],
+                            [
+                                'conn_assign',
+                                self.val(nd.conn_assign)
+                                    if nd.conn_assign
+                                    else self.const_of(None)
+                            ]
+                        )
+                    ]
+                ]
+            )
+        ]
+    );
 }
 
 impl JcirGenPass.exit_filter_compr(nd: uni.FilterCompr) -> None {
-    self._refuse(nd, 'filter comprehension');
+    iter_name = 'i';
+    comprs: list = [];
+    if nd.f_type {
+        f_type_recipe = self.val(nd.f_type);
+        cur_loc = self.nod('Pass', [], []);
+        f_type_recipe.l1 = cur_loc.l1;
+        f_type_recipe.c1 = cur_loc.c1;
+        f_type_recipe.l2 = cur_loc.l2;
+        f_type_recipe.c2 = cur_loc.c2;
+        comprs.append(
+            self.nod(
+                'Call',
+                ['func', 'args', 'keywords'],
+                [
+                    self.name_load('isinstance'),
+                    [self.name_load(iter_name), f_type_recipe],
+                    []
+                ]
+            )
+        );
+    }
+    for x in nd.compares {
+        x_recipe = self.val(x);
+        if (
+            x_recipe.cls == 'Compare'
+            and isinstance(x_recipe.get('left'), CgNode)
+            and x_recipe.get('left').cls == 'Name'
+        ) {
+            comprs.append(
+                self.nod(
+                    'Compare',
+                    ['left', 'ops', 'comparators'],
+                    [
+                        self.nod(
+                            'Attribute',
+                            ['value', 'attr', 'ctx'],
+                            [
+                                self.name_load(iter_name, jac_node=x),
+                                x_recipe.get('left').get('id'),
+                                self.nod('Load', [], [], jac_node=x)
+                            ],
+                            jac_node=x
+                        ),
+                        x_recipe.get('ops'),
+                        x_recipe.get('comparators')
+                    ],
+                    jac_node=x
+                )
+            );
+        }
+    }
+    body: (CgNode | None) = None;
+    if (len(comprs) > 1) {
+        body = self.nod('BoolOp', ['op', 'values'], [self.nod('And', [], []), comprs]);
+    } elif comprs {
+        body = comprs[0];
+    }
+    if body {
+        self.set_out(
+            nd,
+            [
+                self.nod(
+                    'Lambda',
+                    ['args', 'body'],
+                    [
+                        self.nod(
+                            'arguments',
+                            [
+                                'posonlyargs',
+                                'args',
+                                'kwonlyargs',
+                                'kw_defaults',
+                                'defaults'
+                            ],
+                            [[], [self.nod('arg', ['arg'], [iter_name])], [], [], []]
+                        ),
+                        body
+                    ]
+                )
+            ]
+        );
+    }
 }
 
 impl JcirGenPass.exit_assign_compr(nd: uni.AssignCompr) -> None {
-    self._refuse(nd, 'assign comprehension');
+    keys: list = [];
+    values: list = [];
+    for i in nd.assigns {
+        if i.key {
+            keys.append(self.const_of(i.key.sym_name));
+            values.append(self.val(i.value));
+        }
+    }
+    key_tup = self.nod('Tuple', ['elts', 'ctx'], [keys, self.nod('Load', [], [])]);
+    val_tup = self.nod('Tuple', ['elts', 'ctx'], [values, self.nod('Load', [], [])]);
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'Tuple', ['elts', 'ctx'], [[key_tup, val_tup], self.nod('Load', [], [])]
+            )
+        ]
+    );
 }
 
 impl JcirGenPass.exit_match_stmt(nd: uni.MatchStmt) -> None {
-    self._refuse(nd, 'match statement');
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'Match',
+                ['subject', 'cases'],
+                [self.val(nd.target), [self.val(x) for x in nd.cases]]
+            )
+        ]
+    );
+}
+
+impl JcirGenPass.exit_match_case(nd: uni.MatchCase) -> None {
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'match_case',
+                ['pattern', 'guard', 'body'],
+                [
+                    self.val(nd.pattern),
+                    self.val(nd.guard) if nd.guard else None,
+                    self.resolve_stmt_block(nd.body)
+                ]
+            )
+        ]
+    );
+}
+
+impl JcirGenPass.exit_match_or(nd: uni.MatchOr) -> None {
+    self.set_out(
+        nd, [self.nod('MatchOr', ['patterns'], [[self.val(x) for x in nd.patterns]])]
+    );
+}
+
+impl JcirGenPass.exit_match_as(nd: uni.MatchAs) -> None {
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'MatchAs',
+                ['name', 'pattern'],
+                [nd.name.sym_name, self.val(nd.pattern) if nd.pattern else None]
+            )
+        ]
+    );
+}
+
+impl JcirGenPass.exit_match_wild(nd: uni.MatchWild) -> None {
+    self.set_out(nd, [self.nod('MatchAs', [], [])]);
+}
+
+impl JcirGenPass.exit_match_value(nd: uni.MatchValue) -> None {
+    self.set_out(nd, [self.nod('MatchValue', ['value'], [self.val(nd.value)])]);
+}
+
+impl JcirGenPass.exit_match_singleton(nd: uni.MatchSingleton) -> None {
+    self.set_out(nd, [self.nod('MatchSingleton', ['value'], [nd.value.lit_value])]);
+}
+
+impl JcirGenPass.exit_match_sequence(nd: uni.MatchSequence) -> None {
+    self.set_out(
+        nd,
+        [self.nod('MatchSequence', ['patterns'], [[self.val(x) for x in nd.values]])]
+    );
+}
+
+impl JcirGenPass.exit_match_mapping(nd: uni.MatchMapping) -> None {
+    map_keys: list = [];
+    map_patterns: list = [];
+    rest: (str | None) = None;
+    for i in nd.values {
+        if (
+            isinstance(i, uni.MatchKVPair)
+            and isinstance(i.key, uni.MatchValue)
+            and self.outs(i.key.value)
+            and self.outs(i.value)
+        ) {
+            map_keys.append(self.val(i.key.value));
+            map_patterns.append(self.val(i.value));
+        } elif isinstance(i, uni.MatchStar) {
+            rest = i.name.sym_name;
+        }
+    }
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'MatchMapping',
+                ['keys', 'patterns', 'rest'],
+                [map_keys, map_patterns, rest]
+            )
+        ]
+    );
+}
+
+impl JcirGenPass.exit_match_k_v_pair(nd: uni.MatchKVPair) -> None {
+    ;
+}
+
+impl JcirGenPass.exit_match_star(nd: uni.MatchStar) -> None {
+    self.set_out(nd, [self.nod('MatchStar', ['name'], [nd.name.sym_name])]);
+}
+
+impl JcirGenPass.exit_match_arch(nd: uni.MatchArch) -> None {
+    self.set_out(
+        nd,
+        [
+            self.nod(
+                'MatchClass',
+                ['cls', 'patterns', 'kwd_attrs', 'kwd_patterns'],
+                [
+                    self.val(nd.name),
+                    [self.val(x) for x in (nd.arg_patterns or [])],
+                    [
+                        x.key.sym_name
+                        for x in (nd.kw_patterns or [])
+                        if isinstance(x.key, uni.NameAtom)
+                    ],
+                    [self.val(x.value) for x in (nd.kw_patterns or [])]
+                ]
+            )
+        ]
+    );
 }
 
 impl JcirGenPass.exit_token(nd: uni.Token) -> None {
