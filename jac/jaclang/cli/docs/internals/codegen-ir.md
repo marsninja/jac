@@ -1,12 +1,17 @@
 # Compact Codegen IR (JCIR)
 
-Status: design plus reference implementation. This is the first lane 2
-deliverable of the zero-bytecode endgame (epic #8201): it fixes the Step 4
-shim's contract and is the proof that the intermediate annotated-state
-materializer is skippable at all. The format module, the Python reference
-shim, and the round-trip suite land together with this document; the sealed
-native producer and the generated native transcriber come later and must
-conform to the bytes specified here.
+Status: design plus reference implementation, plus the phase 1 producer.
+This is the first lane 2 deliverable of the zero-bytecode endgame (epic
+#8201): it fixes the Step 4 shim's contract and is the proof that the
+intermediate annotated-state materializer is skippable at all. The format
+module, the Python reference shim, and the round-trip suite landed
+together with this document; the phase 1 emitter pass
+(`jac0core/passes/jcir_gen_pass.jac`) now produces this format for the
+core language directly from the annotated unitree, verified against
+`pyast_gen` by the differential suite
+(`tests/compiler/test_jcir_gen_pass.jac`). The sealed native producer and
+the generated native transcriber come later and must conform to the bytes
+specified here.
 
 Note on location: the task brief suggested `docs/community/internals/`; the
 corpus's actual home for internal design docs is `docs/internals/` (beside
@@ -221,6 +226,37 @@ adds the jac node's `first_line` to inline Python, and the generated stub
 sources (interop stubs, sv-to-sv stubs, native test shims) keep their
 parse-relative 1..k line numbers with no offset.
 
+### 5.1 The deterministic loc-fill rule
+
+`pyast_gen` reaches for `ast3.fix_missing_locations` in exactly one place
+(hoisted lambda-derived defs). The emitter replaces that crutch with a
+construction invariant instead of a fill pass:
+
+- Every recipe node is created through one constructor (`nod`) that
+  requires a source jac node and stamps the four normalized values at
+  construction time, applying `sync()`'s normalization exactly
+  (`end_lineno` falls back to `first_line` unless strictly greater,
+  `end_col_offset` falls back to `col_start` unless strictly greater).
+- A node lowered from a real jac node carries that node's location.
+- A synthesized node with no dedicated jac node of its own (glue like
+  `Load`/`Store` contexts, operator singletons, `__executed` temporaries,
+  hoisted `FunctionDef` shells, preamble imports) inherits the location of
+  the jac node whose lowering created it: the pass's current node by
+  default, or an explicitly passed jac node where `pyast_gen` passes one
+  to `sync()`.
+- Consequence: a hoisted lambda def is fully located the moment it is
+  built (children from their own jac nodes, shell from the `LambdaExpr`),
+  so there is nothing left to fill and no fill pass exists. The
+  differential suite's lambda fixture asserts both tree equality against
+  `pyast_gen`'s `fix_missing_locations` output and that every
+  location-bearing node in the transcribed tree has a concrete
+  `lineno >= 1`.
+
+One writer convenience supports the rule without changing the wire
+format: `CodegenIrWriter.emit_loc_needed` skips the `OP_LOC` when the
+location register already holds the node's exact values, so runs of
+same-location nodes cost one `OP_LOC` as section 5 promises.
+
 ## 6. How diagnostics and the code object cross
 
 The crossing's production result is code objects plus diagnostics; the
@@ -310,20 +346,18 @@ assumed away.
    nodes with string constants: fully IR-encodable. The decision inputs
    (impl file paths, the `is_test` predicate from `ext_registry`) are
    producer-side facts.
-2. **Has-var `field()` wrapping.** Today the constant-vs-factory choice
-   tests `isinstance(value_expr, ast3.Constant)` on the *constructed* ast.
-   The producer must re-express this predicate on unitree facts (literal
-   Int/Float/String/Bool/Null/Ellipsis, and MultiString that merges to a
-   single constant). Behavior-preserving but not mechanical: flagged for
-   the emitter port checklist, covered by the end-to-end parity canary.
-3. **Hoisted lambdas and `fix_missing_locations`.** `pyast_gen` calls
-   `ast3.fix_missing_locations(func_def)` when hoisting a lambda-derived
-   def. JCIR has no such crutch; the producer must emit real `OP_LOC`s for
-   every node of the hoisted def. The deterministic replacement rule
-   (children inherit the enclosing jac node's location unless they have
-   their own) must be written down in the emitter and verified against the
-   parity corpus. This is the one place the line-mapping story requires
-   new producer logic rather than transport of existing values.
+2. **Has-var `field()` wrapping.** Resolved in the phase 1 emitter, and
+   more directly than predicted: the emitter's recipe tree preserves the
+   predicate exactly. The constant-vs-factory choice becomes "is the
+   value's recipe a `Constant` node", which is the same decision
+   `isinstance(value_expr, ast3.Constant)` makes on the constructed ast,
+   with no unitree re-derivation needed. Covered by the archetype fixture
+   in the differential suite.
+3. **Hoisted lambdas and `fix_missing_locations`.** Resolved: the
+   deterministic loc-fill rule is specified in section 5.1, implemented as
+   a construction invariant in `jcir_gen_pass` (no fill pass exists), and
+   verified by the differential suite's nested-lambda fixture (lambdas in
+   default arguments included).
 4. **Jsx lowering.** `PyJsxProcessor` makes real decisions (element
    lowering, attribute handling, text/expression children) but its output
    is ordinary `ast3` nodes built through `pass_ref.sync`, so the
@@ -364,12 +398,19 @@ assumed away.
 
 ## 10. Unresolved questions
 
-- **The `fix_missing_locations` replacement rule** (fidelity note 3) needs
-  a written spec in the emitter and a dedicated parity fixture with nested
-  lambdas in default arguments and decorators, where today's behavior is
-  the trickiest.
+- **The `fix_missing_locations` replacement rule** (fidelity note 3):
+  resolved, see section 5.1.
 - **Producer-side constant predicate** for has-var lowering (fidelity
-  note 2): re-derive from unitree, then prove equal on the corpus.
+  note 2): resolved, the recipe tree preserves the predicate directly.
+- **Marshal bytes are not a stable parity token.** Found while building
+  the differential suite: `marshal.dumps` sets a per-object `FLAG_REF`
+  bit based on the object's transient refcount at serialization time, so
+  two semantically identical code objects can marshal to different bytes
+  depending on the call shape around `dumps`. The end-to-end parity
+  canary must therefore compare code objects field by field (recursively
+  through `co_consts`) or normalize before comparing, never raw
+  `marshal.dumps` output from different call sites. The differential
+  suite's `code_diffs` helper is the reference comparison.
 - **`gen.py` consumers audit.** Believed tooling-only; the cutover PR must
   verify nothing in the production serve path reads `mod.gen.py` or
   `mod.gen.py_ast` after the crossing lands.
@@ -405,12 +446,28 @@ assumed away.
   keyword-apply trampoline through one `eval` of a two-argument lambda at
   first use. The generated native transcriber has no such constraint (it
   builds a kwargs dict through the C API).
+- `jac0core/passes/jcir_gen_pass.jac` (+impl): the phase 1 emitter pass.
+  Lane-portable jac with no CPython ast import anywhere; it ports
+  `pyast_gen`'s decisions method by method into recipe construction
+  (`CgNode` trees: class name, field names, field values, one normalized
+  location per node, `CgSplice` markers for `::py::` splices) and
+  serializes the finished module recipe through `CodegenIrWriter`. The
+  recipe tree is the emitter's working form; the wire format is unchanged.
+  Constructs outside phase 1 (jsx, walker and edge object-spatial
+  codegen, sem and interop manifest emission, match statements, async,
+  llm bodies, concurrency) raise a `NotImplementedError` naming the
+  construct and its source location, never silently skip.
 - Tests: `tests/compiler/test_codegen_ir.jac`, string-named, covering the
   full round trip (functions with args and defaults, assignments, calls, a
   class, if/for, f-string), `ast.dump` equality against the source tree,
   hand emission without `ast` on the producer seat, splice offsets,
   version refusal, unknown-opcode refusal, diagnostics transport, and
-  writer stack discipline.
+  writer stack discipline; plus `tests/compiler/test_jcir_gen_pass.jac`,
+  the differential suite that compiles fixtures through both codegen
+  lanes and asserts exact `ast.dump(include_attributes=True)` equality,
+  recursive code-object equality after `compile()`, and behavioral
+  equality under `exec`, including one real compiler source file
+  (`jac0core/srcloc.jac`) end to end.
 
 ## 12. Cutover fit
 
