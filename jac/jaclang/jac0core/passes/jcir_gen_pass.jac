@@ -1,3 +1,4 @@
+import html;
 import textwrap;
 import from typing { ClassVar }
 import from collections.abc { Sequence }
@@ -388,6 +389,13 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
     def exit_null(nd: uni.Null) -> None;
     def exit_ellipsis(nd: uni.Ellipsis) -> None;
     def exit_jsx_element(nd: uni.JsxElement) -> None;
+    def exit_jsx_element_name(nd: uni.JsxElementName) -> None;
+    def exit_jsx_spread_attribute(nd: uni.JsxSpreadAttribute) -> None;
+    def exit_jsx_normal_attribute(nd: uni.JsxNormalAttribute) -> None;
+    def exit_jsx_text(nd: uni.JsxText) -> None;
+    def exit_jsx_expression(nd: uni.JsxExpression) -> None;
+    def exit_jsx_slot(nd: uni.JsxSlot) -> None;
+    def exit_jsx_comment(nd: uni.JsxComment) -> None;
     def exit_semi(nd: uni.Semi) -> None;
     def exit_comment_token(nd: uni.CommentToken) -> None;
 }
