@@ -1,17 +1,19 @@
 # Compact Codegen IR (JCIR)
 
-Status: design plus reference implementation, plus the phase 1 producer.
-This is the first lane 2 deliverable of the zero-bytecode endgame (epic
-#8201): it fixes the Step 4 shim's contract and is the proof that the
-intermediate annotated-state materializer is skippable at all. The format
-module, the Python reference shim, and the round-trip suite landed
-together with this document; the phase 1 emitter pass
+Status: design plus reference implementation, plus the phase 1 and 2
+producer. This is the first lane 2 deliverable of the zero-bytecode
+endgame (epic #8201): it fixes the Step 4 shim's contract and is the
+proof that the intermediate annotated-state materializer is skippable at
+all. The format module, the Python reference shim, and the round-trip
+suite landed together with this document; the emitter pass
 (`jac0core/passes/jcir_gen_pass.jac`) now produces this format for the
-core language directly from the annotated unitree, verified against
+core language (phase 1) plus object-spatial codegen, match, and async
+(phase 2) directly from the annotated unitree, verified against
 `pyast_gen` by the differential suite
-(`tests/compiler/test_jcir_gen_pass.jac`). The sealed native producer and
-the generated native transcriber come later and must conform to the bytes
-specified here.
+(`tests/compiler/test_jcir_gen_pass.jac`). An opt-in pipeline flag
+(section 11.1) runs the whole codegen tail through this lane. The sealed
+native producer and the generated native transcriber come later and must
+conform to the bytes specified here.
 
 Note on location: the task brief suggested `docs/community/internals/`; the
 corpus's actual home for internal design docs is `docs/internals/` (beside
@@ -446,17 +448,29 @@ assumed away.
   keyword-apply trampoline through one `eval` of a two-argument lambda at
   first use. The generated native transcriber has no such constraint (it
   builds a kwargs dict through the C API).
-- `jac0core/passes/jcir_gen_pass.jac` (+impl): the phase 1 emitter pass.
+- `jac0core/passes/jcir_gen_pass.jac` (+impl): the emitter pass.
   Lane-portable jac with no CPython ast import anywhere; it ports
   `pyast_gen`'s decisions method by method into recipe construction
   (`CgNode` trees: class name, field names, field values, one normalized
   location per node, `CgSplice` markers for `::py::` splices) and
-  serializes the finished module recipe through `CodegenIrWriter`. The
-  recipe tree is the emitter's working form; the wire format is unchanged.
-  Constructs outside phase 1 (jsx, walker and edge object-spatial
-  codegen, sem and interop manifest emission, match statements, async,
-  llm bodies, concurrency) raise a `NotImplementedError` naming the
+  serializes the finished module recipe through `CodegenIrWriter`, also
+  stashing the container on the module's `gen.jcir` for the pipeline
+  consumer. The recipe tree is the emitter's working form; the wire
+  format is unchanged. Phase 2 added the object-spatial surface (walkers,
+  event signatures with `on_entry`/`on_exit` and `set_trigger`, visit
+  with else, disengage, report, skip, spawn, connect and disconnect
+  operators, edge reference chains via `GraphQuery`/`QHop`/`QPred`,
+  filter and assign comprehensions, typed context blocks, `root`), match
+  statements, and async (abilities, for, with, await, `__jac_async__`
+  archetypes). Constructs still outside scope (jsx, sem-string decorator
+  emission, interop manifest emission incl. native test shims, llm
+  bodies, concurrency flow/wait) raise a `NotImplementedError` naming the
   construct and its source location, never silently skip.
+- `jac0core/passes/jcir_bc_gen_pass.jac` (+impl): the shim-seat pipeline
+  pass. Reads `gen.jcir`, transcribes through the reference shim into
+  `gen.py_ast`, and compiles into `gen.py_bytecode`. It is the Python
+  side of the crossing (imports ast freely, never sealed) and makes no
+  codegen decisions.
 - Tests: `tests/compiler/test_codegen_ir.jac`, string-named, covering the
   full round trip (functions with args and defaults, assignments, calls, a
   class, if/for, f-string), `ast.dump` equality against the source tree,
@@ -468,6 +482,31 @@ assumed away.
   recursive code-object equality after `compile()`, and behavioral
   equality under `exec`, including one real compiler source file
   (`jac0core/srcloc.jac`) end to end.
+
+### 11.1 The JAC_CODEGEN=jcir pipeline flag
+
+Setting the environment variable `JAC_CODEGEN=jcir` makes
+`get_py_code_gen` (jac0core/compiler.jac) swap the Python codegen tail:
+
+- default tail: `PyastGenPass`, `PyJacAstLinkPass`, `PyBytecodeGenPass`
+- jcir tail: `JcirGenPass`, `JcirBytecodeGenPass`
+
+Under the flag, codegen decisions run through the emitter, the container
+crosses as bytes on `gen.jcir`, and the shim-seat pass rebuilds
+`gen.py_ast` and `gen.py_bytecode` from those bytes, so every downstream
+consumer of the standard artifacts keeps working. Two deliberate
+differences from the default tail:
+
+- `PyJacAstLinkPass` is absent: `jac_link` back-references are a tooling
+  concern that never crosses the production boundary (section 7), and the
+  shim-built tree correctly has none.
+- Constructs the emitter refuses (section 11) fail the compile loudly
+  instead of lowering; the flag is for the cross-lane parity canary and
+  development, not yet a supported default.
+
+The differential suite's pipeline test compiles the same source with and
+without the flag and asserts tree and code-object equality between the
+two lanes.
 
 ## 12. Cutover fit
 
