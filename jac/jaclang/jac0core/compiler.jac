@@ -40,7 +40,134 @@ import from jaclang.jac0core.passes {
     SymTabBuildPass,
     Transform
 }
+import from jaclang.jac0core.passes.transform { DiagnosticPolicy }
 import from jaclang.jac0core.program { JacProgram }
+
+"""Resolve a suppression policy from parsed project config data.
+
+Pure data resolution: token lists collapse to canonical diagnostic codes
+once, here at the boundary, so `DiagnosticPolicy.is_suppressed` stays a
+plain lookup a pass can evaluate mid-run without reaching for config.
+"""
+def diagnostic_policy_for(
+    config: any, extra_suppress_tokens: (list | None) = None
+) -> DiagnosticPolicy {
+    import from jaclang.jac0core.diagnostic_utils { resolve_diagnostic_tokens }
+    check = config.check if (config and config.check) else None;
+    tokens: list[str] = [];
+    if check?.suppress and check.suppress {
+        tokens = list(check.suppress);
+    }
+    if extra_suppress_tokens {
+        tokens.extend(extra_suppress_tokens);
+    }
+    resolved: list[str] = [];
+    if tokens {
+        (resolved, _unknown) = resolve_diagnostic_tokens(tokens);
+    }
+    categories: list[str] = (
+        list(check.suppress_categories)
+            if (check?.suppress_categories and check.suppress_categories)
+            else []
+    );
+    lint = check.lint if check?.lint else None;
+    return DiagnosticPolicy(
+        suppress_codes=resolved,
+        suppress_categories=categories,
+        lint_active=lint is not None,
+        lint_select=list(lint.select) if lint else [],
+        lint_ignore=list(lint.ignore) if lint else []
+    );
+}
+
+"""The program's effective suppression policy: project config plus the
+suppress tokens carried on its compile options."""
+def build_diagnostic_policy(prog: JacProgram) -> DiagnosticPolicy {
+    config: any = None;
+    try {
+        import from jaclang.project.config { get_config }
+        config = get_config();
+    } except Exception {
+        config = None;
+    }
+    opts = prog._compile_options;
+    extra: list[str] = (
+        list(opts.suppress_codes)
+            if (opts is not None and opts.suppress_codes)
+            else []
+    );
+    return diagnostic_policy_for(config, extra);
+}
+
+"""Deliver pass-accumulated alerts to the program ledger.
+
+The delivery boundary of the diagnostics-as-data flow: passes only append
+`Alert` objects to their local `errors_had` / `warnings_had` lists, and the
+driver lands the survivors here, applying the suppression policy once per
+alert. Emission order is preserved.
+"""
+def deliver_alerts(
+    errors: list,
+    warnings: list,
+    prog: JacProgram,
+    policy: (DiagnosticPolicy | None) = None
+) -> None {
+    pol = policy if policy is not None else build_diagnostic_policy(prog);
+    for alrt in errors {
+        if alrt.code is not None and pol.is_suppressed(alrt.code, alrt.loc) {
+            continue;
+        }
+        prog.errors_had.append(alrt);
+    }
+    for alrt in warnings {
+        if alrt.code is not None and pol.is_suppressed(alrt.code, alrt.loc) {
+            continue;
+        }
+        prog.warnings_had.append(alrt);
+    }
+}
+
+"""Run one pass and deliver its alerts to the program.
+
+The single construction path for `Transform` passes in both lanes: the
+driver stamps the pre-resolved suppression policy and hands the pass its
+accumulation lists, then delivers them after the pass body finishes. The
+lists are driver-owned so delivery also happens when the pass raises --
+`Transform.ice` records its alert even though the constructor never
+returns. A pass may replace its stamped policy during `postinit` (the
+auto-lint pass resolves config per module path); delivery honors the
+instance's policy when one survives.
+"""
+def run_pass(
+    pass_cls: type,
+    ir_in: any,
+    prog: JacProgram,
+    cancel_token: any = None,
+    policy: (DiagnosticPolicy | None) = None,
+    **kwargs: any
+) -> any {
+    pol = policy if policy is not None else build_diagnostic_policy(prog);
+    errors: list = [];
+    warnings: list = [];
+    inst: any = None;
+    try {
+        inst = pass_cls(
+            ir_in=ir_in,
+            prog=prog,
+            cancel_token=cancel_token,
+            policy=pol,
+            errors_had=errors,
+            warnings_had=warnings,
+            **kwargs
+        );
+    } finally {
+        eff = inst.policy
+            if (inst is not None and inst.policy is not None)
+            else pol;
+        deliver_alerts(errors, warnings, prog, eff);
+    }
+    return inst;
+}
 
 def get_symtab_ir_sched -> list[type[Transform[uni.Module, uni.Module]]] {
     return validate_schedule(

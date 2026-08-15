@@ -673,11 +673,12 @@ impl JacCompiler.parse_str(
     if (file_path.endswith('.py') or file_path.endswith('.pyi')) {
         import from jaclang.compiler.passes.main.pyast_load_pass { PyastBuildPass }
         parsed_ast = py_ast.parse(source_str);
-        py_ast_ret = PyastBuildPass(
-            ir_in=uni.PythonModuleAst(
+        py_ast_ret = run_pass(
+            PyastBuildPass,
+            uni.PythonModuleAst(
                 parsed_ast, orig_src=uni.Source(source_str, mod_path=file_path)
             ),
-            prog=target_program,
+            target_program,
             cancel_token=cancel_token
         );
         had_error = len(py_ast_ret.errors_had) > 0;
@@ -774,7 +775,7 @@ impl JacCompiler.parse_str(
     target_program.mod.hub[hub_key] = mod;
 
     mod.annex_mods = self.load_annex_modules(mod, target_program);
-    JacAnnexPass(ir_in=mod, prog=target_program);
+    run_pass(JacAnnexPass, mod, target_program);
     if run_codespace_infer {
         _opts = target_program._compile_options;
         _analysis_only = _opts is not None and _opts.no_cgen;
@@ -1263,7 +1264,7 @@ impl JacCompiler.build(
     actual_program = self._resolve_program(file_path, target_program);
     options = CompileOptions(type_check=type_check);
     mod_targ = self.compile(file_path, actual_program, use_str, options=options);
-    SemanticAnalysisPass(ir_in=mod_targ, prog=actual_program);
+    run_pass(SemanticAnalysisPass, mod_targ, actual_program);
     return mod_targ;
 }
 
@@ -1283,6 +1284,7 @@ impl JacCompiler.run_schedule(
         preprovided=provided,
         origin=(f"schedule for module {mod.loc.mod_path if mod.loc else mod.name}")
     );
+    _policy = build_diagnostic_policy(target_program);
     for current_pass in passes {
         if (cancel_token and cancel_token.is_set()) {
             break;
@@ -1290,7 +1292,13 @@ impl JacCompiler.run_schedule(
         if current_pass is SymTabBuildPass {
             self.resolve_absorb_imports(mod, target_program);
         }
-        current_pass(ir_in=mod, prog=target_program, cancel_token=cancel_token);
+        run_pass(
+            current_pass,
+            mod,
+            target_program,
+            cancel_token=cancel_token,
+            policy=_policy
+        );
         for _prov in (getattr(current_pass, 'PROVIDES', ()) or ()) {
             provided.add(_prov);
         }
@@ -1402,7 +1410,7 @@ impl JacCompiler.jac_file_formatter(
         return prog;
     }
     for pass_cls in get_format_sched(auto_lint=auto_lint) {
-        current_mod = pass_cls(ir_in=current_mod, prog=prog).ir_out;
+        current_mod = run_pass(pass_cls, current_mod, prog).ir_out;
     }
     prog.mod = uni.ProgramModule(main_mod=current_mod);
     return prog;
@@ -1416,7 +1424,7 @@ impl JacCompiler.jac_str_formatter(
         return prog;
     }
     for pass_cls in get_format_sched(auto_lint=auto_lint) {
-        current_mod = pass_cls(ir_in=current_mod, prog=prog).ir_out;
+        current_mod = run_pass(pass_cls, current_mod, prog).ir_out;
     }
     prog.mod = uni.ProgramModule(main_mod=current_mod);
     return prog;
@@ -1431,7 +1439,7 @@ impl JacCompiler.jac_file_linter(file_path: str) -> JacProgram {
         return prog;
     }
     for pass_cls in get_lint_sched() {
-        current_mod = pass_cls(ir_in=current_mod, prog=prog).ir_out;
+        current_mod = run_pass(pass_cls, current_mod, prog).ir_out;
     }
     prog.mod = uni.ProgramModule(main_mod=current_mod);
     return prog;
