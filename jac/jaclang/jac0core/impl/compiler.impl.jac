@@ -1023,6 +1023,8 @@ impl JacCompiler._compile_once(
     had_parse_errors = len(actual_program.errors_had) > had_parse_errors;
 
     cur_mod_path = os.path.normpath(file_path);
+    reentrant_import = (actual_program is self._internal_program)
+        and module_import_in_flight(file_path);
     blocking_errs_pre_ir = self._count_module_blocking_errors(
         actual_program, cur_mod_path
     );
@@ -1034,13 +1036,18 @@ impl JacCompiler._compile_once(
             cancel_token=options.cancel_token
         );
     } else {
+        _ir_passes = (
+            get_bootstrap_ir_sched()
+                if reentrant_import
+                else get_ir_gen_sched(
+                    is_internal=(actual_program is self._internal_program),
+                    gen_mtir=not options.no_cgen
+                )
+        );
         self.run_schedule(
             mod=mod_targ,
             target_program=actual_program,
-            passes=get_ir_gen_sched(
-                is_internal=(actual_program is self._internal_program),
-                gen_mtir=not options.no_cgen
-            ),
+            passes=_ir_passes,
             cancel_token=options.cancel_token
         );
     }
@@ -1253,13 +1260,18 @@ impl JacCompiler._compile_once(
         import from jaclang.jac0core.passes.module_codegen_pass { ModuleCodegenPass }
         needs_native = is_native_mod
             or ModuleCodegenPass.has_native_context_stmts(mod_targ);
+        _cgen_passes = (
+            [PyastGenPass, PyBytecodeGenPass]
+                if reentrant_import
+                else get_py_code_gen(
+                    native=needs_native,
+                    provided=actual_program._analyses_run.get(id(mod_targ), set())
+                )
+        );
         self.run_schedule(
             mod=mod_targ,
             target_program=actual_program,
-            passes=get_py_code_gen(
-                native=needs_native,
-                provided=actual_program._analyses_run.get(id(mod_targ), set())
-            ),
+            passes=_cgen_passes,
             cancel_token=options.cancel_token
         );
         if mod_targ.decided_codespace == 'native' {
