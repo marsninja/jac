@@ -1109,7 +1109,7 @@ def seal_timing_report(rows: list[tuple]) -> list[str] {
             );
         }
         lines.append(
-            f"    {str(r[0]).ljust(width)}  {str(r[1]).ljust(8)}  {r[2]:7.1f}s  "
+            f"    {str(r[0]).ljust(width)}  {str(r[1]).ljust(8)}  {r[2]:8.2f}s  "
             f"{share:4.1f}%  {detail}"
         );
     }
