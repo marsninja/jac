@@ -83,7 +83,7 @@ impl JcirGenPass.enter_node(nd: UniNode) -> None {
             }
         }
         if first_native {
-            self._gen_native_interop_stubs(nd);
+            self._interop_stub_node = nd;
         }
         self.prune();
         return;
@@ -723,6 +723,10 @@ impl JcirGenPass.exit_module(nd: Module) -> None {
     }
     body_items.extend(self.preamble);
     body_items.extend(self._drain_module_hoists());
+    stub_node = self._interop_stub_node;
+    if stub_node is not None {
+        self._gen_native_interop_stubs(stub_node);
+    }
     reg_map = self._native_import_registration_map();
     emitted: set[str] = set();
     for item in merged_body {
