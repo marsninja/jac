@@ -589,7 +589,7 @@ def skip_evens(n: Plain) -> list[Branded] {
         if k % 2 == 0 {
             continue;
         }
-        out.append(k);
+        out.append(Branded(k));
     }
     return out;
 }

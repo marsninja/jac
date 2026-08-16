@@ -68,6 +68,7 @@ import from jaclang.compiler.passes.main.layout_pass {
 import from jaclang.jac0core.sealed { native_artifact_for }
 import from jaclang.utils.precompile_bytecode {
     _UNITREE_SEAM_WAIVERS,
+    NATIVE_SEAL_ROOTS,
     seal_waiver_names
 }
 
@@ -84,6 +85,7 @@ glob PKG_PATH = Path(jaclang.__file__).parent,
          "jac0core/passes/semantic_analysis_pass.jac",
          "compiler/passes/main/sem_def_match_pass.jac"
      ),
+     JCIR_ROOT = "jac0core/passes/jcir_gen_pass.jac",
      SYM_TAB_ROOT = "jac0core/passes/sym_tab_build_pass.jac",
      # Documented carve-outs of the receiver-blind accessor rule: `x.a` adds
      # every class's `a` accessor, so a live read of a polymorphic slot flags
@@ -94,6 +96,10 @@ glob PKG_PATH = Path(jaclang.__file__).parent,
      # (now live) MultiString decoder; the two entries below decode values
      # (a `type` object, `...`) that a MultiString can never hold.
      ACCESSOR_ARGUED: dict[(str, tuple)] = {
+         "jac0core/passes/jcir_gen_pass.jac": (
+             "BuiltinType.lit_value.__get__",
+             "Ellipsis.lit_value.__get__"
+         ),
          "compiler/passes/main/sem_def_match_pass.jac": (
              "BuiltinType.lit_value.__get__",
              "Ellipsis.lit_value.__get__"
@@ -542,6 +548,68 @@ test "wave-2 roots: no waived seam is native-reachable beyond the argued slots" 
             f"(or that stopped being waived) -- drop them: {stale_argued}"
         );
     }
+}
+
+
+test "the jcir walk reaches the emitter's own machinery" {
+    (seen, _waived) = pass_reachable(JCIR_ROOT);
+    for name in (
+        "JcirGenPass.resolve_stmt_block",
+        "JcirGenPass.val",
+        "CodegenIrWriter.emit_node",
+        "CgNode.get"
+    ) {
+        assert name in seen , (
+            f"{JCIR_ROOT}: '{name}' is missing from the reachable set -- the "
+            "walk found nothing there, so a clean waiver verdict would be "
+            "vacuous"
+        );
+    }
+}
+
+
+test "jcir stays out of the seal while its stubs are reachable" {
+    # The emitter's refusal, pinned so it self-clears. Three waived seams
+    # are reachable through native calls from the live entry surface:
+    # `enter_node` calls `_gen_native_interop_stubs` on the first
+    # native-context node in a module, `_emit_lambda_expr_body` self-calls
+    # `exit_func_call`, and live methods read `self.ir_in.gen` to reach the
+    # interop manifest, which dispatches unitree's waived `gen` accessor. A
+    # sealed emitter would abort on the first module taking any of the
+    # three, so the root is refused rather than sealed.
+    #
+    # The two `lit_value` accessors the walk also flags are carve-outs of
+    # the receiver-blind accessor rule, argued in ACCESSOR_ARGUED: the only
+    # live read is `exit_string`'s `nd.lit_value` on a parser-built
+    # `String`, so the only decoder a string can dispatch is the live one.
+    assert JCIR_ROOT not in NATIVE_SEAL_ROOTS , (
+        f"{JCIR_ROOT} joined NATIVE_SEAL_ROOTS while its waived stubs are "
+        "still natively reachable; a sealed build would abort on the first "
+        "module with a native-context node or a lambda body"
+    );
+    (seen, waived) = pass_reachable(JCIR_ROOT);
+    argued = set(ACCESSOR_ARGUED.get(JCIR_ROOT, ()));
+    hit = sorted(
+        name
+        for name in waived
+        if name in seen and name not in argued
+    );
+    assert hit , (
+        f"{JCIR_ROOT}: no waived seam is reachable any more, so the refusal "
+        "is stale: add the root back to NATIVE_SEAL_ROOTS, drop its entry "
+        "from NATIVE_SEAL_REFUSED_ROOTS, and restore the census "
+        "registration pin"
+    );
+    expected = [
+        "JcirGenPass._gen_native_interop_stubs",
+        "JcirGenPass.exit_func_call",
+        "UniNode.gen.__get__"
+    ];
+    assert hit == expected , (
+        f"{JCIR_ROOT}: the reachable waived set moved. It was {expected} and "
+        f"is now {hit}. A name that left is progress and should shrink this "
+        "pin; a name that arrived is a new abort path"
+    );
 }
 
 

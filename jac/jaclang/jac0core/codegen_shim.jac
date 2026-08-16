@@ -1,5 +1,6 @@
 import ast;
 import marshal;
+import struct;
 import sys;
 
 import from jaclang.jac0core.codegen_ir {
@@ -8,7 +9,6 @@ import from jaclang.jac0core.codegen_ir {
     CirModule,
     CodegenIrFormatError,
     CodegenIrVersionError,
-    decode_ops,
     DIAG_ERROR,
     OP_BYTES,
     OP_ELLIPSIS,
@@ -16,6 +16,7 @@ import from jaclang.jac0core.codegen_ir {
     OP_FALSE,
     OP_FLOAT,
     OP_INT,
+    OP_INT_BIG,
     OP_LIST,
     OP_LOC,
     OP_NODE,
@@ -24,7 +25,135 @@ import from jaclang.jac0core.codegen_ir {
     OP_STR,
     OP_TRUE,
     OP_TUPLE,
-    read_container
+    read_container,
+    _r_svarint,
+    _r_varint
+}
+
+def decode_ops(code: bytes, container: CirContainer) -> list {
+    ops: list = [];
+    pos = 0;
+    loc_l1 = 0;
+    loc_c1 = 0;
+    loc_l2 = 0;
+    loc_c2 = 0;
+    ended = False;
+    while pos < len(code) {
+        if ended {
+            raise CodegenIrFormatError(
+                f"{len(code) - pos} bytes follow OP_END in a module stream"
+            );
+        }
+        op = code[pos];
+        at = pos;
+        pos += 1;
+        if op == OP_NONE or op == OP_TRUE or op == OP_FALSE or op == OP_ELLIPSIS {
+            ops.append((op, ));
+        } elif op == OP_INT {
+            (v, pos) = _r_svarint(code, pos, "OP_INT operand");
+            ops.append((OP_INT, v, ));
+        } elif op == OP_INT_BIG {
+            if pos >= len(code) {
+                raise CodegenIrFormatError(
+                    "truncated stream: OP_INT_BIG sign byte missing"
+                );
+            }
+            sign = code[pos];
+            pos += 1;
+            (nbytes, pos) = _r_varint(code, pos, "OP_INT_BIG length");
+            if pos + nbytes > len(code) {
+                raise CodegenIrFormatError(
+                    "truncated stream: OP_INT_BIG magnitude runs past the end"
+                );
+            }
+            mag = int.from_bytes(code[pos:pos + nbytes], "little");
+            pos += nbytes;
+            ops.append((OP_INT, -mag if sign else mag, ));
+        } elif op == OP_FLOAT {
+            if pos + 8 > len(code) {
+                raise CodegenIrFormatError(
+                    "truncated stream: OP_FLOAT operand runs past the end"
+                );
+            }
+            (v, ) = struct.unpack("<d", code[pos:pos + 8]);
+            pos += 8;
+            ops.append((OP_FLOAT, v, ));
+        } elif op == OP_STR {
+            (r, pos) = _r_varint(code, pos, "OP_STR ref");
+            if r >= len(container.strings) {
+                raise CodegenIrFormatError(
+                    f"OP_STR ref {r} is outside the string pool"
+                );
+            }
+            ops.append((OP_STR, container.strings[r], ));
+        } elif op == OP_BYTES {
+            (n, pos) = _r_varint(code, pos, "OP_BYTES length");
+            if pos + n > len(code) {
+                raise CodegenIrFormatError(
+                    "truncated stream: OP_BYTES body runs past the end"
+                );
+            }
+            ops.append((OP_BYTES, code[pos:pos + n], ));
+            pos += n;
+        } elif op == OP_LIST or op == OP_TUPLE {
+            (n, pos) = _r_varint(code, pos, "aggregate arity");
+            ops.append((op, n, ));
+        } elif op == OP_NODE {
+            (cref, pos) = _r_varint(code, pos, "OP_NODE class ref");
+            if cref >= len(container.class_names) {
+                raise CodegenIrFormatError(
+                    f"OP_NODE class ref {cref} is outside the class table"
+                );
+            }
+            (nk, pos) = _r_varint(code, pos, "OP_NODE field count");
+            krefs: list[int] = [];
+            j = 0;
+            while j < nk {
+                (kr, pos) = _r_varint(code, pos, "OP_NODE key ref");
+                if kr >= len(container.key_names) {
+                    raise CodegenIrFormatError(
+                        f"OP_NODE key ref {kr} is outside the key table"
+                    );
+                }
+                krefs.append(kr);
+                j += 1;
+            }
+            ops.append((OP_NODE, cref, krefs, ));
+        } elif op == OP_LOC {
+            (d1, pos) = _r_svarint(code, pos, "OP_LOC first_line delta");
+            (d2, pos) = _r_svarint(code, pos, "OP_LOC col_start delta");
+            (d3, pos) = _r_svarint(code, pos, "OP_LOC last_line delta");
+            (d4, pos) = _r_svarint(code, pos, "OP_LOC col_end delta");
+            loc_l1 += d1;
+            loc_c1 += d2;
+            loc_l2 += d3;
+            loc_c2 += d4;
+            ops.append((OP_LOC, loc_l1, loc_c1, loc_l2, loc_c2, ));
+        } elif op == OP_PARSE_SPLICE {
+            (r, pos) = _r_varint(code, pos, "OP_PARSE_SPLICE source ref");
+            if r >= len(container.strings) {
+                raise CodegenIrFormatError(
+                    f"OP_PARSE_SPLICE ref {r} is outside the string pool"
+                );
+            }
+            (off, pos) = _r_varint(code, pos, "OP_PARSE_SPLICE line offset");
+            ops.append((OP_PARSE_SPLICE, container.strings[r], off, ));
+        } elif op == OP_END {
+            ops.append((OP_END, ));
+            ended = True;
+        } else {
+            raise CodegenIrFormatError(
+                f"unknown opcode {op} at byte {at} of a module stream: this "
+                f"container claims format version {container.format_version} "
+                "but uses an instruction this runtime does not know; refusing "
+                "to guess"
+            );
+        }
+    }
+    if not ended {
+        raise CodegenIrFormatError("module stream has no OP_END");
+    }
+    return ops;
 }
 
 glob _KW_CALL_CACHE: list = [];

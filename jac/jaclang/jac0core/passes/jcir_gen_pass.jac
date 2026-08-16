@@ -119,6 +119,7 @@ import from jaclang.jac0core.unitree {
     TypedCtxBlock,
     UnaryExpr,
     UniNode,
+    UniScopeNode,
     VisitStmt,
     WhileStmt,
     WithStmt,
@@ -133,7 +134,6 @@ import from jaclang.jac0core.constant {
 import from jaclang.jac0core.constant { Constants as Con }
 import from jaclang.jac0core.constant { Tokens as Tok }
 
-glob TOK_MEMBER_NAMES: frozenset = frozenset(member.name for member in Tok);
 import from jaclang.jac0core.codegen_ir { CodegenIrWriter }
 import from jaclang.jac0core.codeinfo { BoundaryTypeInfo, InteropBinding }
 import from jaclang.jac0core.jcir_facts {
@@ -155,65 +155,73 @@ import from jaclang.jac0core.diagnostics {
     E5098
 }
 
-glob TOKEN_CLS_MAP: dict[(Tok, str)] = {
-         Tok.KW_AND: 'And',
-         Tok.KW_OR: 'Or',
-         Tok.PLUS: 'Add',
-         Tok.ADD_EQ: 'Add',
-         Tok.BW_AND: 'BitAnd',
-         Tok.BW_AND_EQ: 'BitAnd',
-         Tok.BW_OR: 'BitOr',
-         Tok.BW_OR_EQ: 'BitOr',
-         Tok.BW_XOR: 'BitXor',
-         Tok.BW_XOR_EQ: 'BitXor',
-         Tok.DIV: 'Div',
-         Tok.DIV_EQ: 'Div',
-         Tok.FLOOR_DIV: 'FloorDiv',
-         Tok.FLOOR_DIV_EQ: 'FloorDiv',
-         Tok.LSHIFT: 'LShift',
-         Tok.LSHIFT_EQ: 'LShift',
-         Tok.MOD: 'Mod',
-         Tok.MOD_EQ: 'Mod',
-         Tok.STAR_MUL: 'Mult',
-         Tok.MUL_EQ: 'Mult',
-         Tok.DECOR_OP: 'MatMult',
-         Tok.MATMUL_EQ: 'MatMult',
-         Tok.STAR_POW: 'Pow',
-         Tok.STAR_POW_EQ: 'Pow',
-         Tok.RSHIFT: 'RShift',
-         Tok.RSHIFT_EQ: 'RShift',
-         Tok.MINUS: 'Sub',
-         Tok.SUB_EQ: 'Sub',
-         Tok.BW_NOT: 'Invert',
-         Tok.NOT: 'Not',
-         Tok.EQ: 'NotEq',
-         Tok.EE: 'Eq',
-         Tok.GT: 'Gt',
-         Tok.GTE: 'GtE',
-         Tok.KW_IN: 'In',
-         Tok.KW_IS: 'Is',
-         Tok.KW_ISN: 'IsNot',
-         Tok.LT: 'Lt',
-         Tok.LTE: 'LtE',
-         Tok.NE: 'NotEq',
-         Tok.KW_NIN: 'NotIn'
+glob TOKEN_CLS_BY_NAME: dict[(str, str)] = {
+         'KW_AND': 'And',
+         'KW_OR': 'Or',
+         'PLUS': 'Add',
+         'ADD_EQ': 'Add',
+         'BW_AND': 'BitAnd',
+         'BW_AND_EQ': 'BitAnd',
+         'BW_OR': 'BitOr',
+         'BW_OR_EQ': 'BitOr',
+         'BW_XOR': 'BitXor',
+         'BW_XOR_EQ': 'BitXor',
+         'DIV': 'Div',
+         'DIV_EQ': 'Div',
+         'FLOOR_DIV': 'FloorDiv',
+         'FLOOR_DIV_EQ': 'FloorDiv',
+         'LSHIFT': 'LShift',
+         'LSHIFT_EQ': 'LShift',
+         'MOD': 'Mod',
+         'MOD_EQ': 'Mod',
+         'STAR_MUL': 'Mult',
+         'MUL_EQ': 'Mult',
+         'DECOR_OP': 'MatMult',
+         'MATMUL_EQ': 'MatMult',
+         'STAR_POW': 'Pow',
+         'STAR_POW_EQ': 'Pow',
+         'RSHIFT': 'RShift',
+         'RSHIFT_EQ': 'RShift',
+         'MINUS': 'Sub',
+         'SUB_EQ': 'Sub',
+         'BW_NOT': 'Invert',
+         'NOT': 'Not',
+         'EQ': 'NotEq',
+         'EE': 'Eq',
+         'GT': 'Gt',
+         'GTE': 'GtE',
+         'KW_IN': 'In',
+         'KW_IS': 'Is',
+         'KW_ISN': 'IsNot',
+         'LT': 'Lt',
+         'LTE': 'LtE',
+         'NE': 'NotEq',
+         'KW_NIN': 'NotIn'
      },
-     UNARY_CLS_MAP: dict[(Tok, str)] = {
-         Tok.NOT: 'Not',
-         Tok.BW_NOT: 'Invert',
-         Tok.PLUS: 'UAdd',
-         Tok.MINUS: 'USub'
+     UNARY_CLS_BY_NAME: dict[(str, str)] = {
+         'NOT': 'Not',
+         'BW_NOT': 'Invert',
+         'PLUS': 'UAdd',
+         'MINUS': 'USub'
      };
 
-obj CgNode {
+glob EDGE_DIR_NAMES: dict[(int, str)] = {
+         int(EdgeDir.IN): 'IN',
+         int(EdgeDir.OUT): 'OUT',
+         int(EdgeDir.ANY): 'ANY'
+     };
+
+obj CgItem { }
+
+obj CgNode(CgItem) {
     has cls: str,
-        keys: list,
+        keys: list[str],
         vals: list,
         l1: int = 0,
         c1: int = 0,
         l2: int = 0,
         c2: int = 0,
-        jac_src: any = None;
+        jac_src: (UniNode | None) = None;
 
     def get(key: str) -> any {
         i = 0;
@@ -244,10 +252,10 @@ obj CgNode {
     }
 }
 
-obj CgSplice {
+obj CgSplice(CgItem) {
     has src: str,
         offset: int = 0,
-        bound_names: list = [];
+        bound_names: list[str] = [];
 }
 
 def write_ir_value(w: CodegenIrWriter, v: object) {
@@ -284,8 +292,7 @@ def write_ir_value(w: CodegenIrWriter, v: object) {
         w.emit_list(len(v));
     } else {
         raise ValueError(
-            "JCIR emitter produced a value outside the v1 constant "
-                + f"domain: {type(v).__name__}"
+            "JCIR emitter produced a value outside the v1 constant domain"
         );
     }
 }
@@ -298,24 +305,21 @@ def module_container_bytes(mod_path: str, root_node: CgNode) -> bytes {
     return w.to_bytes();
 }
 
-obj JcirGenPass(BaseAstGenPass[CgNode]) {
+obj JcirGenPass(BaseAstGenPass[CgItem]) {
     has already_added: list[str] = [],
         jaclib_imports: set[str] postinit,
         builtin_imports: set[str] postinit,
         typing_imports: set[str] postinit,
         _lambda_counter: int = 0,
-        _hoist_frames: list[list] postinit,
-        preamble: list postinit,
-        _sink: dict[UniNode, list] postinit,
+        _hoist_frames: list[list[CgNode]] postinit,
+        preamble: list[CgItem] postinit,
+        _sink: dict[UniNode, list[CgItem]] postinit,
         _module_root: (CgNode | None) = None,
         _module_path: str = "";
 
     with entry { }
 
-    @classmethod
     def _get_builtin_names -> set[str];
-
-    @classmethod
     def _get_ambient_typing_names -> set[str];
 
     def postinit -> None;
@@ -324,15 +328,23 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
     def _is_native_ext_module -> bool;
     def _refuse(nd: (UniNode | None), construct: str) -> None;
     def nod(
-        cls_name: str, keys: list, vals: list, jac_node: (UniNode | None) = None
+        cls_name: str, keys: list[str], vals: list, jac_node: (UniNode | None) = None
     ) -> CgNode;
 
     def nod_loc(
-        cls_name: str, keys: list, vals: list, l1: int, c1: int, l2: int, c2: int
+        cls_name: str,
+        keys: list[str],
+        vals: list,
+        l1: int,
+        c1: int,
+        l2: int,
+        c2: int
     ) -> CgNode;
 
-    def outs(nd: UniNode) -> list;
-    def set_out(nd: UniNode, items: list) -> None;
+    def _flatten_ast_list(items: list[CgItem | list[CgItem] | None]) -> list[CgItem];
+
+    def outs(nd: UniNode) -> list[CgItem];
+    def set_out(nd: UniNode, items: list[CgItem]) -> None;
     def val(nd: UniNode) -> CgNode;
     def const_of(value: any, jac_node: (UniNode | None) = None) -> CgNode;
     def name_load(name_id: str, jac_node: (UniNode | None) = None) -> CgNode;
@@ -349,10 +361,11 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
     def _ancestor_is_one_of(nd: (UniNode | None), roots: list[UniNode]) -> bool;
 
     def _split_scope_hoists(
-        hoists: list, sig_roots: list[UniNode]
-    ) -> tuple[(list, list)];
+        hoists: list[CgNode], sig_roots: list[UniNode]
+    ) -> tuple[(list[CgNode], list[CgNode])];
 
-    def _drain_module_hoists -> list;
+    def _drain_module_hoists -> list[CgNode];
+    def _docstring_offset(body: list[CgItem]) -> int;
     def _report_leaked_hoisted_lambdas -> None;
     def _function_expr_from_def(func_def: CgNode, jac_node: UniNode) -> CgNode;
     def _get_sem_decorator(nd: UniNode) -> (CgNode | None);
@@ -388,7 +401,7 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
     def _query_filter_kws(fc: FilterCompr, type_arg: str, preds_arg: str) -> list;
     def _recipe_contains_root(v: any) -> bool;
     def resolve_switch_pattern(pattern: MatchPattern, target: Expr) -> CgNode;
-    def resolve_switch_stmt(nd: SwitchStmt) -> list;
+    def resolve_switch_stmt(nd: SwitchStmt) -> list[CgItem];
     def resolve_stmt_block(
         nd:
             (
@@ -398,14 +411,18 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
                 | None
             ),
         doc: (String | None) = None
-    ) -> list;
+    ) -> list[CgItem];
 
-    def scope_directive_stmts(scopes: list) -> list;
+    def scope_directive_stmts(scopes: list[UniScopeNode | None]) -> list[CgNode];
     def _resolve_self_type(nd: Name) -> (CgNode | None);
     def _is_in_type_annotation(nd: UniNode) -> bool;
     def _is_descendant_of(nd: UniNode, ancestor: UniNode) -> bool;
     def gen_call_args(nd: FuncCall) -> tuple[(list, list)];
-    def _delete_targets(nd: DeleteStmt) -> list;
+    def _delete_targets(nd: DeleteStmt) -> list[CgNode];
+    def _delete_ctx_targets(
+        targets: list[CgNode], ctx_cls: str
+    ) -> list[CgNode];
+
     def ir_bytes -> bytes;
     def exit_sub_tag(nd: SubTag) -> None;
     def exit_module(nd: Module) -> None;
@@ -471,6 +488,7 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
     def exit_unary_expr(nd: UnaryExpr) -> None;
     def _emit_jobj_ref(nd: UnaryExpr) -> None;
     def exit_if_else_expr(nd: IfElseExpr) -> None;
+    def _multi_string_pieces(str_seq: Sequence[UniNode]) -> list;
     def exit_multi_string(nd: MultiString) -> None;
     def exit_f_string(nd: FString) -> None;
     def exit_formatted_value(nd: FormattedValue) -> None;
