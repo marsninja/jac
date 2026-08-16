@@ -1,49 +1,17 @@
 @classmethod
 impl JcirGenPass._get_builtin_names(cls: any) -> set[str] {
     if (cls._builtin_names is None) {
-        try {
-            import jaclang.runtimelib.builtin as builtin_mod;
-            cls._builtin_names = set(builtin_mod.__all__);
-        } except (ImportError, AttributeError) {
-            return set();
-        }
+        cls._builtin_names = set(JCIR_BUILTIN_NAMES);
     }
     return cls._builtin_names;
 }
 
 @classmethod
 impl JcirGenPass._get_ambient_typing_names(cls: any) -> set[str] {
-    if (cls._ambient_typing_names is not None) {
-        return cls._ambient_typing_names;
+    if (cls._ambient_typing_names is None) {
+        cls._ambient_typing_names = set(JCIR_AMBIENT_TYPING_NAMES);
     }
-    import os;
-    stub_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-        "compiler",
-        "type_system",
-        "typing_ambient.pyi"
-    );
-    names: set[str] = set();
-    try {
-        with open(stub_path, encoding="utf-8") as f {
-            text = f.read();
-        }
-        marker = text.find("__all__");
-        open_b = text.find("[", marker) if marker >= 0 else -1;
-        close_b = text.find("]", open_b) if open_b >= 0 else -1;
-        if (open_b >= 0 and close_b > open_b) {
-            for piece in text[open_b + 1:close_b].split(",") {
-                entry = piece.strip();
-                if (len(entry) >= 2 and entry[0] in "'\"" and entry[-1] == entry[0]) {
-                    names.add(entry[1:-1]);
-                }
-            }
-        }
-    } except OSError {
-        names = set();
-    }
-    cls._ambient_typing_names = names;
-    return names;
+    return cls._ambient_typing_names;
 }
 
 impl JcirGenPass.postinit -> None {
@@ -78,7 +46,7 @@ impl JcirGenPass._is_native_ext_module -> bool {
     return self.ir_in is not None and self.ir_in.decided_codespace == 'native';
 }
 
-impl JcirGenPass._refuse(nd: (uni.UniNode | None), construct: str) -> None {
+impl JcirGenPass._refuse(nd: (UniNode | None), construct: str) -> None {
     target = nd if nd is not None else self.cur_node;
     where = '';
     if (target is not None and target.loc is not None) {
@@ -93,16 +61,16 @@ impl JcirGenPass._refuse(nd: (uni.UniNode | None), construct: str) -> None {
     );
 }
 
-impl JcirGenPass.enter_node(nd: uni.UniNode) -> None {
-    if (isinstance(nd, uni.Module) and (nd is not self.ir_in)) {
+impl JcirGenPass.enter_node(nd: UniNode) -> None {
+    if (isinstance(nd, Module) and (nd is not self.ir_in)) {
         self.prune();
         return;
     }
     if (
-        isinstance(nd, uni.ContextAwareNode)
+        isinstance(nd, ContextAwareNode)
         and (nd.code_context == CodeContext.NATIVE)
-        and ((nd.parent is None) or isinstance(nd.parent, uni.Module))
-        and not isinstance(nd, (uni.Import, uni.Test))
+        and ((nd.parent is None) or isinstance(nd.parent, Module))
+        and not isinstance(nd, (Import, Test))
         and not self._is_native_ext_module()
     ) {
         first_native = True;
@@ -111,9 +79,9 @@ impl JcirGenPass.enter_node(nd: uni.UniNode) -> None {
                 break;
             }
             if (
-                isinstance(sib, uni.ContextAwareNode)
+                isinstance(sib, ContextAwareNode)
                 and sib.code_context == CodeContext.NATIVE
-                and not isinstance(sib, uni.Import)
+                and not isinstance(sib, Import)
             ) {
                 first_native = False;
                 break;
@@ -126,16 +94,16 @@ impl JcirGenPass.enter_node(nd: uni.UniNode) -> None {
         return;
     }
     if (
-        isinstance(nd, uni.ContextAwareNode)
+        isinstance(nd, ContextAwareNode)
         and (nd.code_context == CodeContext.CLIENT)
         and not nd.codespace_dual
-        and ((nd.parent is None) or isinstance(nd.parent, uni.Module))
+        and ((nd.parent is None) or isinstance(nd.parent, Module))
     ) {
         self.prune();
         return;
     }
     if (
-        isinstance(nd, uni.Import)
+        isinstance(nd, Import)
         and nd.code_context == CodeContext.NATIVE
         and (not nd.items)
     ) {
@@ -145,29 +113,29 @@ impl JcirGenPass.enter_node(nd: uni.UniNode) -> None {
     super.enter_node(nd);
 }
 
-impl JcirGenPass.exit_node(nd: uni.UniNode) -> None {
-    if (isinstance(nd, uni.Module) and (nd is not self.ir_in)) {
+impl JcirGenPass.exit_node(nd: UniNode) -> None {
+    if (isinstance(nd, Module) and (nd is not self.ir_in)) {
         return;
     }
     if (
-        isinstance(nd, uni.ContextAwareNode)
+        isinstance(nd, ContextAwareNode)
         and (nd.code_context == CodeContext.CLIENT)
         and not nd.codespace_dual
-        and ((nd.parent is None) or isinstance(nd.parent, uni.Module))
+        and ((nd.parent is None) or isinstance(nd.parent, Module))
     ) {
         return;
     }
     if (
-        isinstance(nd, uni.ContextAwareNode)
+        isinstance(nd, ContextAwareNode)
         and (nd.code_context == CodeContext.NATIVE)
-        and ((nd.parent is None) or isinstance(nd.parent, uni.Module))
-        and not isinstance(nd, (uni.Import, uni.Test))
+        and ((nd.parent is None) or isinstance(nd.parent, Module))
+        and not isinstance(nd, (Import, Test))
         and not self._is_native_ext_module()
     ) {
         return;
     }
     if (
-        isinstance(nd, uni.Import)
+        isinstance(nd, Import)
         and nd.code_context == CodeContext.NATIVE
         and (not nd.items)
     ) {
@@ -177,7 +145,7 @@ impl JcirGenPass.exit_node(nd: uni.UniNode) -> None {
 }
 
 impl JcirGenPass.nod(
-    cls_name: str, keys: list, vals: list, jac_node: (uni.UniNode | None) = None
+    cls_name: str, keys: list, vals: list, jac_node: (UniNode | None) = None
 ) -> CgNode {
     src = jac_node if jac_node is not None else self.cur_node;
     loc = src.loc;
@@ -205,16 +173,16 @@ impl JcirGenPass.nod_loc(
     return CgNode(cls=cls_name, keys=keys, vals=vals, l1=l1, c1=c1, l2=l2, c2=c2);
 }
 
-impl JcirGenPass.outs(nd: uni.UniNode) -> list {
+impl JcirGenPass.outs(nd: UniNode) -> list {
     got = self._sink.get(nd);
     return got if got is not None else [];
 }
 
-impl JcirGenPass.set_out(nd: uni.UniNode, items: list) -> None {
+impl JcirGenPass.set_out(nd: UniNode, items: list) -> None {
     self._sink[nd] = items;
 }
 
-impl JcirGenPass.val(nd: uni.UniNode) -> CgNode {
+impl JcirGenPass.val(nd: UniNode) -> CgNode {
     got = self._sink.get(nd);
     if not got {
         loc = nd.loc;
@@ -226,12 +194,12 @@ impl JcirGenPass.val(nd: uni.UniNode) -> CgNode {
     return got[0];
 }
 
-impl JcirGenPass.const_of(value: any, jac_node: (uni.UniNode | None) = None) -> CgNode {
+impl JcirGenPass.const_of(value: any, jac_node: (UniNode | None) = None) -> CgNode {
     return self.nod('Constant', ['value'], [value], jac_node=jac_node);
 }
 
 impl JcirGenPass.name_load(
-    name_id: str, jac_node: (uni.UniNode | None) = None
+    name_id: str, jac_node: (UniNode | None) = None
 ) -> CgNode {
     return self.nod(
         'Name',
@@ -295,21 +263,21 @@ impl JcirGenPass.needs_enum_kind(kind: str) -> None {
     );
 }
 
-impl JcirGenPass._py_name(nd: uni.AstSymbolNode) -> str {
-    if (isinstance(nd, uni.SpecialVarRef) and (nd.name == Tok.KW_INIT)) {
+impl JcirGenPass._py_name(nd: AstSymbolNode) -> str {
+    if (isinstance(nd, SpecialVarRef) and (nd.name == Tok.KW_INIT)) {
         return '__init__';
     }
-    if (isinstance(nd, uni.Name) and (nd.name == Tok.KW_INIT)) {
+    if (isinstance(nd, Name) and (nd.name == Tok.KW_INIT)) {
         return '__init__';
     }
     return nd.sym_name;
 }
 
-impl JcirGenPass.py_ctx(nd: uni.AstSymbolNode) -> CgNode {
-    if (nd.expr_ctx == uni.ExprCtx.STORE) {
+impl JcirGenPass.py_ctx(nd: AstSymbolNode) -> CgNode {
+    if (nd.expr_ctx == ExprCtx.STORE) {
         return self.nod('Store', [], []);
     }
-    if (nd.expr_ctx == uni.ExprCtx.DEL) {
+    if (nd.expr_ctx == ExprCtx.DEL) {
         return self.nod('Del', [], []);
     }
     return self.nod('Load', [], []);
@@ -332,10 +300,10 @@ impl JcirGenPass._hoist_lambda(func_def: CgNode) -> None {
 }
 
 impl JcirGenPass._ancestor_is_one_of(
-    nd: (uni.UniNode | None), roots: list[uni.UniNode]
+    nd: (UniNode | None), roots: list[UniNode]
 ) -> bool {
-    cur: (uni.UniNode | None) = nd;
-    seen: set[uni.UniNode] = set();
+    cur: (UniNode | None) = nd;
+    seen: set[UniNode] = set();
     while cur {
         if cur in seen {
             return False;
@@ -352,7 +320,7 @@ impl JcirGenPass._ancestor_is_one_of(
 }
 
 impl JcirGenPass._split_scope_hoists(
-    hoists: list, sig_roots: list[uni.UniNode]
+    hoists: list, sig_roots: list[UniNode]
 ) -> tuple[(list, list)] {
     body_hoists: list = [];
     enclosing_hoists: list = [];
@@ -385,7 +353,7 @@ impl JcirGenPass._report_leaked_hoisted_lambdas -> None {
         leftover.extend(frame);
     }
     for func_def in leftover {
-        jac_node: uni.UniNode = self.ir_out;
+        jac_node: UniNode = self.ir_out;
         if func_def.jac_src is not None {
             jac_node = func_def.jac_src;
         }
@@ -394,7 +362,7 @@ impl JcirGenPass._report_leaked_hoisted_lambdas -> None {
 }
 
 impl JcirGenPass._function_expr_from_def(
-    func_def: CgNode, jac_node: uni.UniNode
+    func_def: CgNode, jac_node: UniNode
 ) -> CgNode {
     self._hoist_lambda(func_def);
     return self.nod(
@@ -405,19 +373,19 @@ impl JcirGenPass._function_expr_from_def(
     );
 }
 
-impl JcirGenPass._get_sem_decorator(nd: uni.UniNode) -> (CgNode | None) {
+impl JcirGenPass._get_sem_decorator(nd: UniNode) -> (CgNode | None) {
     semstr: str = '';
     inner_semstr: dict = {};
-    if isinstance(nd, uni.Archetype) {
+    if isinstance(nd, Archetype) {
         semstr = nd.semstr;
         arch_ast_body: list = [];
         if isinstance(nd.body, list) {
             arch_ast_body = nd.body;
-        } elif (isinstance(nd.body, uni.ImplDef) and isinstance(nd.body.body, list)) {
+        } elif (isinstance(nd.body, ImplDef) and isinstance(nd.body.body, list)) {
             arch_ast_body = nd.body.body;
         }
         for stmt in arch_ast_body {
-            if isinstance(stmt, uni.ArchHas) {
+            if isinstance(stmt, ArchHas) {
                 for has_var in stmt.vars {
                     if has_var.semstr {
                         inner_semstr[has_var.sym_name] = has_var.semstr;
@@ -425,27 +393,27 @@ impl JcirGenPass._get_sem_decorator(nd: uni.UniNode) -> (CgNode | None) {
                 }
             }
         }
-    } elif isinstance(nd, uni.Enum) {
+    } elif isinstance(nd, Enum) {
         semstr = nd.semstr;
         enum_ast_body: list = [];
         if isinstance(nd.body, list) {
             enum_ast_body = nd.body;
-        } elif (isinstance(nd.body, uni.ImplDef) and isinstance(nd.body.body, list)) {
+        } elif (isinstance(nd.body, ImplDef) and isinstance(nd.body.body, list)) {
             enum_ast_body = nd.body.body;
         }
         for stmt in enum_ast_body {
             if (
-                isinstance(stmt, uni.Assignment)
-                and isinstance(stmt.target[0], uni.AstSymbolNode)
+                isinstance(stmt, Assignment)
+                and isinstance(stmt.target[0], AstSymbolNode)
             ) {
                 inner_semstr[stmt.target[0].sym_name] = stmt.target[0].semstr;
             }
         }
-    } elif isinstance(nd, uni.Ability) {
+    } elif isinstance(nd, Ability) {
         semstr = nd.semstr;
-        if isinstance(nd.signature, uni.FuncSignature) {
+        if isinstance(nd.signature, FuncSignature) and nd.signature.params {
             for param in nd.signature.params {
-                if param.semstr {
+                if isinstance(param, ParamVar) and param.semstr {
                     inner_semstr[param.sym_name] = param.semstr;
                 }
             }
@@ -478,15 +446,15 @@ impl JcirGenPass._get_sem_decorator(nd: uni.UniNode) -> (CgNode | None) {
 }
 
 impl JcirGenPass.resolve_switch_pattern(
-    pattern: uni.MatchPattern, target: uni.Expr
+    pattern: MatchPattern, target: Expr
 ) -> CgNode {
-    if isinstance(pattern, uni.MatchValue) {
+    if isinstance(pattern, MatchValue) {
         return self.nod(
             'Compare',
             ['left', 'ops', 'comparators'],
             [self.val(target), [self.nod('Eq', [], [])], [self.val(pattern.value)]]
         );
-    } elif isinstance(pattern, uni.MatchOr) {
+    } elif isinstance(pattern, MatchOr) {
         return self.nod(
             'BoolOp',
             ['op', 'values'],
@@ -495,7 +463,7 @@ impl JcirGenPass.resolve_switch_pattern(
                 [self.resolve_switch_pattern(pat, target) for pat in pattern.patterns]
             ]
         );
-    } elif isinstance(pattern, uni.MatchSingleton) {
+    } elif isinstance(pattern, MatchSingleton) {
         return self.nod(
             'Compare',
             ['left', 'ops', 'comparators'],
@@ -506,7 +474,7 @@ impl JcirGenPass.resolve_switch_pattern(
     }
 }
 
-impl JcirGenPass.resolve_switch_stmt(nd: uni.SwitchStmt) -> list {
+impl JcirGenPass.resolve_switch_stmt(nd: SwitchStmt) -> list {
     var_executed = self.nod(
         'Name', ['id', 'ctx'], ['__executed', self.nod('Store', [], [])]
     );
@@ -552,24 +520,24 @@ impl JcirGenPass.resolve_switch_stmt(nd: uni.SwitchStmt) -> list {
 }
 
 impl JcirGenPass.resolve_stmt_block(
-    nd: Sequence[uni.CodeBlockStmt] | Sequence[uni.EnumBlockStmt] | None,
-    doc: (uni.String | None) = None
+    nd: Sequence[CodeBlockStmt] | Sequence[EnumBlockStmt] | None,
+    doc: (String | None) = None
 ) -> list {
     items = list(nd) if nd else [];
     valid_stmts = [
         i
         for i in items
-        if not isinstance(i, uni.Semi)
+        if not isinstance(i, Semi)
     ];
     ret: list = [self.nod('Pass', [], [])]
         if (isinstance(nd, Sequence) and not valid_stmts)
         else self._flatten_ast_list(
             [
                 self.outs(x)
-                    if not isinstance(x, uni.SwitchStmt)
+                    if not isinstance(x, SwitchStmt)
                     else self.resolve_switch_stmt(x)
                 for x in valid_stmts
-                if not isinstance(x, uni.ImplDef)
+                if not isinstance(x, ImplDef)
             ]
         )
             if (nd is not None)
@@ -594,7 +562,7 @@ impl JcirGenPass.scope_directive_stmts(scopes: list) -> list {
             }
             seen.add(name);
             sym = scope.implicit_rebinds[name];
-            if isinstance(sym.parent_tab, uni.Module) {
+            if isinstance(sym.parent_tab, Module) {
                 global_names.append(name);
             } else {
                 nonlocal_names.append(name);
@@ -618,11 +586,14 @@ impl JcirGenPass.ir_bytes -> bytes {
     return module_container_bytes(self._module_path, self._module_root);
 }
 
-impl JcirGenPass.exit_sub_tag(nd: uni.SubTag[uni.T]) -> None {
-    self.set_out(nd, self.outs(nd.tag));
+impl JcirGenPass.exit_sub_tag(nd: SubTag) -> None {
+    tag_node = nd.tag;
+    if isinstance(tag_node, UniNode) {
+        self.set_out(nd, self.outs(tag_node));
+    }
 }
 
-impl JcirGenPass.exit_module(nd: uni.Module) -> None {
+impl JcirGenPass.exit_module(nd: Module) -> None {
     is_builtin_module = (
         nd.loc.mod_path.endswith(('builtin.jac', 'builtin.py'))
         and ('runtimelib' in nd.loc.mod_path)
@@ -728,14 +699,14 @@ impl JcirGenPass.exit_module(nd: uni.Module) -> None {
     nd.gen.jcir = module_container_bytes(self._module_path, module);
 }
 
-impl JcirGenPass.exit_type_param(nd: uni.TypeParam) -> None {
+impl JcirGenPass.exit_type_param(nd: TypeParam) -> None {
     bound_ast = self.val(nd.bound) if nd.bound else None;
     self.set_out(
         nd, [self.nod('TypeVar', ['name', 'bound'], [nd.name.value, bound_ast])]
     );
 }
 
-impl JcirGenPass.exit_type_alias(nd: uni.TypeAlias) -> None {
+impl JcirGenPass.exit_type_alias(nd: TypeAlias) -> None {
     type_param_asts: list = [];
     for tp in nd.type_params {
         if self.outs(tp) {
@@ -775,7 +746,7 @@ impl JcirGenPass.exit_type_alias(nd: uni.TypeAlias) -> None {
     self.set_out(nd, [type_alias]);
 }
 
-impl JcirGenPass.exit_global_vars(nd: uni.GlobalVars) -> None {
+impl JcirGenPass.exit_global_vars(nd: GlobalVars) -> None {
     assigns_ast = self._flatten_ast_list([self.outs(a) for a in nd.assignments]);
     if nd.doc {
         doc = self.nod('Expr', ['value'], [self.val(nd.doc)], jac_node=nd.doc);
@@ -785,12 +756,11 @@ impl JcirGenPass.exit_global_vars(nd: uni.GlobalVars) -> None {
     }
 }
 
-impl JcirGenPass.enter_test(nd: uni.Test) -> None {
+impl JcirGenPass.enter_test(nd: Test) -> None {
     self._push_hoist_frame();
 }
 
-impl JcirGenPass.exit_test(nd: uni.Test) -> None {
-    import from jaclang.jac0core.ext_registry { is_test }
+impl JcirGenPass.exit_test(nd: Test) -> None {
     test_name = nd.name.sym_name;
     if nd.code_context == CodeContext.NATIVE {
         body_stmts = self._native_test_shim_stmts(nd);
@@ -819,7 +789,7 @@ impl JcirGenPass.exit_test(nd: uni.Test) -> None {
     if not self._hoist_frames {
         self._hoist_frames = [[]];
     }
-    test_sig_roots: list[uni.UniNode] = [];
+    test_sig_roots: list[UniNode] = [];
     if nd.decorators {
         for d in nd.decorators {
             if d {
@@ -886,7 +856,7 @@ impl JcirGenPass.exit_test(nd: uni.Test) -> None {
             [self.jaclib_obj('jac_test'), [], jac_test_keywords]
         )
     );
-    if is_test(nd.loc.mod_path) {
+    if jcir_is_test_path(nd.loc.mod_path) {
         func.get('decorator_list').append(
             self.nod(
                 'Call',
@@ -908,7 +878,7 @@ impl JcirGenPass.exit_test(nd: uni.Test) -> None {
     self.set_out(nd, [func]);
 }
 
-impl JcirGenPass.exit_module_code(nd: uni.ModuleCode) -> None {
+impl JcirGenPass.exit_module_code(nd: ModuleCode) -> None {
     stmts = self.resolve_stmt_block(nd.body, doc=nd.doc);
     if nd.name {
         stmts = [
@@ -934,7 +904,7 @@ impl JcirGenPass.exit_module_code(nd: uni.ModuleCode) -> None {
     self.set_out(nd, stmts);
 }
 
-impl JcirGenPass.exit_py_inline_code(nd: uni.PyInlineCode) -> None {
+impl JcirGenPass.exit_py_inline_code(nd: PyInlineCode) -> None {
     if nd.doc {
         doc = self.nod('Expr', ['value'], [self.val(nd.doc)], jac_node=nd.doc);
         shift = nd.loc.first_line;
@@ -951,7 +921,7 @@ impl JcirGenPass.exit_py_inline_code(nd: uni.PyInlineCode) -> None {
     }
 }
 
-impl JcirGenPass.exit_import(nd: uni.Import) -> None {
+impl JcirGenPass.exit_import(nd: Import) -> None {
     import from jaclang.jac0core.compiler {
         import_binds_client_native,
         native_only_import_target
@@ -998,7 +968,7 @@ impl JcirGenPass.exit_import(nd: uni.Import) -> None {
     }
     if nd.is_absorb {
         source = nd.items[0];
-        if not isinstance(source, uni.ModulePath) {
+        if not isinstance(source, ModulePath) {
             raise self.ice();
         }
         module_name_parts = [p.value for p in source.path] if source.path else [];
@@ -1019,7 +989,7 @@ impl JcirGenPass.exit_import(nd: uni.Import) -> None {
         mod_paths = [
             k
             for k in nd.kid
-            if isinstance(k, uni.ModulePath)
+            if isinstance(k, ModulePath)
         ];
         names_list = [x for p in mod_paths for x in self.outs(p)]
             if mod_paths
@@ -1061,9 +1031,9 @@ impl JcirGenPass.exit_import(nd: uni.Import) -> None {
     self.set_out(nd, py_nodes);
 }
 
-impl JcirGenPass.exit_module_path(nd: uni.ModulePath) -> None {
+impl JcirGenPass.exit_module_path(nd: ModulePath) -> None {
     if nd.string_path_value is not None {
-        import_node = nd.parent_of_type(uni.Import);
+        import_node = nd.parent_of_type(Import);
         if (import_node and (import_node.code_context != CodeContext.CLIENT)) {
             self.emit(E5001, node_override=nd, path=str(nd.string_path_value));
         }
@@ -1080,8 +1050,8 @@ impl JcirGenPass.exit_module_path(nd: uni.ModulePath) -> None {
     );
 }
 
-impl JcirGenPass.exit_module_item(nd: uni.ModuleItem) -> None {
-    if (isinstance(nd.name, uni.Token) and (nd.name.value in ['default', '*'])) {
+impl JcirGenPass.exit_module_item(nd: ModuleItem) -> None {
+    if (isinstance(nd.name, Token) and (nd.name.value in ['default', '*'])) {
         import_node = nd.from_parent;
         if (import_node.code_context != CodeContext.CLIENT) {
             import_type = 'Default' if (nd.name.value == 'default') else 'Namespace';
@@ -1104,7 +1074,7 @@ impl JcirGenPass.exit_module_item(nd: uni.ModuleItem) -> None {
                 [
                     (
                         nd.name.sym_name
-                            if isinstance(nd.name, uni.Name)
+                            if isinstance(nd.name, Name)
                             else nd.name.value
                     ),
                     nd.alias.sym_name if nd.alias else None
@@ -1114,22 +1084,27 @@ impl JcirGenPass.exit_module_item(nd: uni.ModuleItem) -> None {
     );
 }
 
-impl JcirGenPass.enter_archetype(nd: uni.Archetype) -> None {
-    if isinstance(nd.body, uni.ImplDef) {
+impl JcirGenPass.enter_archetype(nd: Archetype) -> None {
+    if isinstance(nd.body, ImplDef) {
         self.traverse(nd.body);
     }
 }
 
-impl JcirGenPass.exit_archetype(nd: uni.Archetype) -> None {
-    inner: Sequence[uni.CodeBlockStmt] | Sequence[uni.EnumBlockStmt] | None = None;
-    if isinstance(nd.body, uni.ImplDef) {
-        inner = nd.body.body if not isinstance(nd.body.body, uni.Expr) else None;
-    } elif not isinstance(nd.body, uni.Expr) {
+impl JcirGenPass.exit_archetype(nd: Archetype) -> None {
+    inner: (
+        Sequence[UniNode]
+        | Sequence[CodeBlockStmt]
+        | Sequence[EnumBlockStmt]
+        | None
+    ) = None;
+    if isinstance(nd.body, ImplDef) {
+        inner = nd.body.body if not isinstance(nd.body.body, Expr) else None;
+    } elif isinstance(nd.body, list) {
         inner = nd.body;
     }
     decorators = [self.val(i) for i in nd.decorators] if nd.decorators else [];
     body: list = self.resolve_stmt_block(inner, doc=nd.doc);
-    if (not body and not isinstance(nd.body, uni.Expr)) {
+    if (not body and not isinstance(nd.body, Expr)) {
         self.emit(E5003, node_override=nd);
         body = [self.nod('Pass', [], [], jac_node=nd)];
     }
@@ -1176,17 +1151,22 @@ impl JcirGenPass.exit_archetype(nd: uni.Archetype) -> None {
     self.set_out(nd, [class_def]);
 }
 
-impl JcirGenPass.enter_enum(nd: uni.Enum) -> None {
-    if isinstance(nd.body, uni.ImplDef) {
+impl JcirGenPass.enter_enum(nd: Enum) -> None {
+    if isinstance(nd.body, ImplDef) {
         self.traverse(nd.body);
     }
 }
 
-impl JcirGenPass.exit_enum(nd: uni.Enum) -> None {
-    inner: Sequence[uni.CodeBlockStmt] | Sequence[uni.EnumBlockStmt] | None = None;
-    if isinstance(nd.body, uni.ImplDef) {
-        inner = nd.body.body if not isinstance(nd.body.body, uni.Expr) else None;
-    } elif not isinstance(nd.body, uni.Expr) {
+impl JcirGenPass.exit_enum(nd: Enum) -> None {
+    inner: (
+        Sequence[UniNode]
+        | Sequence[CodeBlockStmt]
+        | Sequence[EnumBlockStmt]
+        | None
+    ) = None;
+    if isinstance(nd.body, ImplDef) {
+        inner = nd.body.body if not isinstance(nd.body.body, Expr) else None;
+    } elif isinstance(nd.body, list) {
         inner = nd.body;
     }
     decorators = [self.val(i) for i in nd.decorators] if nd.decorators else [];
@@ -1197,9 +1177,9 @@ impl JcirGenPass.exit_enum(nd: uni.Enum) -> None {
     trailing_kind: str = "Enum";
     extra_bases: list = [];
     if nd.value_type {
-        if (isinstance(nd.value_type, uni.Name) and nd.value_type.value == "int") {
+        if (isinstance(nd.value_type, Name) and nd.value_type.value == "int") {
             trailing_kind = "IntEnum";
-        } elif (isinstance(nd.value_type, uni.Name) and nd.value_type.value == "str") {
+        } elif (isinstance(nd.value_type, Name) and nd.value_type.value == "str") {
             trailing_kind = "StrEnum";
         } else {
             extra_bases.append(self.val(nd.value_type));
@@ -1216,27 +1196,27 @@ impl JcirGenPass.exit_enum(nd: uni.Enum) -> None {
     self.set_out(nd, [class_def]);
 }
 
-impl JcirGenPass.enter_ability(nd: uni.Ability) -> None {
+impl JcirGenPass.enter_ability(nd: Ability) -> None {
     self._push_hoist_frame();
-    if isinstance(nd.body, uni.ImplDef) {
+    if isinstance(nd.body, ImplDef) {
         self.traverse(nd.body);
     }
 }
 
-impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
+impl JcirGenPass.exit_ability(nd: Ability) -> None {
     func_type = 'AsyncFunctionDef' if nd.is_async else 'FunctionDef';
     has_by_in_return = (
-        isinstance(nd.signature, uni.FuncSignature)
+        isinstance(nd.signature, FuncSignature)
         and nd.signature.return_type
-        and isinstance(nd.signature.return_type, uni.BinaryExpr)
-        and isinstance(nd.signature.return_type.op, uni.Token)
+        and isinstance(nd.signature.return_type, BinaryExpr)
+        and isinstance(nd.signature.return_type.op, Token)
         and (nd.signature.return_type.op.name == Tok.KW_BY)
     );
     scope_frame = self._hoist_frames.pop() if self._hoist_frames else [];
     if not self._hoist_frames {
         self._hoist_frames = [[]];
     }
-    sig_roots: list[uni.UniNode] = [];
+    sig_roots: list[UniNode] = [];
     if nd.signature {
         sig_roots.append(nd.signature);
     }
@@ -1254,33 +1234,39 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
     is_prop_acc = nd.accessor_kind != "";
     prop_owner_name: str | None = None;
     if is_prop_acc {
-        hv = nd.find_parent_of_type(uni.HasVar);
-        if (hv and isinstance(hv.name, uni.Name)) {
+        hv = nd.find_parent_of_type(HasVar);
+        if (hv and isinstance(hv.name, Name)) {
             prop_owner_name = hv.name.value;
         }
     }
+    body_loc_node: (UniNode | None) = (
+        nd.body if isinstance(nd.body, UniNode) else None
+    );
+    stmt_body: (
+        Sequence[UniNode]
+        | Sequence[CodeBlockStmt]
+        | Sequence[EnumBlockStmt]
+        | None
+    ) = None;
+    if isinstance(nd.body, ImplDef) and not isinstance(nd.body.body, Expr) {
+        stmt_body = nd.body.body;
+    } elif isinstance(nd.body, list) {
+        stmt_body = nd.body;
+    }
     body = self.gen_llm_body(nd)
         if (
-            isinstance(nd.body, uni.Expr)
-            or (isinstance(nd.body, uni.ImplDef) and isinstance(nd.body.body, uni.Expr))
+            isinstance(nd.body, Expr)
+            or (isinstance(nd.body, ImplDef) and isinstance(nd.body.body, Expr))
             or has_by_in_return
         )
         else [
             self.nod('Expr', ['value'], [self.val(nd.doc)], jac_node=nd.doc),
-            self.nod('Pass', [], [], jac_node=nd.body)
+            self.nod('Pass', [], [], jac_node=body_loc_node)
         ]
             if (nd.doc and nd.is_abstract)
-            else [self.nod('Pass', [], [], jac_node=nd.body)]
+            else [self.nod('Pass', [], [], jac_node=body_loc_node)]
                 if nd.is_abstract
-                else self.resolve_stmt_block(
-                    nd.body.body
-                        if (
-                            isinstance(nd.body, uni.ImplDef)
-                            and not isinstance(nd.body.body, uni.Expr)
-                        )
-                        else nd.body if not isinstance(nd.body, uni.Expr) else None,
-                    doc=nd.doc
-                );
+                else self.resolve_stmt_block(stmt_body, doc=nd.doc);
     if (nd.is_abstract and nd.body) {
         self.emit(E5004, node_override=nd, name=str(nd.sym_name));
     }
@@ -1288,7 +1274,7 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
     if (sem_decorator := self._get_sem_decorator(nd)) {
         decorator_list.append(sem_decorator);
     }
-    if isinstance(nd.signature, uni.EventSignature) {
+    if isinstance(nd.signature, EventSignature) {
         event_sig = nd.signature;
         decorator_list.append(
             self.jaclib_obj(
@@ -1300,7 +1286,7 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
             tinfo = self.val(event_sig.arch_tag_info);
             if (
                 tinfo.cls == 'Tuple'
-                and isinstance(event_sig.arch_tag_info, uni.TupleVal)
+                and isinstance(event_sig.arch_tag_info, TupleVal)
             ) {
                 telts = tinfo.get('elts');
                 if (len(telts) > 1) {
@@ -1339,7 +1325,7 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
             )
         );
     }
-    if isinstance(nd.body, uni.ImplDef) {
+    if isinstance(nd.body, ImplDef) {
         decorator_list.append(
             self.nod(
                 'Call',
@@ -1395,7 +1381,7 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
             );
         }
     }
-    if (not body and not isinstance(nd.body, uni.Expr)) {
+    if (not body and not isinstance(nd.body, Expr)) {
         self.emit(E5005, node_override=nd);
         body = [self.nod('Pass', [], [], jac_node=nd)];
     }
@@ -1403,7 +1389,7 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
         body = [*body_hoists, *body];
     }
     directive_stmts = self.scope_directive_stmts(
-        [nd, nd.body if isinstance(nd.body, uni.ImplDef) else None]
+        [nd, nd.body if isinstance(nd.body, ImplDef) else None]
     );
     if directive_stmts {
         insert_at = 1
@@ -1419,10 +1405,10 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
         body = [*body[:insert_at], *directive_stmts, *body[insert_at:]];
     }
     ast_returns: CgNode = self.const_of(None);
-    if (isinstance(nd.signature, uni.FuncSignature) and nd.signature.return_type) {
+    if (isinstance(nd.signature, FuncSignature) and nd.signature.return_type) {
         if (
-            isinstance(nd.signature.return_type, uni.BinaryExpr)
-            and isinstance(nd.signature.return_type.op, uni.Token)
+            isinstance(nd.signature.return_type, BinaryExpr)
+            and isinstance(nd.signature.return_type.op, Token)
             and (nd.signature.return_type.op.name == Tok.KW_BY)
         ) {
             ast_returns = self.val(nd.signature.return_type.left);
@@ -1436,15 +1422,18 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
         and (nd.signature is None)
         and (prop_owner_name is not None)
     ) {
-        hv2 = nd.find_parent_of_type(uni.HasVar);
+        hv2 = nd.find_parent_of_type(HasVar);
         if (hv2 and hv2.type_tag) {
             ast_returns = self.val(hv2.type_tag);
         }
     }
+    name_ref_node = nd.name_ref;
     func_name_out = (
         prop_owner_name
             if (is_prop_acc and (prop_owner_name is not None))
-            else self._py_name(nd.name_ref)
+            else self._py_name(name_ref_node)
+                if name_ref_node is not None
+                else ""
     );
     func_args_out: CgNode;
     if (is_prop_acc and (nd.signature is None)) {
@@ -1500,22 +1489,22 @@ impl JcirGenPass.exit_ability(nd: uni.Ability) -> None {
     self.set_out(nd, [func_def]);
 }
 
-impl JcirGenPass.exit_impl_def(nd: uni.ImplDef) -> None {
+impl JcirGenPass.exit_impl_def(nd: ImplDef) -> None {
     ;
 }
 
-impl JcirGenPass.exit_sem_def(nd: uni.SemDef) -> None {
+impl JcirGenPass.exit_sem_def(nd: SemDef) -> None {
     ;
 }
 
-impl JcirGenPass.exit_func_signature(nd: uni.FuncSignature) -> None {
+impl JcirGenPass.exit_func_signature(nd: FuncSignature) -> None {
     posonlyargs = [self.val(i) for i in nd.posonly_params];
     vararg = self.val(nd.varargs) if nd.varargs else None;
     kwarg = self.val(nd.kwargs) if nd.kwargs else None;
     params = [self.nod('arg', ['arg', 'annotation'], ['cls', None])]
         if (
             (abl := nd.parent)
-            and isinstance(abl, uni.Ability)
+            and isinstance(abl, Ability)
             and abl.is_method
             and abl.is_classmethod
             and not nd.is_in_py_class
@@ -1523,7 +1512,7 @@ impl JcirGenPass.exit_func_signature(nd: uni.FuncSignature) -> None {
         else [self.nod('arg', ['arg', 'annotation'], ['self', None])]
             if (
                 (abl := nd.parent)
-                and isinstance(abl, uni.Ability)
+                and isinstance(abl, Ability)
                 and abl.is_method
                 and not nd.is_static
                 and not abl.is_cls_method
@@ -1545,7 +1534,7 @@ impl JcirGenPass.exit_func_signature(nd: uni.FuncSignature) -> None {
     kwonly_args = [self.val(i) for i in nd.kwonlyargs];
     kw_defaults: list = [];
     for i in nd.kwonlyargs {
-        if i.value {
+        if isinstance(i, ParamVar) and i.value {
             kw_defaults.append(self.val(i.value));
         } else {
             kw_defaults.append(None);
@@ -1571,12 +1560,12 @@ impl JcirGenPass.exit_func_signature(nd: uni.FuncSignature) -> None {
     );
 }
 
-impl JcirGenPass.exit_event_signature(nd: uni.EventSignature) -> None {
+impl JcirGenPass.exit_event_signature(nd: EventSignature) -> None {
     arch_kw = Con.HERE.value if nd.from_walker else Con.VISITOR.value;
     annotation: (CgNode | None) = None;
     if nd.arch_tag_info {
         tag_recipe = self.val(nd.arch_tag_info);
-        if (tag_recipe.cls == 'Tuple' and isinstance(nd.arch_tag_info, uni.TupleVal)) {
+        if (tag_recipe.cls == 'Tuple' and isinstance(nd.arch_tag_info, TupleVal)) {
             telts = tag_recipe.get('elts');
             if (len(telts) > 1) {
                 annotation = telts[0];
@@ -1621,7 +1610,7 @@ impl JcirGenPass.exit_event_signature(nd: uni.EventSignature) -> None {
                     [],
                     [self.nod('arg', ['arg', 'annotation'], ['self', None]), arch_arg]
                         if (
-                            (abl := nd.find_parent_of_type(uni.Ability))
+                            (abl := nd.find_parent_of_type(Ability))
                             and abl.is_method
                         )
                         else [arch_arg],
@@ -1658,7 +1647,7 @@ impl JcirGenPass._recipe_contains_root(v: any) -> bool {
     return False;
 }
 
-impl JcirGenPass.exit_param_var(nd: uni.ParamVar) -> None {
+impl JcirGenPass.exit_param_var(nd: ParamVar) -> None {
     if self.val(nd.name).cls == 'Name' {
         name = self.val(nd.name).get('id');
         self.set_out(
@@ -1674,7 +1663,7 @@ impl JcirGenPass.exit_param_var(nd: uni.ParamVar) -> None {
     }
 }
 
-impl JcirGenPass.exit_arch_has(nd: uni.ArchHas) -> None {
+impl JcirGenPass.exit_arch_has(nd: ArchHas) -> None {
     vars_py = self._flatten_ast_list([self.outs(v) for v in nd.vars]);
     if nd.doc {
         doc = self.nod('Expr', ['value'], [self.val(nd.doc)], jac_node=nd.doc);
@@ -1684,7 +1673,7 @@ impl JcirGenPass.exit_arch_has(nd: uni.ArchHas) -> None {
     }
 }
 
-impl JcirGenPass.exit_has_var(nd: uni.HasVar) -> None {
+impl JcirGenPass.exit_has_var(nd: HasVar) -> None {
     annotation = self.val(nd.type_tag) if nd.type_tag else None;
     if ((nd.accessors is not None) and (len(nd.accessors) > 0)) {
         result_stmts: list = [];
@@ -1697,10 +1686,10 @@ impl JcirGenPass.exit_has_var(nd: uni.HasVar) -> None {
         return;
     }
     is_static_var = (
-        (haspar := nd.find_parent_of_type(uni.ArchHas)) and haspar and haspar.is_static
+        (haspar := nd.find_parent_of_type(ArchHas)) and haspar and haspar.is_static
     );
     is_in_class = (
-        (archpar := nd.find_parent_of_type(uni.Archetype))
+        (archpar := nd.find_parent_of_type(Archetype))
         and archpar
         and (archpar.arch_type.name == Tok.KW_CLASS)
     );
@@ -1775,13 +1764,13 @@ impl JcirGenPass.exit_has_var(nd: uni.HasVar) -> None {
             self.val(nd.name),
             annotation or self.const_of(None),
             value,
-            int(isinstance(nd.name, uni.Name))
+            int(isinstance(nd.name, Name))
         ]
     );
     self.set_out(nd, [ann_assign]);
 }
 
-impl JcirGenPass.exit_typed_ctx_block(nd: uni.TypedCtxBlock) -> None {
+impl JcirGenPass.exit_typed_ctx_block(nd: TypedCtxBlock) -> None {
     loc = self.name_load(Con.HERE.value if nd.from_walker else Con.VISITOR.value);
     self.set_out(
         nd,
@@ -1803,7 +1792,7 @@ impl JcirGenPass.exit_typed_ctx_block(nd: uni.TypedCtxBlock) -> None {
     );
 }
 
-impl JcirGenPass.exit_open_stmt(nd: uni.OpenStmt) -> None {
+impl JcirGenPass.exit_open_stmt(nd: OpenStmt) -> None {
     self.builtin_imports.add("_jac_region_open");
     self.builtin_imports.add("_jac_region_close");
     _tmp = f"_jac_region_{nd.loc.first_line}_{nd.loc.col_start}";
@@ -1873,7 +1862,7 @@ impl JcirGenPass.exit_open_stmt(nd: uni.OpenStmt) -> None {
         ],
         jac_node=nd
     );
-    body_stmts = self._flatten_ast_list([self.outs(item) for item in nd.body]);
+    body_stmts: list = self._flatten_ast_list([self.outs(item) for item in nd.body]);
     if not body_stmts {
         body_stmts = [self.nod('Pass', [], [], jac_node=nd)];
     }
@@ -1886,7 +1875,7 @@ impl JcirGenPass.exit_open_stmt(nd: uni.OpenStmt) -> None {
     self.set_out(nd, [assign_stmt, open_stmt, try_stmt]);
 }
 
-impl JcirGenPass.exit_if_stmt(nd: uni.IfStmt) -> None {
+impl JcirGenPass.exit_if_stmt(nd: IfStmt) -> None {
     self.set_out(
         nd,
         [
@@ -1903,7 +1892,7 @@ impl JcirGenPass.exit_if_stmt(nd: uni.IfStmt) -> None {
     );
 }
 
-impl JcirGenPass.exit_else_if(nd: uni.ElseIf) -> None {
+impl JcirGenPass.exit_else_if(nd: ElseIf) -> None {
     self.set_out(
         nd,
         [
@@ -1920,11 +1909,11 @@ impl JcirGenPass.exit_else_if(nd: uni.ElseIf) -> None {
     );
 }
 
-impl JcirGenPass.exit_else_stmt(nd: uni.ElseStmt) -> None {
+impl JcirGenPass.exit_else_stmt(nd: ElseStmt) -> None {
     self.set_out(nd, self.resolve_stmt_block(nd.body));
 }
 
-impl JcirGenPass.exit_expr_stmt(nd: uni.ExprStmt) -> None {
+impl JcirGenPass.exit_expr_stmt(nd: ExprStmt) -> None {
     expr_stmt = self.nod('Expr', ['value'], [self.val(nd.expr)])
         if not nd.in_fstring
         else self.nod(
@@ -1935,7 +1924,7 @@ impl JcirGenPass.exit_expr_stmt(nd: uni.ExprStmt) -> None {
     self.set_out(nd, [expr_stmt]);
 }
 
-impl JcirGenPass.exit_concurrent_expr(nd: uni.ConcurrentExpr) -> None {
+impl JcirGenPass.exit_concurrent_expr(nd: ConcurrentExpr) -> None {
     func = '';
     if nd.tok {
         if nd.tok.value == 'flow' {
@@ -1982,7 +1971,7 @@ impl JcirGenPass.exit_concurrent_expr(nd: uni.ConcurrentExpr) -> None {
     }
 }
 
-impl JcirGenPass.exit_try_stmt(nd: uni.TryStmt) -> None {
+impl JcirGenPass.exit_try_stmt(nd: TryStmt) -> None {
     self.set_out(
         nd,
         [
@@ -2000,7 +1989,7 @@ impl JcirGenPass.exit_try_stmt(nd: uni.TryStmt) -> None {
     );
 }
 
-impl JcirGenPass.exit_except(nd: uni.Except) -> None {
+impl JcirGenPass.exit_except(nd: Except) -> None {
     self.set_out(
         nd,
         [
@@ -2017,11 +2006,11 @@ impl JcirGenPass.exit_except(nd: uni.Except) -> None {
     );
 }
 
-impl JcirGenPass.exit_finally_stmt(nd: uni.FinallyStmt) -> None {
+impl JcirGenPass.exit_finally_stmt(nd: FinallyStmt) -> None {
     self.set_out(nd, self.resolve_stmt_block(nd.body));
 }
 
-impl JcirGenPass.exit_iter_for_stmt(nd: uni.IterForStmt) -> None {
+impl JcirGenPass.exit_iter_for_stmt(nd: IterForStmt) -> None {
     py_nodes: list = [];
     body = self.resolve_stmt_block(nd.body);
     body = body + [self.val(nd.count_by)];
@@ -2040,7 +2029,7 @@ impl JcirGenPass.exit_iter_for_stmt(nd: uni.IterForStmt) -> None {
     self.set_out(nd, py_nodes);
 }
 
-impl JcirGenPass.exit_in_for_stmt(nd: uni.InForStmt) -> None {
+impl JcirGenPass.exit_in_for_stmt(nd: InForStmt) -> None {
     self.set_out(
         nd,
         [
@@ -2058,7 +2047,7 @@ impl JcirGenPass.exit_in_for_stmt(nd: uni.InForStmt) -> None {
     );
 }
 
-impl JcirGenPass.exit_while_stmt(nd: uni.WhileStmt) -> None {
+impl JcirGenPass.exit_while_stmt(nd: WhileStmt) -> None {
     self.set_out(
         nd,
         [
@@ -2075,7 +2064,7 @@ impl JcirGenPass.exit_while_stmt(nd: uni.WhileStmt) -> None {
     );
 }
 
-impl JcirGenPass.exit_forever_stmt(nd: uni.ForeverStmt) -> None {
+impl JcirGenPass.exit_forever_stmt(nd: ForeverStmt) -> None {
     self.set_out(
         nd,
         [
@@ -2088,7 +2077,7 @@ impl JcirGenPass.exit_forever_stmt(nd: uni.ForeverStmt) -> None {
     );
 }
 
-impl JcirGenPass.exit_with_stmt(nd: uni.WithStmt) -> None {
+impl JcirGenPass.exit_with_stmt(nd: WithStmt) -> None {
     self.set_out(
         nd,
         [
@@ -2104,7 +2093,7 @@ impl JcirGenPass.exit_with_stmt(nd: uni.WithStmt) -> None {
     );
 }
 
-impl JcirGenPass.exit_expr_as_item(nd: uni.ExprAsItem) -> None {
+impl JcirGenPass.exit_expr_as_item(nd: ExprAsItem) -> None {
     self.set_out(
         nd,
         [
@@ -2117,7 +2106,7 @@ impl JcirGenPass.exit_expr_as_item(nd: uni.ExprAsItem) -> None {
     );
 }
 
-impl JcirGenPass.exit_raise_stmt(nd: uni.RaiseStmt) -> None {
+impl JcirGenPass.exit_raise_stmt(nd: RaiseStmt) -> None {
     self.set_out(
         nd,
         [
@@ -2133,7 +2122,7 @@ impl JcirGenPass.exit_raise_stmt(nd: uni.RaiseStmt) -> None {
     );
 }
 
-impl JcirGenPass.exit_assert_stmt(nd: uni.AssertStmt) -> None {
+impl JcirGenPass.exit_assert_stmt(nd: AssertStmt) -> None {
     self.set_out(
         nd,
         [
@@ -2149,11 +2138,11 @@ impl JcirGenPass.exit_assert_stmt(nd: uni.AssertStmt) -> None {
     );
 }
 
-impl JcirGenPass.exit_ctrl_stmt(nd: uni.CtrlStmt) -> None {
+impl JcirGenPass.exit_ctrl_stmt(nd: CtrlStmt) -> None {
     if (nd.ctrl.name == Tok.KW_BREAK) {
         self.set_out(nd, [self.nod('Break', [], [])]);
     } elif (nd.ctrl.name == Tok.KW_CONTINUE) {
-        if (iter_for_parent := self.find_parent_of_type(nd, uni.IterForStmt)) {
+        if (iter_for_parent := self.find_parent_of_type(nd, IterForStmt)) {
             count_by = iter_for_parent.count_by;
             self.set_out(nd, [self.val(count_by), self.nod('Continue', [], [])]);
         } else {
@@ -2164,14 +2153,14 @@ impl JcirGenPass.exit_ctrl_stmt(nd: uni.CtrlStmt) -> None {
     }
 }
 
-impl JcirGenPass._delete_targets(nd: uni.DeleteStmt) -> list {
-    if (isinstance(nd.target, uni.TupleVal) and nd.target.values) {
+impl JcirGenPass._delete_targets(nd: DeleteStmt) -> list {
+    if (isinstance(nd.target, TupleVal) and nd.target.values) {
         return [self.val(i) for i in nd.target.values];
     }
     return self.outs(nd.target);
 }
 
-impl JcirGenPass.exit_delete_stmt(nd: uni.DeleteStmt) -> None {
+impl JcirGenPass.exit_delete_stmt(nd: DeleteStmt) -> None {
     def set_ctx(targets: any, ctx_cls: str) -> list {
         if not isinstance(targets, list) {
             targets = [targets];
@@ -2225,7 +2214,7 @@ impl JcirGenPass.exit_delete_stmt(nd: uni.DeleteStmt) -> None {
     self.set_out(nd, [destroy_expr, delete_stmt]);
 }
 
-impl JcirGenPass.exit_report_stmt(nd: uni.ReportStmt) -> None {
+impl JcirGenPass.exit_report_stmt(nd: ReportStmt) -> None {
     self.set_out(
         nd,
         [
@@ -2244,13 +2233,13 @@ impl JcirGenPass.exit_report_stmt(nd: uni.ReportStmt) -> None {
     );
 }
 
-impl JcirGenPass.exit_return_stmt(nd: uni.ReturnStmt) -> None {
+impl JcirGenPass.exit_return_stmt(nd: ReturnStmt) -> None {
     self.set_out(
         nd, [self.nod('Return', ['value'], [self.val(nd.expr) if nd.expr else None])]
     );
 }
 
-impl JcirGenPass.exit_yield_expr(nd: uni.YieldExpr) -> None {
+impl JcirGenPass.exit_yield_expr(nd: YieldExpr) -> None {
     if not nd.with_from {
         self.set_out(
             nd, [self.nod('Yield', ['value'], [self.val(nd.expr) if nd.expr else None])]
@@ -2269,7 +2258,7 @@ impl JcirGenPass.exit_yield_expr(nd: uni.YieldExpr) -> None {
     }
 }
 
-impl JcirGenPass.exit_visit_stmt(nd: uni.VisitStmt) -> None {
+impl JcirGenPass.exit_visit_stmt(nd: VisitStmt) -> None {
     loc = self.name_load('self' if nd.from_walker else Con.VISITOR.value);
     visit_call = self.nod(
         'Call',
@@ -2305,7 +2294,7 @@ impl JcirGenPass.exit_visit_stmt(nd: uni.VisitStmt) -> None {
     );
 }
 
-impl JcirGenPass.exit_disengage_stmt(nd: uni.DisengageStmt) -> None {
+impl JcirGenPass.exit_disengage_stmt(nd: DisengageStmt) -> None {
     loc = self.name_load('self' if nd.from_walker else Con.VISITOR.value);
     self.set_out(
         nd,
@@ -2326,15 +2315,15 @@ impl JcirGenPass.exit_disengage_stmt(nd: uni.DisengageStmt) -> None {
     );
 }
 
-impl JcirGenPass.exit_await_expr(nd: uni.AwaitExpr) -> None {
+impl JcirGenPass.exit_await_expr(nd: AwaitExpr) -> None {
     self.set_out(nd, [self.nod('Await', ['value'], [self.val(nd.target)])]);
 }
 
-impl JcirGenPass.exit_cast_expr(nd: uni.CastExpr) -> None {
+impl JcirGenPass.exit_cast_expr(nd: CastExpr) -> None {
     self.set_out(nd, self.outs(nd.value));
 }
 
-impl JcirGenPass.exit_assignment(nd: uni.Assignment) -> None {
+impl JcirGenPass.exit_assignment(nd: Assignment) -> None {
     value = self.val(nd.value)
         if nd.value
         else self.nod(
@@ -2374,8 +2363,8 @@ impl JcirGenPass.exit_assignment(nd: uni.Assignment) -> None {
     self.set_out(nd, [assignment_stmt]);
 }
 
-impl JcirGenPass.exit_binary_expr(nd: uni.BinaryExpr) -> None {
-    if isinstance(nd.op, uni.ConnectOp) {
+impl JcirGenPass.exit_binary_expr(nd: BinaryExpr) -> None {
+    if isinstance(nd.op, ConnectOp) {
         left = self.val(nd.right)
             if (nd.op.edge_dir == EdgeDir.IN)
             else self.val(nd.left);
@@ -2417,7 +2406,7 @@ impl JcirGenPass.exit_binary_expr(nd: uni.BinaryExpr) -> None {
                 )
             ]
         );
-    } elif isinstance(nd.op, uni.DisconnectOp) {
+    } elif isinstance(nd.op, DisconnectOp) {
         keywords = [
             self.nod('keyword', ['arg', 'value'], ['left', self.val(nd.left)]),
             self.nod('keyword', ['arg', 'value'], ['right', self.val(nd.right)])
@@ -2484,7 +2473,7 @@ impl JcirGenPass.exit_binary_expr(nd: uni.BinaryExpr) -> None {
                 )
             ]
         );
-    } elif ((nd.op.name in [Tok.WALRUS_EQ]) and not isinstance(nd.left, uni.Name)) {
+    } elif ((nd.op.name in [Tok.WALRUS_EQ]) and not isinstance(nd.left, Name)) {
         self.set_out(nd, [self.val(nd.right)]);
     } elif self.outs(nd.op) {
         self.set_out(
@@ -2502,12 +2491,15 @@ impl JcirGenPass.exit_binary_expr(nd: uni.BinaryExpr) -> None {
     }
 }
 
-impl JcirGenPass.translate_jac_bin_op(nd: uni.BinaryExpr) -> list {
+impl JcirGenPass.translate_jac_bin_op(nd: BinaryExpr) -> list {
+    if not isinstance(nd.op, Token) {
+        raise self.ice('translate_jac_bin_op reached a non-token operator');
+    }
     if (nd.op.name in [Tok.PIPE_FWD, Tok.A_PIPE_FWD]) {
-        func_node = uni.FuncCall(
+        func_node = FuncCall(
             target=nd.right,
             params=list(nd.left.values)
-                if (isinstance(nd.left, uni.TupleVal) and nd.left.values)
+                if (isinstance(nd.left, TupleVal) and nd.left.values)
                 else [nd.left],
             genai_call=None,
             kid=nd.kid
@@ -2524,10 +2516,10 @@ impl JcirGenPass.translate_jac_bin_op(nd: uni.BinaryExpr) -> list {
             )
         ];
     } elif (nd.op.name in [Tok.PIPE_BKWD, Tok.A_PIPE_BKWD]) {
-        func_node = uni.FuncCall(
+        func_node = FuncCall(
             target=nd.left,
             params=list(nd.right.values)
-                if (isinstance(nd.right, uni.TupleVal) and nd.right.values)
+                if (isinstance(nd.right, TupleVal) and nd.right.values)
                 else [nd.right],
             genai_call=None,
             kid=nd.kid
@@ -2547,7 +2539,7 @@ impl JcirGenPass.translate_jac_bin_op(nd: uni.BinaryExpr) -> list {
                 ]
             )
         ];
-    } elif ((nd.op.name == Tok.PIPE_FWD) and isinstance(nd.right, uni.TupleVal)) {
+    } elif ((nd.op.name == Tok.PIPE_FWD) and isinstance(nd.right, TupleVal)) {
         self.emit(E5006);
     } else {
         self.emit(E5007, op=str(nd.op.value));
@@ -2555,7 +2547,7 @@ impl JcirGenPass.translate_jac_bin_op(nd: uni.BinaryExpr) -> list {
     return [];
 }
 
-impl JcirGenPass.exit_compare_expr(nd: uni.CompareExpr) -> None {
+impl JcirGenPass.exit_compare_expr(nd: CompareExpr) -> None {
     self.set_out(
         nd,
         [
@@ -2572,11 +2564,11 @@ impl JcirGenPass.exit_compare_expr(nd: uni.CompareExpr) -> None {
     );
 }
 
-impl JcirGenPass.exit_cfg_expr(nd: uni.CfgExpr) -> None {
+impl JcirGenPass.exit_cfg_expr(nd: CfgExpr) -> None {
     self.set_out(nd, self.outs(nd.expr));
 }
 
-impl JcirGenPass.exit_bool_expr(nd: uni.BoolExpr) -> None {
+impl JcirGenPass.exit_bool_expr(nd: BoolExpr) -> None {
     self.set_out(
         nd,
         [
@@ -2589,7 +2581,7 @@ impl JcirGenPass.exit_bool_expr(nd: uni.BoolExpr) -> None {
     );
 }
 
-impl JcirGenPass.exit_lambda_expr(nd: uni.LambdaExpr) -> None {
+impl JcirGenPass.exit_lambda_expr(nd: LambdaExpr) -> None {
     if isinstance(nd.body, list) {
         tail = nd.tail_return_expr();
         if tail is not None {
@@ -2631,11 +2623,14 @@ impl JcirGenPass.exit_lambda_expr(nd: uni.LambdaExpr) -> None {
         self.set_out(nd, [self._function_expr_from_def(func_def, nd)]);
         return;
     }
+    if not isinstance(nd.body, Expr) {
+        raise self.ice('lambda statement body fell past the FunctionDef path');
+    }
     self._emit_lambda_expr_body(nd, nd.body);
 }
 
 impl JcirGenPass._emit_lambda_expr_body(
-    nd: uni.LambdaExpr, body_node: uni.Expr
+    nd: LambdaExpr, body_node: Expr
 ) -> None {
     if nd.signature {
         self._remove_lambda_param_annotations(nd.signature);
@@ -2664,7 +2659,7 @@ impl JcirGenPass._emit_lambda_expr_body(
 }
 
 impl JcirGenPass._remove_lambda_param_annotations(
-    signature: uni.FuncSignature
+    signature: FuncSignature
 ) -> None {
     for param in signature.params {
         if (self.outs(param) and self.val(param).cls == 'arg') {
@@ -2673,7 +2668,7 @@ impl JcirGenPass._remove_lambda_param_annotations(
     }
 }
 
-impl JcirGenPass._emit_jobj_ref(nd: uni.UnaryExpr) -> None {
+impl JcirGenPass._emit_jobj_ref(nd: UnaryExpr) -> None {
     self.set_out(
         nd,
         [
@@ -2694,7 +2689,7 @@ impl JcirGenPass._emit_jobj_ref(nd: uni.UnaryExpr) -> None {
     );
 }
 
-impl JcirGenPass.exit_unary_expr(nd: uni.UnaryExpr) -> None {
+impl JcirGenPass.exit_unary_expr(nd: UnaryExpr) -> None {
     if nd.ownership in (OwnershipKind.OWN, OwnershipKind.IMM) {
         self.set_out(nd, [self.val(nd.operand)]);
         return;
@@ -2716,7 +2711,7 @@ impl JcirGenPass.exit_unary_expr(nd: uni.UnaryExpr) -> None {
         }
         return;
     }
-    op_tok = Tok(nd.op.name) if (nd.op.name in Tok.__members__) else None;
+    op_tok = Tok(nd.op.name) if (nd.op.name in TOK_MEMBER_NAMES) else None;
     op_cls = UNARY_CLS_MAP.get(op_tok) if op_tok else None;
     if op_cls {
         self.set_out(
@@ -2741,7 +2736,7 @@ impl JcirGenPass.exit_unary_expr(nd: uni.UnaryExpr) -> None {
         );
     } elif (nd.op.name in [Tok.STAR_MUL]) {
         ctx_val = self.py_ctx(nd.operand)
-            if isinstance(nd.operand, uni.AstSymbolNode)
+            if isinstance(nd.operand, AstSymbolNode)
             else self.nod('Load', [], []);
         self.set_out(
             nd, [self.nod('Starred', ['value', 'ctx'], [self.val(nd.operand), ctx_val])]
@@ -2753,7 +2748,7 @@ impl JcirGenPass.exit_unary_expr(nd: uni.UnaryExpr) -> None {
     }
 }
 
-impl JcirGenPass.exit_if_else_expr(nd: uni.IfElseExpr) -> None {
+impl JcirGenPass.exit_if_else_expr(nd: IfElseExpr) -> None {
     self.set_out(
         nd,
         [
@@ -2766,10 +2761,10 @@ impl JcirGenPass.exit_if_else_expr(nd: uni.IfElseExpr) -> None {
     );
 }
 
-impl JcirGenPass.exit_multi_string(nd: uni.MultiString) -> None {
+impl JcirGenPass.exit_multi_string(nd: MultiString) -> None {
     if (
         (len(nd.strings) == 1)
-        and isinstance(nd.strings[0], uni.FString)
+        and isinstance(nd.strings[0], FString)
         and self.outs(nd.strings[0])
     ) {
         self.set_out(nd, self.outs(nd.strings[0]));
@@ -2778,9 +2773,9 @@ impl JcirGenPass.exit_multi_string(nd: uni.MultiString) -> None {
     def get_pieces(str_seq: Sequence) -> list {
         pieces: list = [];
         for i in str_seq {
-            if isinstance(i, uni.String) {
+            if isinstance(i, String) {
                 pieces.append(i.lit_value);
-            } elif isinstance(i, (uni.FString, uni.ExprStmt)) {
+            } elif isinstance(i, (FString, ExprStmt)) {
                 py_val = self.val(i);
                 if py_val.cls == 'JoinedStr' {
                     for v in py_val.get('values') {
@@ -2790,7 +2785,7 @@ impl JcirGenPass.exit_multi_string(nd: uni.MultiString) -> None {
                     pieces.append(py_val);
                 }
             } elif (
-                isinstance(i, uni.Token) and (i.name in [Tok.LBRACE, Tok.RBRACE])
+                isinstance(i, Token) and (i.name in [Tok.LBRACE, Tok.RBRACE])
             ) {
                 continue;
             } else {
@@ -2804,15 +2799,15 @@ impl JcirGenPass.exit_multi_string(nd: uni.MultiString) -> None {
         if (
             combined_multi
             and isinstance(item, str)
-            and isinstance(combined_multi[-1], str)
+            and isinstance((tail_str := combined_multi[-1]), str)
         ) {
-            combined_multi[-1] += item;
+            combined_multi[-1] = tail_str + item;
         } elif (
             combined_multi
             and isinstance(item, bytes)
-            and isinstance(combined_multi[-1], bytes)
+            and isinstance((tail_bytes := combined_multi[-1]), bytes)
         ) {
-            combined_multi[-1] += item;
+            combined_multi[-1] = tail_bytes + item;
         } else {
             combined_multi.append(item);
         }
@@ -2831,9 +2826,10 @@ impl JcirGenPass.exit_multi_string(nd: uni.MultiString) -> None {
             and isinstance(v.get('value'), str)
             and isinstance(merged[-1], CgNode)
             and merged[-1].cls == 'Constant'
-            and isinstance(merged[-1].get('value'), str)
+            and isinstance((prev_const := merged[-1].get('value')), str)
+            and isinstance((next_const := v.get('value')), str)
         ) {
-            merged[-1] = self.const_of(merged[-1].get('value') + v.get('value'));
+            merged[-1] = self.const_of(prev_const + next_const);
         } else {
             merged.append(v);
         }
@@ -2851,7 +2847,7 @@ impl JcirGenPass.exit_multi_string(nd: uni.MultiString) -> None {
     }
 }
 
-impl JcirGenPass.exit_f_string(nd: uni.FString) -> None {
+impl JcirGenPass.exit_f_string(nd: FString) -> None {
     self.set_out(
         nd,
         [
@@ -2870,7 +2866,7 @@ impl JcirGenPass.exit_f_string(nd: uni.FString) -> None {
     );
 }
 
-impl JcirGenPass.exit_formatted_value(nd: uni.FormattedValue) -> None {
+impl JcirGenPass.exit_formatted_value(nd: FormattedValue) -> None {
     self.set_out(
         nd,
         [
@@ -2887,7 +2883,7 @@ impl JcirGenPass.exit_formatted_value(nd: uni.FormattedValue) -> None {
     );
 }
 
-impl JcirGenPass.exit_list_val(nd: uni.ListVal) -> None {
+impl JcirGenPass.exit_list_val(nd: ListVal) -> None {
     self.set_out(
         nd,
         [
@@ -2900,11 +2896,11 @@ impl JcirGenPass.exit_list_val(nd: uni.ListVal) -> None {
     );
 }
 
-impl JcirGenPass.exit_set_val(nd: uni.SetVal) -> None {
+impl JcirGenPass.exit_set_val(nd: SetVal) -> None {
     self.set_out(nd, [self.nod('Set', ['elts'], [[self.val(i) for i in nd.values]])]);
 }
 
-impl JcirGenPass.exit_tuple_val(nd: uni.TupleVal) -> None {
+impl JcirGenPass.exit_tuple_val(nd: TupleVal) -> None {
     self.set_out(
         nd,
         [
@@ -2917,7 +2913,7 @@ impl JcirGenPass.exit_tuple_val(nd: uni.TupleVal) -> None {
     );
 }
 
-impl JcirGenPass.exit_dict_val(nd: uni.DictVal) -> None {
+impl JcirGenPass.exit_dict_val(nd: DictVal) -> None {
     self.set_out(
         nd,
         [
@@ -2933,11 +2929,11 @@ impl JcirGenPass.exit_dict_val(nd: uni.DictVal) -> None {
     );
 }
 
-impl JcirGenPass.exit_k_v_pair(nd: uni.KVPair) -> None {
+impl JcirGenPass.exit_k_v_pair(nd: KVPair) -> None {
     ;
 }
 
-impl JcirGenPass.exit_k_w_pair(nd: uni.KWPair) -> None {
+impl JcirGenPass.exit_k_w_pair(nd: KWPair) -> None {
     self.set_out(
         nd,
         [
@@ -2955,7 +2951,7 @@ impl JcirGenPass.exit_k_w_pair(nd: uni.KWPair) -> None {
     );
 }
 
-impl JcirGenPass.exit_inner_compr(nd: uni.InnerCompr) -> None {
+impl JcirGenPass.exit_inner_compr(nd: InnerCompr) -> None {
     self.set_out(
         nd,
         [
@@ -2973,7 +2969,7 @@ impl JcirGenPass.exit_inner_compr(nd: uni.InnerCompr) -> None {
     );
 }
 
-impl JcirGenPass.exit_list_compr(nd: uni.ListCompr) -> None {
+impl JcirGenPass.exit_list_compr(nd: ListCompr) -> None {
     self.set_out(
         nd,
         [
@@ -2986,7 +2982,7 @@ impl JcirGenPass.exit_list_compr(nd: uni.ListCompr) -> None {
     );
 }
 
-impl JcirGenPass.exit_gen_compr(nd: uni.GenCompr) -> None {
+impl JcirGenPass.exit_gen_compr(nd: GenCompr) -> None {
     self.set_out(
         nd,
         [
@@ -2999,7 +2995,7 @@ impl JcirGenPass.exit_gen_compr(nd: uni.GenCompr) -> None {
     );
 }
 
-impl JcirGenPass.exit_set_compr(nd: uni.SetCompr) -> None {
+impl JcirGenPass.exit_set_compr(nd: SetCompr) -> None {
     self.set_out(
         nd,
         [
@@ -3012,7 +3008,7 @@ impl JcirGenPass.exit_set_compr(nd: uni.SetCompr) -> None {
     );
 }
 
-impl JcirGenPass.exit_dict_compr(nd: uni.DictCompr) -> None {
+impl JcirGenPass.exit_dict_compr(nd: DictCompr) -> None {
     self.set_out(
         nd,
         [
@@ -3029,12 +3025,12 @@ impl JcirGenPass.exit_dict_compr(nd: uni.DictCompr) -> None {
     );
 }
 
-impl JcirGenPass.exit_atom_trailer(nd: uni.AtomTrailer) -> None {
+impl JcirGenPass.exit_atom_trailer(nd: AtomTrailer) -> None {
     if nd.is_genai {
         self.set_out(nd, []);
     }
     if nd.is_attr {
-        if isinstance(nd.right, uni.AstSymbolNode) {
+        if isinstance(nd.right, AstSymbolNode) {
             self.set_out(
                 nd,
                 [
@@ -3052,7 +3048,7 @@ impl JcirGenPass.exit_atom_trailer(nd: uni.AtomTrailer) -> None {
         } else {
             self.emit(E5008);
         }
-    } elif isinstance(nd.right, uni.FilterCompr) {
+    } elif isinstance(nd.right, FilterCompr) {
         if self._is_edge_ref_target(nd.target) {
             target_py = self.val(nd.target);
             narrow_kws = self._query_filter_kws(nd.right, 'nd', 'preds');
@@ -3097,7 +3093,7 @@ impl JcirGenPass.exit_atom_trailer(nd: uni.AtomTrailer) -> None {
                 ]
             );
         }
-    } elif isinstance(nd.right, uni.AssignCompr) {
+    } elif isinstance(nd.right, AssignCompr) {
         self.set_out(
             nd,
             [
@@ -3113,7 +3109,7 @@ impl JcirGenPass.exit_atom_trailer(nd: uni.AtomTrailer) -> None {
             ]
         );
     } elif (
-        isinstance(nd.right, uni.IndexSlice)
+        isinstance(nd.right, IndexSlice)
         and nd.right.is_range
         and len(nd.right.slices) == 1
         and self._is_edge_ref_target(nd.target)
@@ -3143,7 +3139,7 @@ impl JcirGenPass.exit_atom_trailer(nd: uni.AtomTrailer) -> None {
                         self.val(nd.target),
                         self.val(nd.right),
                         self.py_ctx(nd.right)
-                            if isinstance(nd.right, uni.AstSymbolNode)
+                            if isinstance(nd.right, AstSymbolNode)
                             else self.nod('Load', [], [])
                     ]
                 )
@@ -3235,9 +3231,9 @@ impl JcirGenPass.exit_atom_trailer(nd: uni.AtomTrailer) -> None {
     }
 }
 
-impl JcirGenPass.exit_atom_unit(nd: uni.AtomUnit) -> None {
+impl JcirGenPass.exit_atom_unit(nd: AtomUnit) -> None {
     if (
-        isinstance(nd.value, uni.Ability)
+        isinstance(nd.value, Ability)
         and self.outs(nd.value)
         and self.val(nd.value).cls in ('FunctionDef', 'AsyncFunctionDef')
     ) {
@@ -3247,18 +3243,18 @@ impl JcirGenPass.exit_atom_unit(nd: uni.AtomUnit) -> None {
     self.set_out(nd, self.outs(nd.value));
 }
 
-impl JcirGenPass.gen_call_args(nd: uni.FuncCall) -> tuple[(list, list)] {
+impl JcirGenPass.gen_call_args(nd: FuncCall) -> tuple[(list, list)] {
     args: list = [];
     keywords: list = [];
     if nd.params {
         for x in nd.params {
-            if (isinstance(x, uni.UnaryExpr) and (x.op.name == Tok.STAR_POW)) {
+            if (isinstance(x, UnaryExpr) and (x.op.name == Tok.STAR_POW)) {
                 keywords.append(
                     self.nod('keyword', ['value'], [self.val(x.operand)], jac_node=x)
                 );
-            } elif isinstance(x, uni.Expr) {
+            } elif isinstance(x, Expr) {
                 args.append(self.val(x));
-            } elif (isinstance(x, uni.KWPair) and self.val(x).cls == 'keyword') {
+            } elif (isinstance(x, KWPair) and self.val(x).cls == 'keyword') {
                 keywords.append(self.val(x));
             } else {
                 self.ice('Invalid Parameter');
@@ -3268,12 +3264,12 @@ impl JcirGenPass.gen_call_args(nd: uni.FuncCall) -> tuple[(list, list)] {
     return (args, keywords);
 }
 
-impl JcirGenPass.exit_func_call(nd: uni.FuncCall) -> None {
+impl JcirGenPass.exit_func_call(nd: FuncCall) -> None {
     if nd.genai_call {
         self._refuse(nd, 'genai call expression');
     }
     if (
-        isinstance(nd.target, uni.SpecialVarRef)
+        isinstance(nd.target, SpecialVarRef)
         and nd.target.name == Tok.KW_ROOT
         and (nd.params is None or len(nd.params) == 0)
     ) {
@@ -3281,9 +3277,9 @@ impl JcirGenPass.exit_func_call(nd: uni.FuncCall) -> None {
         return;
     }
     if (
-        isinstance(nd.target, uni.AtomTrailer)
+        isinstance(nd.target, AtomTrailer)
         and nd.target.is_attr
-        and isinstance(nd.target.right, uni.Name)
+        and isinstance(nd.target.right, Name)
         and nd.target.right.sym_name == "chunks"
         and nd.params is not None
         and len(nd.params) == 1
@@ -3325,7 +3321,7 @@ impl JcirGenPass.exit_func_call(nd: uni.FuncCall) -> None {
     );
 }
 
-impl JcirGenPass.exit_index_slice(nd: uni.IndexSlice) -> None {
+impl JcirGenPass.exit_index_slice(nd: IndexSlice) -> None {
     if nd.is_range {
         if (len(nd.slices) > 1) {
             self.set_out(
@@ -3375,7 +3371,7 @@ impl JcirGenPass.exit_index_slice(nd: uni.IndexSlice) -> None {
     }
 }
 
-impl JcirGenPass.exit_special_var_ref(nd: uni.SpecialVarRef) -> None {
+impl JcirGenPass.exit_special_var_ref(nd: SpecialVarRef) -> None {
     if (nd.name == Tok.KW_SUPER) {
         self.set_out(
             nd,
@@ -3409,13 +3405,13 @@ impl JcirGenPass.exit_special_var_ref(nd: uni.SpecialVarRef) -> None {
     }
 }
 
-impl JcirGenPass._is_edge_ref_target(target: uni.UniNode) -> bool {
-    if isinstance(target, uni.EdgeRefTrailer) {
+impl JcirGenPass._is_edge_ref_target(target: UniNode) -> bool {
+    if isinstance(target, EdgeRefTrailer) {
         return not target.edges_only and not target.is_async;
     }
     if (
-        isinstance(target, uni.AtomTrailer)
-        and isinstance(target.right, uni.FilterCompr)
+        isinstance(target, AtomTrailer)
+        and isinstance(target.right, FilterCompr)
     ) {
         return self._is_edge_ref_target(target.target);
     }
@@ -3448,7 +3444,7 @@ impl JcirGenPass._cmp_op_str(op: CgNode) -> (str | None) {
 }
 
 impl JcirGenPass._query_filter_kws(
-    fc: uni.FilterCompr, type_arg: str, preds_arg: str
+    fc: FilterCompr, type_arg: str, preds_arg: str
 ) -> list {
     kws: list = [];
     if fc.f_type {
@@ -3522,18 +3518,21 @@ impl JcirGenPass._query_filter_kws(
     return kws;
 }
 
-impl JcirGenPass.exit_edge_ref_trailer(nd: uni.EdgeRefTrailer) -> None {
+impl JcirGenPass.exit_edge_ref_trailer(nd: EdgeRefTrailer) -> None {
     origin: (CgNode | None) = None;
     cur = nd.chain[0];
     chomp = [*nd.chain[1:]];
-    from_visit = bool(isinstance(nd.parent, uni.VisitStmt));
-    if not isinstance(cur, uni.EdgeOpRef) {
+    from_visit = bool(isinstance(nd.parent, VisitStmt));
+    if not isinstance(cur, EdgeOpRef) {
         origin = self.val(cur);
         cur = chomp.pop(0);
     }
     origin_ast = origin if origin is not None else self.val(cur);
     hops: list = [];
     while True {
+        if not isinstance(cur, EdgeOpRef) {
+            raise self.ice('edge ref chain hop is not an EdgeOpRef');
+        }
         keywords = [
             self.nod(
                 'keyword', ['arg', 'value'], ['dir', self.const_of(cur.edge_dir.value)]
@@ -3542,9 +3541,9 @@ impl JcirGenPass.exit_edge_ref_trailer(nd: uni.EdgeRefTrailer) -> None {
         if cur.filter_cond {
             keywords.extend(self._query_filter_kws(cur.filter_cond, 'edge', 'epreds'));
         }
-        if (chomp and not isinstance(chomp[0], uni.EdgeOpRef)) {
+        if (chomp and not isinstance(chomp[0], EdgeOpRef)) {
             filt = chomp.pop(0);
-            if isinstance(filt, uni.FilterCompr) {
+            if isinstance(filt, FilterCompr) {
                 keywords.extend(self._query_filter_kws(filt, 'nd', 'preds'));
             } else {
                 keywords.append(
@@ -3616,15 +3615,15 @@ impl JcirGenPass.exit_edge_ref_trailer(nd: uni.EdgeRefTrailer) -> None {
     self.set_out(nd, [pynode]);
 }
 
-impl JcirGenPass.exit_edge_op_ref(nd: uni.EdgeOpRef) -> None {
+impl JcirGenPass.exit_edge_op_ref(nd: EdgeOpRef) -> None {
     self.set_out(nd, [self.name_load(Con.HERE.value if nd.from_walker else 'self')]);
 }
 
-impl JcirGenPass.exit_disconnect_op(nd: uni.DisconnectOp) -> None {
+impl JcirGenPass.exit_disconnect_op(nd: DisconnectOp) -> None {
     self.set_out(nd, self.outs(nd.edge_spec));
 }
 
-impl JcirGenPass.exit_connect_op(nd: uni.ConnectOp) -> None {
+impl JcirGenPass.exit_connect_op(nd: ConnectOp) -> None {
     self.set_out(
         nd,
         [
@@ -3667,7 +3666,7 @@ impl JcirGenPass.exit_connect_op(nd: uni.ConnectOp) -> None {
     );
 }
 
-impl JcirGenPass.exit_filter_compr(nd: uni.FilterCompr) -> None {
+impl JcirGenPass.exit_filter_compr(nd: FilterCompr) -> None {
     iter_name = 'i';
     comprs: list = [];
     if nd.f_type {
@@ -3752,7 +3751,7 @@ impl JcirGenPass.exit_filter_compr(nd: uni.FilterCompr) -> None {
     }
 }
 
-impl JcirGenPass.exit_assign_compr(nd: uni.AssignCompr) -> None {
+impl JcirGenPass.exit_assign_compr(nd: AssignCompr) -> None {
     keys: list = [];
     values: list = [];
     for i in nd.assigns {
@@ -3773,7 +3772,7 @@ impl JcirGenPass.exit_assign_compr(nd: uni.AssignCompr) -> None {
     );
 }
 
-impl JcirGenPass.exit_match_stmt(nd: uni.MatchStmt) -> None {
+impl JcirGenPass.exit_match_stmt(nd: MatchStmt) -> None {
     self.set_out(
         nd,
         [
@@ -3786,7 +3785,7 @@ impl JcirGenPass.exit_match_stmt(nd: uni.MatchStmt) -> None {
     );
 }
 
-impl JcirGenPass.exit_match_case(nd: uni.MatchCase) -> None {
+impl JcirGenPass.exit_match_case(nd: MatchCase) -> None {
     self.set_out(
         nd,
         [
@@ -3803,13 +3802,13 @@ impl JcirGenPass.exit_match_case(nd: uni.MatchCase) -> None {
     );
 }
 
-impl JcirGenPass.exit_match_or(nd: uni.MatchOr) -> None {
+impl JcirGenPass.exit_match_or(nd: MatchOr) -> None {
     self.set_out(
         nd, [self.nod('MatchOr', ['patterns'], [[self.val(x) for x in nd.patterns]])]
     );
 }
 
-impl JcirGenPass.exit_match_as(nd: uni.MatchAs) -> None {
+impl JcirGenPass.exit_match_as(nd: MatchAs) -> None {
     self.set_out(
         nd,
         [
@@ -3822,39 +3821,39 @@ impl JcirGenPass.exit_match_as(nd: uni.MatchAs) -> None {
     );
 }
 
-impl JcirGenPass.exit_match_wild(nd: uni.MatchWild) -> None {
+impl JcirGenPass.exit_match_wild(nd: MatchWild) -> None {
     self.set_out(nd, [self.nod('MatchAs', [], [])]);
 }
 
-impl JcirGenPass.exit_match_value(nd: uni.MatchValue) -> None {
+impl JcirGenPass.exit_match_value(nd: MatchValue) -> None {
     self.set_out(nd, [self.nod('MatchValue', ['value'], [self.val(nd.value)])]);
 }
 
-impl JcirGenPass.exit_match_singleton(nd: uni.MatchSingleton) -> None {
+impl JcirGenPass.exit_match_singleton(nd: MatchSingleton) -> None {
     self.set_out(nd, [self.nod('MatchSingleton', ['value'], [nd.value.lit_value])]);
 }
 
-impl JcirGenPass.exit_match_sequence(nd: uni.MatchSequence) -> None {
+impl JcirGenPass.exit_match_sequence(nd: MatchSequence) -> None {
     self.set_out(
         nd,
         [self.nod('MatchSequence', ['patterns'], [[self.val(x) for x in nd.values]])]
     );
 }
 
-impl JcirGenPass.exit_match_mapping(nd: uni.MatchMapping) -> None {
+impl JcirGenPass.exit_match_mapping(nd: MatchMapping) -> None {
     map_keys: list = [];
     map_patterns: list = [];
     rest: (str | None) = None;
     for i in nd.values {
         if (
-            isinstance(i, uni.MatchKVPair)
-            and isinstance(i.key, uni.MatchValue)
+            isinstance(i, MatchKVPair)
+            and isinstance(i.key, MatchValue)
             and self.outs(i.key.value)
             and self.outs(i.value)
         ) {
             map_keys.append(self.val(i.key.value));
             map_patterns.append(self.val(i.value));
-        } elif isinstance(i, uni.MatchStar) {
+        } elif isinstance(i, MatchStar) {
             rest = i.name.sym_name;
         }
     }
@@ -3870,15 +3869,15 @@ impl JcirGenPass.exit_match_mapping(nd: uni.MatchMapping) -> None {
     );
 }
 
-impl JcirGenPass.exit_match_k_v_pair(nd: uni.MatchKVPair) -> None {
+impl JcirGenPass.exit_match_k_v_pair(nd: MatchKVPair) -> None {
     ;
 }
 
-impl JcirGenPass.exit_match_star(nd: uni.MatchStar) -> None {
+impl JcirGenPass.exit_match_star(nd: MatchStar) -> None {
     self.set_out(nd, [self.nod('MatchStar', ['name'], [nd.name.sym_name])]);
 }
 
-impl JcirGenPass.exit_match_arch(nd: uni.MatchArch) -> None {
+impl JcirGenPass.exit_match_arch(nd: MatchArch) -> None {
     self.set_out(
         nd,
         [
@@ -3891,7 +3890,7 @@ impl JcirGenPass.exit_match_arch(nd: uni.MatchArch) -> None {
                     [
                         x.key.sym_name
                         for x in (nd.kw_patterns or [])
-                        if isinstance(x.key, uni.NameAtom)
+                        if isinstance(x.key, NameAtom)
                     ],
                     [self.val(x.value) for x in (nd.kw_patterns or [])]
                 ]
@@ -3900,15 +3899,15 @@ impl JcirGenPass.exit_match_arch(nd: uni.MatchArch) -> None {
     );
 }
 
-impl JcirGenPass.exit_token(nd: uni.Token) -> None {
-    tok = Tok(nd.name) if (nd.name in Tok.__members__) else None;
+impl JcirGenPass.exit_token(nd: Token) -> None {
+    tok = Tok(nd.name) if (nd.name in TOK_MEMBER_NAMES) else None;
     op_cls = TOKEN_CLS_MAP.get(tok) if tok else None;
     if op_cls {
         self.set_out(nd, [self.nod(op_cls, [], [])]);
     }
 }
 
-impl JcirGenPass.exit_name(nd: uni.Name) -> None {
+impl JcirGenPass.exit_name(nd: Name) -> None {
     name = nd.sym_name;
     if name == "Self" {
         resolved = self._resolve_self_type(nd);
@@ -3926,19 +3925,19 @@ impl JcirGenPass.exit_name(nd: uni.Name) -> None {
     self.set_out(nd, [self.nod('Name', ['id', 'ctx'], [name, self.py_ctx(nd)])]);
 }
 
-impl JcirGenPass._resolve_self_type(nd: uni.Name) -> (CgNode | None) {
-    arch = nd.find_parent_of_type(uni.Archetype);
-    enum_parent = nd.find_parent_of_type(uni.Enum) if not arch else None;
+impl JcirGenPass._resolve_self_type(nd: Name) -> (CgNode | None) {
+    arch = nd.find_parent_of_type(Archetype);
+    enum_parent = nd.find_parent_of_type(Enum) if not arch else None;
     enclosing = arch or enum_parent;
     enclosing_name: str | None = None;
     if enclosing {
         enclosing_name = enclosing.name.sym_name if enclosing.name else None;
     }
     if not enclosing_name {
-        impl_def = nd.find_parent_of_type(uni.ImplDef);
+        impl_def = nd.find_parent_of_type(ImplDef);
         if (impl_def and impl_def.target and len(impl_def.target) > 0) {
             enclosing_name = impl_def.target[0].sym_name
-                if isinstance(impl_def.target[0], uni.NameAtom)
+                if isinstance(impl_def.target[0], NameAtom)
                 else None;
         }
     }
@@ -3948,8 +3947,8 @@ impl JcirGenPass._resolve_self_type(nd: uni.Name) -> (CgNode | None) {
     if self._is_in_type_annotation(nd) {
         return self.name_load(enclosing_name);
     }
-    ability = nd.find_parent_of_type(uni.Ability);
-    impl_def = nd.find_parent_of_type(uni.ImplDef);
+    ability = nd.find_parent_of_type(Ability);
+    impl_def = nd.find_parent_of_type(ImplDef);
     is_in_classmethod = False;
     is_in_method = False;
     if ability {
@@ -3958,7 +3957,7 @@ impl JcirGenPass._resolve_self_type(nd: uni.Name) -> (CgNode | None) {
             and not ability.is_static
             and not ability.is_cls_method;
     } elif (
-        impl_def and impl_def.decl_link and isinstance(impl_def.decl_link, uni.Ability)
+        impl_def and impl_def.decl_link and isinstance(impl_def.decl_link, Ability)
     ) {
         is_in_classmethod = impl_def.decl_link.is_cls_method;
         is_in_method = (
@@ -3980,25 +3979,25 @@ impl JcirGenPass._resolve_self_type(nd: uni.Name) -> (CgNode | None) {
     return self.nod('Name', ['id', 'ctx'], [enclosing_name, self.py_ctx(nd)]);
 }
 
-impl JcirGenPass._is_in_type_annotation(nd: uni.UniNode) -> bool {
+impl JcirGenPass._is_in_type_annotation(nd: UniNode) -> bool {
     parent = nd.parent;
     while parent {
-        if isinstance(parent, uni.FuncSignature) {
+        if isinstance(parent, FuncSignature) {
             if parent.return_type {
                 return self._is_descendant_of(nd, parent.return_type);
             }
         }
-        if isinstance(parent, uni.ParamVar) {
+        if isinstance(parent, ParamVar) {
             if parent.type_tag {
                 return True;
             }
         }
-        if isinstance(parent, uni.HasVar) {
+        if isinstance(parent, HasVar) {
             if parent.type_tag {
                 return True;
             }
         }
-        if isinstance(parent, uni.SubTag) {
+        if isinstance(parent, SubTag) {
             return True;
         }
         parent = parent.parent;
@@ -4006,7 +4005,7 @@ impl JcirGenPass._is_in_type_annotation(nd: uni.UniNode) -> bool {
     return False;
 }
 
-impl JcirGenPass._is_descendant_of(nd: uni.UniNode, ancestor: uni.UniNode) -> bool {
+impl JcirGenPass._is_descendant_of(nd: UniNode, ancestor: UniNode) -> bool {
     if nd is ancestor {
         return True;
     }
@@ -4020,28 +4019,28 @@ impl JcirGenPass._is_descendant_of(nd: uni.UniNode, ancestor: uni.UniNode) -> bo
     return False;
 }
 
-impl JcirGenPass.exit_float(nd: uni.Float) -> None {
+impl JcirGenPass.exit_float(nd: Float) -> None {
     self.set_out(nd, [self.const_of(float(nd.value))]);
 }
 
-impl JcirGenPass.exit_int(nd: uni.Int) -> None {
+impl JcirGenPass.exit_int(nd: Int) -> None {
     self.set_out(nd, [self.const_of(int(nd.value, 0))]);
 }
 
-impl JcirGenPass.exit_string(nd: uni.String) -> None {
+impl JcirGenPass.exit_string(nd: String) -> None {
     self.set_out(nd, [self.const_of(nd.lit_value)]);
 }
 
-impl JcirGenPass.exit_bool(nd: uni.Bool) -> None {
+impl JcirGenPass.exit_bool(nd: Bool) -> None {
     self.set_out(nd, [self.const_of(nd.value == 'True')]);
 }
 
-impl JcirGenPass.exit_builtin_type(nd: uni.BuiltinType) -> None {
+impl JcirGenPass.exit_builtin_type(nd: BuiltinType) -> None {
     if nd.sym_name == "any" {
         parent = nd.parent;
         is_call_func = (
             parent is not None
-            and isinstance(parent, uni.FuncCall)
+            and isinstance(parent, FuncCall)
             and parent.target is nd
         );
         if not is_call_func {
@@ -4055,15 +4054,15 @@ impl JcirGenPass.exit_builtin_type(nd: uni.BuiltinType) -> None {
     self.set_out(nd, [self.nod('Name', ['id', 'ctx'], [nd.sym_name, self.py_ctx(nd)])]);
 }
 
-impl JcirGenPass.exit_null(nd: uni.Null) -> None {
+impl JcirGenPass.exit_null(nd: Null) -> None {
     self.set_out(nd, [self.const_of(None)]);
 }
 
-impl JcirGenPass.exit_ellipsis(nd: uni.Ellipsis) -> None {
-    self.set_out(nd, [self.const_of(Ellipsis)]);
+impl JcirGenPass.exit_ellipsis(nd: Ellipsis) -> None {
+    self.set_out(nd, [self.const_of(...)]);
 }
 
-impl JcirGenPass.exit_jsx_element(nd: uni.JsxElement) -> None {
+impl JcirGenPass.exit_jsx_element(nd: JsxElement) -> None {
     tag_arg: CgNode;
     if nd.dynamic_tag is not None {
         tag_arg = self.val(nd.dynamic_tag);
@@ -4075,17 +4074,17 @@ impl JcirGenPass.exit_jsx_element(nd: uni.JsxElement) -> None {
     attrs_expr: CgNode;
     if not nd.attributes {
         attrs_expr = self.nod('Dict', ['keys', 'values'], [[], []], jac_node=nd);
-    } elif any(isinstance(attr, uni.JsxSpreadAttribute) for attr in nd.attributes) {
+    } elif any(isinstance(attr, JsxSpreadAttribute) for attr in nd.attributes) {
         attrs_expr = self.nod('Dict', ['keys', 'values'], [[], []], jac_node=nd);
         for attr in nd.attributes {
-            if isinstance(attr, uni.JsxSpreadAttribute) {
+            if isinstance(attr, JsxSpreadAttribute) {
                 attrs_expr = self.nod(
                     'Dict',
                     ['keys', 'values'],
                     [[None, None], [attrs_expr, self.val(attr)]],
                     jac_node=attr
                 );
-            } elif isinstance(attr, uni.JsxNormalAttribute) {
+            } elif isinstance(attr, JsxNormalAttribute) {
                 attr_tuple = self.val(attr);
                 attrs_expr = self.nod(
                     'Dict',
@@ -4102,7 +4101,7 @@ impl JcirGenPass.exit_jsx_element(nd: uni.JsxElement) -> None {
         dkeys: list = [];
         dvalues: list = [];
         for attr in nd.attributes {
-            if isinstance(attr, uni.JsxNormalAttribute) {
+            if isinstance(attr, JsxNormalAttribute) {
                 attr_tuple = self.val(attr);
                 dkeys.append(attr_tuple.get('elts')[0]);
                 dvalues.append(attr_tuple.get('elts')[1]);
@@ -4117,8 +4116,8 @@ impl JcirGenPass.exit_jsx_element(nd: uni.JsxElement) -> None {
         kept_children = [
             c
             for c in nd.children
-            if not isinstance(c, uni.JsxComment)
-                and not (isinstance(c, uni.JsxText) and not c.get_normalized_text())
+            if not isinstance(c, JsxComment)
+                and not (isinstance(c, JsxText) and not c.get_normalized_text())
         ];
         children_arg = self.nod(
             'List',
@@ -4150,7 +4149,7 @@ impl JcirGenPass.exit_jsx_element(nd: uni.JsxElement) -> None {
     );
 }
 
-impl JcirGenPass.exit_jsx_element_name(nd: uni.JsxElementName) -> None {
+impl JcirGenPass.exit_jsx_element_name(nd: JsxElementName) -> None {
     name_str = '.'.join(part.value for part in nd.parts);
     if (nd.parts and nd.parts[0].value[0].isupper()) {
         self.set_out(nd, [self.name_load(name_str, jac_node=nd)]);
@@ -4159,18 +4158,19 @@ impl JcirGenPass.exit_jsx_element_name(nd: uni.JsxElementName) -> None {
     }
 }
 
-impl JcirGenPass.exit_jsx_spread_attribute(nd: uni.JsxSpreadAttribute) -> None {
+impl JcirGenPass.exit_jsx_spread_attribute(nd: JsxSpreadAttribute) -> None {
     self.set_out(nd, [self.val(nd.expr)]);
 }
 
-impl JcirGenPass.exit_jsx_normal_attribute(nd: uni.JsxNormalAttribute) -> None {
+impl JcirGenPass.exit_jsx_normal_attribute(nd: JsxNormalAttribute) -> None {
     if not nd.name {
         self.set_out(nd, []);
         return;
     }
     key_ast = self.const_of(nd.name.value, jac_node=nd.name);
     value_ast: CgNode;
-    if (nd.value and isinstance(nd.value, uni.String)) {
+    if (nd.value and isinstance(nd.value, String)) {
+        import html;
         value_ast = self.const_of(html.unescape(nd.value.lit_value), jac_node=nd.value);
     } elif (nd.value and self.outs(nd.value)) {
         value_ast = self.val(nd.value);
@@ -4190,33 +4190,34 @@ impl JcirGenPass.exit_jsx_normal_attribute(nd: uni.JsxNormalAttribute) -> None {
     );
 }
 
-impl JcirGenPass.exit_jsx_text(nd: uni.JsxText) -> None {
+impl JcirGenPass.exit_jsx_text(nd: JsxText) -> None {
+    import html;
     self.set_out(
         nd, [self.const_of(html.unescape(nd.get_normalized_text()), jac_node=nd)]
     );
 }
 
-impl JcirGenPass.exit_jsx_expression(nd: uni.JsxExpression) -> None {
+impl JcirGenPass.exit_jsx_expression(nd: JsxExpression) -> None {
     self.set_out(nd, [self.val(nd.expr)]);
 }
 
-impl JcirGenPass.exit_jsx_slot(nd: uni.JsxSlot) -> None {
+impl JcirGenPass.exit_jsx_slot(nd: JsxSlot) -> None {
     self.set_out(nd, [self.const_of(None, jac_node=nd)]);
 }
 
-impl JcirGenPass.exit_jsx_comment(nd: uni.JsxComment) -> None {
+impl JcirGenPass.exit_jsx_comment(nd: JsxComment) -> None {
     self.set_out(nd, []);
 }
 
-impl JcirGenPass.exit_semi(nd: uni.Semi) -> None {
+impl JcirGenPass.exit_semi(nd: Semi) -> None {
     ;
 }
 
-impl JcirGenPass.exit_comment_token(nd: uni.CommentToken) -> None {
+impl JcirGenPass.exit_comment_token(nd: CommentToken) -> None {
     ;
 }
 
-impl JcirGenPass._gen_native_interop_stubs(nd: uni.UniNode) -> None {
+impl JcirGenPass._gen_native_interop_stubs(nd: UniNode) -> None {
     manifest = self.ir_in.gen.interop_manifest;
     parts: list = [];
     names: list = [];
@@ -4293,7 +4294,7 @@ impl JcirGenPass._top_level_bound_names(items: any) -> list {
     return names;
 }
 
-impl JcirGenPass._native_test_shim_stmts(nd: uni.Test) -> list {
+impl JcirGenPass._native_test_shim_stmts(nd: Test) -> list {
     import from jaclang.jac0core.codeinfo { native_test_symbol, native_safe_sym }
     test_name = nd.name.sym_name;
     line = nd.loc.first_line if nd.loc else 0;
@@ -4324,7 +4325,7 @@ impl JcirGenPass._native_test_shim_stmts(nd: uni.Test) -> list {
     return [CgSplice(src='\n'.join(src_lines), offset=0)];
 }
 
-impl JcirGenPass._generate_sv_to_sv_stubs(nd: uni.Import) -> bool {
+impl JcirGenPass._generate_sv_to_sv_stubs(nd: Import) -> bool {
     manifest = self.ir_in.gen.interop_manifest;
     if (not manifest) {
         return False;
@@ -4352,7 +4353,7 @@ impl JcirGenPass._generate_sv_to_sv_stubs(nd: uni.Import) -> bool {
     ];
     names: list = ['__jac_sv_client'];
     for item in nd.items {
-        if not isinstance(item, uni.ModuleItem) {
+        if not isinstance(item, ModuleItem) {
             continue;
         }
         item_name = getattr(item.name, 'value', str(item.name));
@@ -4373,7 +4374,7 @@ impl JcirGenPass._generate_sv_to_sv_stubs(nd: uni.Import) -> bool {
                 break;
             }
         }
-        if binding is None {
+        if not isinstance(binding, InteropBinding) {
             continue;
         }
         if binding.kind == 'walker' {
@@ -4621,21 +4622,22 @@ impl JcirGenPass._invoke_llm_call(
     return call;
 }
 
-impl JcirGenPass.gen_llm_body(nd: uni.Ability) -> list {
-    assert isinstance(nd.signature, uni.FuncSignature);
+impl JcirGenPass.gen_llm_body(nd: Ability) -> list {
+    assert isinstance(nd.signature, FuncSignature);
     model_expr: CgNode;
     if (
         nd.signature.return_type
-        and isinstance(nd.signature.return_type, uni.BinaryExpr)
-        and isinstance(nd.signature.return_type.op, uni.Token)
+        and isinstance(nd.signature.return_type, BinaryExpr)
+        and isinstance(nd.signature.return_type.op, Token)
         and (nd.signature.return_type.op.name == Tok.KW_BY)
     ) {
         model_expr = self.val(nd.signature.return_type.right);
-    } elif isinstance(nd.body, uni.Expr) {
+    } elif isinstance(nd.body, Expr) {
         model_expr = self.val(nd.body);
     } else {
         raise self.ice('gen_llm_body called without model expression');
     }
+    llm_name_ref = nd.name_ref;
     caller: CgNode;
     if nd.method_owner {
         owner = self.nod(
@@ -4652,20 +4654,30 @@ impl JcirGenPass.gen_llm_body(nd: uni.Ability) -> list {
             ['value', 'attr', 'ctx'],
             [
                 owner,
-                self._py_name(nd.name_ref),
+                self._py_name(llm_name_ref) if llm_name_ref is not None else "",
                 self.nod('Load', [], [], jac_node=nd.method_owner)
             ],
             jac_node=nd.method_owner
         );
     } else {
-        caller = self.name_load(self._py_name(nd.name_ref));
+        caller = self.name_load(
+            self._py_name(llm_name_ref) if llm_name_ref is not None else ""
+        );
     }
     args = self.nod(
         'Dict',
         ['keys', 'values'],
         [
-            [self.const_of(param.name.sym_name) for param in nd.signature.params],
-            [self.name_load(param.name.sym_name) for param in nd.signature.params]
+            [
+                self.const_of(param.name.sym_name)
+                for param in nd.signature.params
+                if isinstance(param, ParamVar)
+            ],
+            [
+                self.name_load(param.name.sym_name)
+                for param in nd.signature.params
+                if isinstance(param, ParamVar)
+            ]
         ]
     );
     llm_call = self._invoke_llm_call(
