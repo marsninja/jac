@@ -529,19 +529,18 @@ assumed away.
   byte, so a missing entity is a silent divergence rather than a missing
   feature.
 
-  The emitter builds as a native artifact and is measured, but it is
-  **refused rather than sealed**, recorded in
-  `NATIVE_SEAL_REFUSED_ROOTS`. The artifact links and passes both its
-  canaries; what refuses it is the reachability walk. Two waived seams
-  are reachable through native calls from the live entry surface:
-  `enter_node` calls `_gen_native_interop_stubs` on the first
-  native-context node in a module, and `_emit_lambda_expr_body`
-  self-calls `exit_func_call`. A waiver only holds while its stub ships
-  dead, so a sealed emitter would abort on the first module taking
-  either path. The interop one clears when the manifest crosses as a
-  native-clean record; the other when the FuncCall gap lowers. The
-  refusal is pinned in `test_sealed_seam_reachability.jac` against the
-  exact reachable set, so it fails the day either clears.
+  The emitter is a **sealed** native seal root, with an empty reachable
+  waived set. It was refused for three natively-reachable stubs and all
+  three cleared. Moving the interop stub generation off `enter_node`
+  into `exit_module` took `_gen_native_interop_stubs` and, with it,
+  unitree's `gen` accessor, because that call was the only native path
+  reaching a `gen` read. `exit_func_call` cleared when its chunked-flow
+  question -- the mangled receiver type of an `x.chunks(n)` call --
+  became `FuncCall.chunks_recv_type`, stamped in `type_checker_pass`
+  beside `call_kind`. Reading a type-system object is Python-only by
+  construction, so the decision had to arrive as data; it is a new field
+  rather than a new `call_kind` value because the native and ecmascript
+  emitters branch on that field's existing values.
 
   Building it is the most expensive root from cold: 3m26s for the
   artifact, 3m50s with its container crossing canary. Under the
@@ -558,7 +557,18 @@ assumed away.
   `NATIVE_SEAL_WAIVER_FAMILIES`, each naming what clears it, and
   `test_sealed_demotion_audit.jac` holds the whole seal to that,
   refused roots included: withholding the artifact does not withhold
-  the accounting.
+  the accounting. `NATIVE_SEAL_REFUSED_ROOTS` is empty again, and the
+  mechanism stays for the next root that needs it.
+
+  The sealed-versus-source byte comparison C2 could not run now runs.
+  No generated ctypes entry was needed: the pass-serving binder is the
+  crossing, so once `native_artifact_for` reports the emitter's
+  artifact, `JcirGenPass.ir_bytes()` executes inside it.
+  `test_jcir_sealed_bytes.jac` builds the real artifact, computes the
+  source-lane container bytes, serves the artifact, computes them again,
+  and asserts equality across the corpus; it also pins that the binder
+  registered the module, so a green run cannot mean source lane against
+  source lane.
 - `jac0core/passes/jcir_bc_gen_pass.jac` (+impl): the shim-seat pipeline
   pass. Reads `gen.jcir`, transcribes through the reference shim into
   `gen.py_ast`, unparses the tree into `gen.py` (so tooling consumers of
