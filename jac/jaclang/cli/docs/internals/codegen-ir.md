@@ -529,8 +529,14 @@ assumed away.
   byte, so a missing entity is a silent divergence rather than a missing
   feature.
 
-  The emitter is a native seal root. `seal_native_artifacts` builds
-  `libjac_jcir_gen_pass.so` from it with an eight-module closure
+  The emitter is a native seal root, and the most expensive one to build
+  from cold: 3m26s for the artifact, 3m50s with its container crossing
+  canary. Under the sha-incremental reuse a warm seal of an unchanged
+  tree costs about 2.2s in a fresh process, nearly all of it
+  (about 2.08s) re-deriving the materializer root through
+  `generate_materialize_root`, which is the next thing worth caching.
+  `seal_native_artifacts` builds `libjac_jcir_gen_pass.so` with an
+  eight-module closure
   (`codegen_ir`, `constant`, `diagnostics`, `jcir_facts`, `srcloc`,
   `unitree`, the `textwrap` shim, and the emitter), and the artifact
   passes a load canary and a container crossing canary before it is
