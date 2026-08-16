@@ -68,6 +68,7 @@ import from jaclang.compiler.passes.main.layout_pass {
 import from jaclang.jac0core.sealed { native_artifact_for }
 import from jaclang.utils.precompile_bytecode {
     _UNITREE_SEAM_WAIVERS,
+    NATIVE_SEAL_ROOTS,
     seal_waiver_names
 }
 
@@ -568,12 +569,14 @@ test "the jcir walk reaches the emitter's own machinery" {
 
 
 test "jcir stays out of the seal while its stubs are reachable" {
-    # The emitter's refusal, pinned so it self-clears. Two waived seams are
-    # reachable through native calls from the live entry surface:
+    # The emitter's refusal, pinned so it self-clears. Three waived seams
+    # are reachable through native calls from the live entry surface:
     # `enter_node` calls `_gen_native_interop_stubs` on the first
-    # native-context node in a module, and `_emit_lambda_expr_body`
-    # self-calls `exit_func_call`. A sealed emitter would abort on the first
-    # module taking either path, so the root is refused rather than sealed.
+    # native-context node in a module, `_emit_lambda_expr_body` self-calls
+    # `exit_func_call`, and live methods read `self.ir_in.gen` to reach the
+    # interop manifest, which dispatches unitree's waived `gen` accessor. A
+    # sealed emitter would abort on the first module taking any of the
+    # three, so the root is refused rather than sealed.
     #
     # The two `lit_value` accessors the walk also flags are carve-outs of
     # the receiver-blind accessor rule, argued in ACCESSOR_ARGUED: the only
@@ -599,7 +602,8 @@ test "jcir stays out of the seal while its stubs are reachable" {
     );
     expected = [
         "JcirGenPass._gen_native_interop_stubs",
-        "JcirGenPass.exit_func_call"
+        "JcirGenPass.exit_func_call",
+        "UniNode.gen.__get__"
     ];
     assert hit == expected , (
         f"{JCIR_ROOT}: the reachable waived set moved. It was {expected} and "
