@@ -81,13 +81,14 @@ glob CORPUS: list[str] = [
 
 """The ref this branch's compile cost is measured against.
 
-The merge-base of `zb-endgame` with `main`: upstream main as it stood at the
-last merge into the branch. Pinning the merge-base rather than main's tip means
-the delta is exactly the phase-C work on this branch and nothing that landed
-upstream alongside it. Update it when the branch merges upstream again, and say
-so in the commit -- a moved baseline silently reinterprets every number here.
+The most recent upstream `main` commit in this branch's history: `ee434887e`,
+the incremental seal reuse (#8275). Pinning the upstream commit the branch
+already contains, rather than main's tip, means the delta is exactly the
+phase-C lane work and nothing that landed upstream alongside it. Move it
+whenever the branch merges upstream again, and say so in the commit -- a moved
+baseline silently reinterprets every number here.
 """
-glob BASELINE_REF: str = "5f95ff54b8771154e64f6e310e3a828cbde45bdc";
+glob BASELINE_REF: str = "ee434887e1100e6467b9aa7a96adb2b14535c732";
 
 """Gitignored build artifacts a fresh checkout of the baseline cannot produce.
 
