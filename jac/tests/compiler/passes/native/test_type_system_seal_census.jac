@@ -7,7 +7,7 @@ module-scoped refusal denies the whole module its IR, so a seam census taken
 against it reads "not reached" rather than "clean" -- which is why `has_ir` is
 asserted before any seam count is believed.
 
-Three measurements, one memoized census each, and they answer different
+Four measurements, one memoized census each, and they answer different
 questions:
 
 * `types.jac` -- does the keystone reach codegen at all, and which of its
@@ -23,6 +23,10 @@ questions:
   demotion, plus an enumeration of the refusals that still escape an owner.
   Since #8234 a constructor owns its own body, so what remains ownerless here
   is field declarations alone.
+* `enum_utils.jac` and `operations.jac` -- refused outright, and pinned as
+  refused. A parameter typed `TypeEvaluator` is resolved before any body opens
+  a demotion window, so it strands the module the way a field declaration
+  does. Nothing of either module is measurable until that changes.
 
 Waivers are enumerated one at a time and name what blocks each, so the suite
 never degrades into a "fewer than N" threshold: an un-waived seam fails, and a
@@ -46,16 +50,28 @@ glob PKG_PATH = Path(jaclang.__file__).parent,
 
 """Every module the native compile of `types.jac` puts in its closure.
 
-`type_utils`, `operations` and the evaluator are deliberately absent: the
-methods that reach them are seams, so their calls never become native edges.
-`unitree` is present and cannot be avoided -- `ClassDetailsShared.symbol_table`
-is a `UniScopeNode` field, which is a layout dependency no matter that the
-import is `import type`.
+`operations` and the evaluator are deliberately absent: the methods that reach
+them are seams, so their calls never become native edges. `unitree` is present
+and cannot be avoided -- `ClassDetailsShared.symbol_table` is a `UniScopeNode`
+field, which is a layout dependency no matter that the import is `import type`.
+
+`type_utils` is present now and was not before. `ClassVar` becoming a
+compile-time import name made `types.jac` linkable, which closed the
+`unitree <-> types` layout cycle in the other direction too, and the modules
+on the far side of it are in the unit whichever end is the root. This set is
+`unitree`'s closure exactly -- `test_unitree_seal_census.jac` pins the same
+eleven from the other root, and that is the seal's own view.
 """
 glob TYPES_CLOSURE: tuple = (
+         "_hashlib_native.jac",
          "constant.jac",
+         "fnmatch.jac",
+         "hashlib.jac",
+         "helpers.jac",
          "pathlib.jac",
          "srcloc.jac",
+         "type_registry.jac",
+         "type_utils.jac",
          "types.jac",
          "unitree.jac"
      ),
@@ -78,6 +94,13 @@ walked or sliced `list[T] | None` slots and now lower. Three entries survived
 that erasure but for a reason their old text did not name -- the two
 remaining `clone_*` methods and `specialize_func_type_vars` -- so their
 waivers were rewritten rather than kept.
+
+Two more left when `type_utils` joined the closure. `FunctionType.specialize`
+and `FunctionType.specialize_func_type_vars` were both waived as calling a
+function "outside this closure", and it is inside now, so they lower.
+`ClassType.lookup_member_symbol` was waived for the same crossing and still
+demotes, but on its own `Symbol.value` read rather than the call -- a
+different reason, so the entry is rewritten rather than kept.
 """
 glob TYPES_SEAM_WAIVERS: dict[(str, str)] = {
          "types.jac::TypeBase.category.__get__": (
@@ -99,16 +122,8 @@ glob TYPES_SEAM_WAIVERS: dict[(str, str)] = {
              "symbol-table handle the native unit does not model."
          ),
          "types.jac::ClassType.lookup_member_symbol": (
-             "Python-only: calls `collect_member_syms` from `type_utils`, a "
-             "module outside this closure that walks symbol tables."
-         ),
-         "types.jac::FunctionType.specialize": (
-             "Python-only: calls `build_type_var_solution` from `type_utils`, "
-             "outside this closure."
-         ),
-         "types.jac::FunctionType.specialize_func_type_vars": (
-             "Python-only: calls `apply_solved_type_vars` from `type_utils`, "
-             "outside this closure. Its optional-list iteration lowers now."
+             "Python-only: walks a symbol table and reads `Symbol.value`, the "
+             "same unmodelled handle `get_class_symbol` stops on."
          ),
          "types.jac::create_callable_type": (
              "Backend gap: reads `ParameterCategory.Positional`, an `IntEnum` "
@@ -135,14 +150,9 @@ demotable like any other callable, and now read as
 `TypeEvaluator.__post_init__` in the census instead.
 """
 glob EVALUATOR_FATAL_WAIVERS: dict[(str, str)] = {
-         "type_evaluator.jac::Native lowering failed for type 'TypeBase'": (
-             "Field declaration: `NarrowingTarget.declared_type` and "
-             "`NarrowingPredicate.narrow_type` hold the abstract `TypeBase`, "
-             "which has no concrete layout. A field is not an ability, so "
-             "there is no owner to demote."
-         ),
          "type_evaluator.jac::Native lowering failed for type '[MultiString]'": (
-             "Field declaration: a list of `MultiString` unitree nodes."
+             "Field declaration: a list of `MultiString` unitree nodes. "
+             "`MultiString` has a layout, but the list erases its element."
          ),
          (
              "type_evaluator.jac::Native lowering failed for type "
@@ -150,15 +160,28 @@ glob EVALUATOR_FATAL_WAIVERS: dict[(str, str)] = {
          ): (
              "Field declaration: a cache keyed by tuple holding optional "
              "`TypeBase`; neither half has a native layout."
-         ),
-         (
-             "type_evaluator.jac::Native lowering failed for type "
-             "'dict[str, ModuleType]'"
-         ): "Field declaration: a module cache holding `ModuleType` values.",
-         (
-             "type_evaluator.jac::Native lowering failed for type "
-             "'dict[int, TypeBase]'"
-         ): "Field declaration: a cache holding abstract `TypeBase` values."
+         )
+     };
+
+"""Modules whose whole native compile is refused by a parameter's type.
+
+Not a seam table: these two never reach codegen at all, so nothing about their
+bodies is measured. Both hold `def f(evaluator: TypeEvaluator, ...)` at module
+scope, and `TypeEvaluator` is the stage's upper half -- a class with no native
+layout. A signature is resolved when the ability is declared, before any body
+opens a demotion window, so the failure has no owner and costs the module its
+IR the way an un-lowerable field declaration does.
+
+That asymmetry is the clearing mechanism, and it is the same one #8234 and
+#8237 already applied twice: a constructor now owns its body, and the
+evaluator's `postinit` handles now demote as `__post_init__`. Declaration-time
+signature resolution is the third case and the only one left. Until it lands,
+both modules are un-sealable and un-measurable, which is why they are pinned
+here by their refusal rather than waived into a seam table.
+"""
+glob SIGNATURE_REFUSED_MODULES: dict[(str, str)] = {
+         "enum_utils.jac": "TypeEvaluator",
+         "operations.jac": "TypeEvaluator"
      };
 
 glob _CENSUS_MEMO: dict[(str, tuple)] = {};
@@ -349,4 +372,28 @@ test "every ownerless refusal in the evaluator is enumerated" {
         "waived refusals that no longer fire -- drop them:\n"
         + "\n".join(f"  {k}" for k in stale)
     );
+}
+
+
+test "a signature type still refuses its whole module" {
+    for (mod, tname) in sorted(SIGNATURE_REFUSED_MODULES.items()) {
+        (census, has_ir, fatal) = _census_of(TS_PATH / mod);
+        assert not has_ir , (
+            f"{mod} produced native IR. If declaration-time signature "
+            "resolution learned to demote the owning ability, this module is "
+            "measurable now: drop it from SIGNATURE_REFUSED_MODULES and give "
+            "it a seam table of its own."
+        );
+        want = f"Native lowering failed for type '{tname}'";
+        assert any(want in f for f in fatal) , (
+            f"{mod} no longer refuses on `{tname}` in a parameter. It still "
+            f"has no IR, so something else strands it now:\n"
+            + "\n".join(f"  {f}" for f in fatal)
+        );
+        seen = tuple(sorted({os.path.basename(p) for p in census}));
+        assert seen == (mod, "pathlib.jac", ) , (
+            f"{mod}'s closure is {seen}. A refused module links nothing, so "
+            "any growth here means the refusal moved rather than cleared."
+        );
+    }
 }
