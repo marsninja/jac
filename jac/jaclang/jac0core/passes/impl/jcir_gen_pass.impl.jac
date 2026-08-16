@@ -7,9 +7,12 @@ impl JcirGenPass._get_ambient_typing_names -> set[str] {
 }
 
 impl JcirGenPass.postinit -> None {
-    self.jaclib_imports = set();
-    self.builtin_imports = set();
-    self.typing_imports = set();
+    _jaclib: set[str] = set();
+    _builtins: set[str] = set();
+    _typing: set[str] = set();
+    self.jaclib_imports = _jaclib;
+    self.builtin_imports = _builtins;
+    self.typing_imports = _typing;
     self._hoist_frames = [[]];
     self._sink = {};
     self.preamble = [
@@ -392,7 +395,12 @@ impl JcirGenPass._report_leaked_hoisted_lambdas -> None {
         if func_def.jac_src is not None {
             jac_node = func_def.jac_src;
         }
-        self.emit(E5098, node_override=jac_node, name=func_def.get('name'));
+        leaked_name = func_def.get('name');
+        self.emit(
+            E5098,
+            node_override=jac_node,
+            name=leaked_name if isinstance(leaked_name, str) else ''
+        );
     }
 }
 
@@ -410,14 +418,14 @@ impl JcirGenPass._function_expr_from_def(
 
 impl JcirGenPass._get_sem_decorator(nd: UniNode) -> (CgNode | None) {
     semstr: str = '';
-    inner_semstr: dict = {};
+    inner_semstr: dict[(str, str)] = {};
     if isinstance(nd, Archetype) {
         semstr = nd.semstr;
-        arch_ast_body: list = [];
+        arch_ast_body: list[UniNode] = [];
         if isinstance(nd.body, list) {
-            arch_ast_body = nd.body;
+            arch_ast_body = list(nd.body);
         } elif (isinstance(nd.body, ImplDef) and isinstance(nd.body.body, list)) {
-            arch_ast_body = nd.body.body;
+            arch_ast_body = list(nd.body.body);
         }
         for stmt in arch_ast_body {
             if isinstance(stmt, ArchHas) {
@@ -430,11 +438,11 @@ impl JcirGenPass._get_sem_decorator(nd: UniNode) -> (CgNode | None) {
         }
     } elif isinstance(nd, Enum) {
         semstr = nd.semstr;
-        enum_ast_body: list = [];
+        enum_ast_body: list[UniNode] = [];
         if isinstance(nd.body, list) {
-            enum_ast_body = nd.body;
+            enum_ast_body = list(nd.body);
         } elif (isinstance(nd.body, ImplDef) and isinstance(nd.body.body, list)) {
-            enum_ast_body = nd.body.body;
+            enum_ast_body = list(nd.body.body);
         }
         for stmt in enum_ast_body {
             if (
@@ -647,7 +655,7 @@ impl JcirGenPass.exit_module(nd: Module) -> None {
                             ['name', 'asname'],
                             [name, None],
                             jac_node=self.ir_out
-                        ) for name in sorted(self.builtin_imports)
+                        ) for name in sorted(list(self.builtin_imports))
                     ],
                     0
                 ],
@@ -709,7 +717,7 @@ impl JcirGenPass.exit_module(nd: Module) -> None {
     body_items.extend(self.preamble);
     body_items.extend(self._drain_module_hoists());
     reg_map = self._native_import_registration_map();
-    emitted: set = set();
+    emitted: set[str] = set();
     for item in merged_body {
         body_items.extend(self.outs(item));
         if not reg_map {
@@ -2324,13 +2332,18 @@ impl JcirGenPass.exit_cast_expr(nd: CastExpr) -> None {
 }
 
 impl JcirGenPass.exit_assignment(nd: Assignment) -> None {
-    value = self.val(nd.value)
-        if nd.value
-        else self.nod(
+    value: (CgNode | None) = None;
+    if nd.value {
+        value = self.val(nd.value);
+    } elif nd.is_enum_stmt {
+        value = self.nod(
             'Call', ['func', 'args', 'keywords'], [self.name_load('auto'), [], []]
-        )
-            if nd.is_enum_stmt
-            else None if nd.type_tag else self.ice();
+        );
+    } elif not nd.type_tag {
+        raise self.ice(
+            'assignment has no value, no enum default and no type tag'
+        );
+    }
     targets_ast = [self.val(t) for t in nd.target];
     if nd.type_tag {
         assignment_stmt = self.nod(
@@ -2740,7 +2753,7 @@ impl JcirGenPass.exit_unary_expr(nd: UnaryExpr) -> None {
     } elif (nd.op.name in [Tok.STAR_POW]) {
         self.set_out(nd, self.outs(nd.operand));
     } else {
-        self.ice("Unknown Unary operator " + str(nd.op.value));
+        raise self.ice("Unknown Unary operator " + nd.op.value);
     }
 }
 
@@ -2758,12 +2771,9 @@ impl JcirGenPass.exit_if_else_expr(nd: IfElseExpr) -> None {
 }
 
 impl JcirGenPass.exit_multi_string(nd: MultiString) -> None {
-    if (
-        (len(nd.strings) == 1)
-        and isinstance(nd.strings[0], FString)
-        and self.outs(nd.strings[0])
-    ) {
-        self.set_out(nd, self.outs(nd.strings[0]));
+    lone = nd.strings[0] if (len(nd.strings) == 1) else None;
+    if (isinstance(lone, FString) and self.outs(lone)) {
+        self.set_out(nd, self.outs(lone));
         return;
     }
     def get_pieces(str_seq: Sequence) -> list {
@@ -3246,7 +3256,7 @@ impl JcirGenPass.gen_call_args(nd: FuncCall) -> tuple[(list, list)] {
             } elif (isinstance(x, KWPair) and self.val(x).cls == 'keyword') {
                 keywords.append(self.val(x));
             } else {
-                self.ice('Invalid Parameter');
+                raise self.ice('Invalid Parameter');
             }
         }
     }
@@ -3275,9 +3285,10 @@ impl JcirGenPass.exit_func_call(nd: FuncCall) -> None {
     ) {
         _ck_m = "";
         try {
-            _ck_m = nd.target.target.type.mangle()
-                if nd.target.target.type is not None
-                else "";
+            _ck_t = nd.target.target.type;
+            if _ck_t is not None {
+                _ck_m = _ck_t.mangle();
+            }
         } except Exception {
             _ck_m = "";
         }
@@ -3456,9 +3467,11 @@ impl JcirGenPass._query_filter_kws(
                 reason = 'left side must be a declared field name';
             } else {
                 op_node = ops[0];
-                op_str = self._cmp_op_str(op_node);
+                op_str = self._cmp_op_str(op_node) if isinstance(op_node, CgNode)
+                    else None;
                 if op_str is None {
-                    reason = f"operator '{op_node.cls}' is not admitted";
+                    op_label = op_node.cls if isinstance(op_node, CgNode) else '?';
+                    reason = f"operator '{op_label}' is not admitted";
                 } else {
                     field_name = left.get('id');
                     rhs = cmp_ast.get('comparators')[0];
@@ -4259,16 +4272,30 @@ impl JcirGenPass._top_level_bound_names(items: any) -> list {
             names.extend(stmt.bound_names);
         } elif isinstance(stmt, CgNode) {
             if stmt.cls in ('FunctionDef', 'AsyncFunctionDef', 'ClassDef') {
-                names.append(stmt.get('name'));
+                def_name = stmt.get('name');
+                if isinstance(def_name, str) {
+                    names.append(def_name);
+                }
             } elif stmt.cls in ('Import', 'ImportFrom') {
                 for alias in stmt.get('names') {
+                    if not isinstance(alias, CgNode) {
+                        continue;
+                    }
                     asname = alias.get('asname') if alias.hasf('asname') else None;
-                    names.append(asname or alias.get('name'));
+                    bound = asname if isinstance(asname, str) and asname
+                        else alias.get('name');
+                    if isinstance(bound, str) {
+                        names.append(bound);
+                    }
                 }
             } elif stmt.cls == 'Assign' {
                 for target in stmt.get('targets') {
-                    if (isinstance(target, CgNode) and target.cls == 'Name') {
-                        names.append(target.get('id'));
+                    if (not isinstance(target, CgNode)) or (target.cls != 'Name') {
+                        continue;
+                    }
+                    target_id = target.get('id');
+                    if isinstance(target_id, str) {
+                        names.append(target_id);
                     }
                 }
             }
@@ -4320,7 +4347,7 @@ impl JcirGenPass._generate_sv_to_sv_stubs(nd: Import) -> bool {
     if not module_name {
         return False;
     }
-    sv_to_sv_names: set = set();
+    sv_to_sv_names: set[str] = set();
     for b in manifest.server_exports_to_server {
         if b.source_module == module_name {
             sv_to_sv_names.add(b.name);
