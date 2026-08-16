@@ -569,14 +569,19 @@ test "the jcir walk reaches the emitter's own machinery" {
 
 
 test "jcir stays out of the seal while its stubs are reachable" {
-    # The emitter's refusal, pinned so it self-clears. Three waived seams
-    # are reachable through native calls from the live entry surface:
-    # `enter_node` calls `_gen_native_interop_stubs` on the first
-    # native-context node in a module, `_emit_lambda_expr_body` self-calls
-    # `exit_func_call`, and live methods read `self.ir_in.gen` to reach the
-    # interop manifest, which dispatches unitree's waived `gen` accessor. A
-    # sealed emitter would abort on the first module taking any of the
-    # three, so the root is refused rather than sealed.
+    # The emitter's refusal, pinned so it self-clears. One waived seam is
+    # still reachable through native calls from the live entry surface:
+    # `translate_jac_bin_op` synthesizes a `FuncCall` for the pipe
+    # operators and self-calls `exit_func_call`, which is waived because
+    # its chunked-flow branch asks the type system for `TypeBase.mangle`.
+    #
+    # Two others cleared when the interop stub emission moved off
+    # `enter_node` into `exit_module`. The `gen` accessor went with it:
+    # every remaining `self.ir_in.gen` read lives in a waived method that
+    # the traversal reaches through Python dispatch, so nothing native
+    # dispatches it any more. That is the whole of the gen-as-data
+    # question for this pass -- the emitter reads exactly one thing from
+    # `gen`, the interop manifest, and writes `gen.jcir`.
     #
     # The two `lit_value` accessors the walk also flags are carve-outs of
     # the receiver-blind accessor rule, argued in ACCESSOR_ARGUED: the only
@@ -600,11 +605,7 @@ test "jcir stays out of the seal while its stubs are reachable" {
         "from NATIVE_SEAL_REFUSED_ROOTS, and restore the census "
         "registration pin"
     );
-    expected = [
-        "JcirGenPass._gen_native_interop_stubs",
-        "JcirGenPass.exit_func_call",
-        "UniNode.gen.__get__"
-    ];
+    expected = ["JcirGenPass.exit_func_call"];
     assert hit == expected , (
         f"{JCIR_ROOT}: the reachable waived set moved. It was {expected} and "
         f"is now {hit}. A name that left is progress and should shrink this "

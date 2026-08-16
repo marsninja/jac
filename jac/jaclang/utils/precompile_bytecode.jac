@@ -298,20 +298,19 @@ glob NATIVE_SEAL_ROOTS: tuple = (
      ),
      NATIVE_SEAL_REFUSED_ROOTS: dict[str, str] = {
          "jac0core/passes/jcir_gen_pass.jac": (
-             "three waived seams are natively reachable from the live "
-             "entry surface. `enter_node` calls "
-             "`_gen_native_interop_stubs` directly on the first "
-             "native-context node in a module; `_emit_lambda_expr_body` "
-             "self-calls `exit_func_call`; and live methods read "
-             "`self.ir_in.gen` for the interop manifest, dispatching "
-             "unitree's waived `UniNode.gen` accessor. All three are "
-             "waived, so a sealed emitter aborts on the first module that "
-             "takes any of them. Two clear together when the manifest "
-             "crosses as a native-clean record instead of a Python object "
-             "reached through `gen` (the #8242 pattern); the third clears "
-             "when the FuncCall gap in `exit_func_call` lowers. The "
-             "census, the closure and the waiver families below all still "
-             "hold, so the root seals the day they clear."
+             "one waived seam is natively reachable from the live entry "
+             "surface. `translate_jac_bin_op` synthesizes a `FuncCall` "
+             "for the pipe-forward and pipe-backward operators and "
+             "self-calls `exit_func_call`, which is waived because its "
+             "chunked-flow branch asks the type system for "
+             "`TypeBase.mangle`. A sealed emitter aborts on the first "
+             "pipe operator. It clears when that type decision is stamped "
+             "onto the node as data (the #8242 pattern), which is the "
+             "only way the emitter can have it: any read of a "
+             "type-system object is Python-only by construction. Two "
+             "further seams cleared when the interop stub emission moved "
+             "off `enter_node`, and the waived `UniNode.gen` accessor "
+             "went with them."
          )
      },
      NATIVE_SEAL_CLOSURE: tuple = (

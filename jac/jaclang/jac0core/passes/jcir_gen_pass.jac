@@ -315,7 +315,8 @@ obj JcirGenPass(BaseAstGenPass[CgItem]) {
         preamble: list[CgItem] postinit,
         _sink: dict[UniNode, list[CgItem]] postinit,
         _module_root: (CgNode | None) = None,
-        _module_path: str = "";
+        _module_path: str = "",
+        _interop_stub_node: (UniNode | None) = None;
 
     with entry { }
 
