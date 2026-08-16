@@ -58,12 +58,22 @@ import from jaclang.jac0core.program { JacProgram }
 import from jaclang.jac0core.sealed { _jaclang_image, native_artifact_for }
 import from jaclang.utils.precompile_bytecode {
     NATIVE_SEAL_DEMOTION_WAIVERS,
+    NATIVE_SEAL_REFUSED_ROOTS,
     NATIVE_SEAL_ROOTS,
     NATIVE_SEAL_WAIVER_FAMILIES,
     seal_waiver_names
 }
 
 glob PKG_PATH = Path(jaclang.__file__).parent;
+
+"""Sealed roots plus the ones measured and refused.
+
+A refused root still carries a census and a waiver set that have to
+hold; refusing it withholds the artifact, not the accounting.
+"""
+glob AUDITED_ROOTS: tuple = tuple(
+         list(NATIVE_SEAL_ROOTS) + sorted(NATIVE_SEAL_REFUSED_ROOTS)
+     );
 
 glob _CENSUS_MEMO: dict[(str, tuple)] = {};
 
@@ -140,7 +150,7 @@ def _auditable_roots -> tuple {
     live: list[str] = [];
     served: list[str] = [];
     generated: list[str] = [];
-    for rel in NATIVE_SEAL_ROOTS {
+    for rel in AUDITED_ROOTS {
         if native_artifact_for(_root_module_name(rel)) is not None {
             served.append(rel);
         } elif not (PKG_PATH / rel).is_file() {
@@ -163,10 +173,10 @@ def _family_of_waiver -> dict[(str, str)] {
     return owner;
 }
 
-"""Every waiver name registered against any sealed root."""
+"""Every waiver name registered against an audited root."""
 def _all_waived_names -> set[str] {
     names: set[str] = set();
-    for rel in NATIVE_SEAL_ROOTS {
+    for rel in AUDITED_ROOTS {
         (allowed, _bare) = seal_waiver_names(rel);
         for name in allowed {
             names.add(name);
@@ -278,7 +288,7 @@ test "every waiver family covers a registered waiver" {
 
 test "no waived dependency function is advertised as an export" {
     offenders: list[str] = [];
-    for rel in NATIVE_SEAL_ROOTS {
+    for rel in AUDITED_ROOTS {
         (allowed, _bare) = seal_waiver_names(rel);
         for name in sorted(allowed) {
             (owner, _sep, member) = name.partition("::");
@@ -311,7 +321,7 @@ test "the audit reports the whole waived surface" {
     lines: list[str] = [
         "",
         "  === sealed-root demotion audit ===",
-        f"  roots measured: {len(live)} of {len(NATIVE_SEAL_ROOTS)}"
+        f"  roots measured: {len(live)} of {len(AUDITED_ROOTS)}"
     ];
     if generated {
         lines.append(

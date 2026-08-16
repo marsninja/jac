@@ -293,10 +293,24 @@ glob NATIVE_SEAL_ROOTS: tuple = (
          "jac0core/passes/uni_pass.jac",
          "jac0core/passes/endpoint_effect_pass.jac",
          "compiler/passes/main/sem_def_match_pass.jac",
-         "jac0core/passes/jcir_gen_pass.jac",
          "compiler/native_materialize.jac",
 
      ),
+     NATIVE_SEAL_REFUSED_ROOTS: dict[str, str] = {
+         "jac0core/passes/jcir_gen_pass.jac": (
+             "two waived seams are natively reachable from the live entry "
+             "surface. `enter_node` calls `_gen_native_interop_stubs` "
+             "directly on the first native-context node in a module, and "
+             "`_emit_lambda_expr_body` self-calls `exit_func_call`; both "
+             "are waived, so a sealed emitter aborts on the first module "
+             "that takes either path. The interop one clears with the "
+             "manifest crossing as a native-clean record (the #8242 "
+             "pattern); the other clears when the FuncCall gap in "
+             "`exit_func_call` lowers. The census, the closure and the "
+             "waiver families below all still hold, so the root seals the "
+             "day both clear."
+         )
+     },
      NATIVE_SEAL_CLOSURE: tuple = (
          "jac0core/codegen_ir.jac",
          "jac0core/constant.jac",

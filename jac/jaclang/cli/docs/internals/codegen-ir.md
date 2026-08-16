@@ -529,21 +529,36 @@ assumed away.
   byte, so a missing entity is a silent divergence rather than a missing
   feature.
 
-  The emitter is a native seal root, and the most expensive one to build
-  from cold: 3m26s for the artifact, 3m50s with its container crossing
-  canary. Under the sha-incremental reuse a warm seal of an unchanged
-  tree costs about 2.2s in a fresh process, nearly all of it
-  (about 2.08s) re-deriving the materializer root through
-  `generate_materialize_root`, which is the next thing worth caching.
-  `seal_native_artifacts` builds `libjac_jcir_gen_pass.so` with an
-  eight-module closure
+  The emitter builds as a native artifact and is measured, but it is
+  **refused rather than sealed**, recorded in
+  `NATIVE_SEAL_REFUSED_ROOTS`. The artifact links and passes both its
+  canaries; what refuses it is the reachability walk. Two waived seams
+  are reachable through native calls from the live entry surface:
+  `enter_node` calls `_gen_native_interop_stubs` on the first
+  native-context node in a module, and `_emit_lambda_expr_body`
+  self-calls `exit_func_call`. A waiver only holds while its stub ships
+  dead, so a sealed emitter would abort on the first module taking
+  either path. The interop one clears when the manifest crosses as a
+  native-clean record; the other when the FuncCall gap lowers. The
+  refusal is pinned in `test_sealed_seam_reachability.jac` against the
+  exact reachable set, so it fails the day either clears.
+
+  Building it is the most expensive root from cold: 3m26s for the
+  artifact, 3m50s with its container crossing canary. Under the
+  sha-incremental reuse a warm seal of an unchanged tree costs about
+  2.2s in a fresh process, nearly all of it (about 2.08s) re-deriving
+  the materializer root through `generate_materialize_root`, which is
+  the next thing worth caching. `seal_native_artifacts` builds
+  `libjac_jcir_gen_pass.so` with an eight-module closure
   (`codegen_ir`, `constant`, `diagnostics`, `jcir_facts`, `srcloc`,
   `unitree`, the `textwrap` shim, and the emitter), and the artifact
   passes a load canary and a container crossing canary before it is
   accepted. `test_jcir_seal_census.jac` pins the closure and the seam
   set; the residual seams are waived by family in
   `NATIVE_SEAL_WAIVER_FAMILIES`, each naming what clears it, and
-  `test_sealed_demotion_audit.jac` holds the whole seal to that.
+  `test_sealed_demotion_audit.jac` holds the whole seal to that,
+  refused roots included: withholding the artifact does not withhold
+  the accounting.
 - `jac0core/passes/jcir_bc_gen_pass.jac` (+impl): the shim-seat pipeline
   pass. Reads `gen.jcir`, transcribes through the reference shim into
   `gen.py_ast`, unparses the tree into `gen.py` (so tooling consumers of
