@@ -137,7 +137,7 @@ impl JcirGenPass.exit_node(nd: UniNode) -> None {
 }
 
 impl JcirGenPass.nod(
-    cls_name: str, keys: list, vals: list, jac_node: (UniNode | None) = None
+    cls_name: str, keys: list[str], vals: list, jac_node: (UniNode | None) = None
 ) -> CgNode {
     src = jac_node if jac_node is not None else self.cur_node;
     loc = src.loc;
@@ -160,9 +160,29 @@ impl JcirGenPass.nod(
 }
 
 impl JcirGenPass.nod_loc(
-    cls_name: str, keys: list, vals: list, l1: int, c1: int, l2: int, c2: int
+    cls_name: str,
+    keys: list[str],
+    vals: list,
+    l1: int,
+    c1: int,
+    l2: int,
+    c2: int
 ) -> CgNode {
     return CgNode(cls=cls_name, keys=keys, vals=vals, l1=l1, c1=c1, l2=l2, c2=c2);
+}
+
+impl JcirGenPass._flatten_ast_list(
+    items: list[CgItem | list[CgItem] | None]
+) -> list[CgItem] {
+    flattened: list[CgItem] = [];
+    for item in items {
+        if isinstance(item, `list) {
+            flattened.extend(item);
+        } elif (item is not None) {
+            flattened.append(item);
+        }
+    }
+    return flattened;
 }
 
 impl JcirGenPass.outs(nd: UniNode) -> list[CgItem] {
@@ -322,8 +342,8 @@ impl JcirGenPass._ancestor_is_one_of(
 impl JcirGenPass._split_scope_hoists(
     hoists: list, sig_roots: list[UniNode]
 ) -> tuple[(list, list)] {
-    body_hoists: list = [];
-    enclosing_hoists: list = [];
+    body_hoists: list[CgNode] = [];
+    enclosing_hoists: list[CgNode] = [];
     for func_def in hoists {
         lam = func_def.jac_src;
         if (lam is not None and self._ancestor_is_one_of(lam, sig_roots)) {
@@ -348,7 +368,7 @@ impl JcirGenPass._drain_module_hoists -> list {
 }
 
 impl JcirGenPass._report_leaked_hoisted_lambdas -> None {
-    leftover: list = [];
+    leftover: list[CgNode] = [];
     for frame in self._hoist_frames[1:] {
         leftover.extend(frame);
     }
@@ -664,7 +684,7 @@ impl JcirGenPass.exit_module(nd: Module) -> None {
         );
     }
     merged_body = self._merge_module_bodies(nd);
-    body_items: list = [];
+    body_items: list[CgItem] = [];
     if nd.doc {
         body_items.append(
             self.nod('Expr', ['value'], [self.val(nd.doc)], jac_node=nd.doc)
@@ -707,7 +727,7 @@ impl JcirGenPass.exit_type_param(nd: TypeParam) -> None {
 }
 
 impl JcirGenPass.exit_type_alias(nd: TypeAlias) -> None {
-    type_param_asts: list = [];
+    type_param_asts: list[CgNode] = [];
     for tp in nd.type_params {
         if self.outs(tp) {
             type_param_asts.append(self.val(tp));
@@ -839,7 +859,7 @@ impl JcirGenPass.exit_test(nd: Test) -> None {
             []
         ]
     );
-    jac_test_keywords: list = [];
+    jac_test_keywords: list[CgNode] = [];
     if nd.description {
         jac_test_keywords.append(
             self.nod(
@@ -960,7 +980,7 @@ impl JcirGenPass.exit_import(nd: Import) -> None {
     ) {
         return;
     }
-    py_nodes: list = [];
+    py_nodes: list[CgNode] = [];
     if nd.doc {
         py_nodes.append(
             self.nod('Expr', ['value'], [self.val(nd.doc)], jac_node=nd.doc)
@@ -1128,7 +1148,7 @@ impl JcirGenPass.exit_archetype(nd: Archetype) -> None {
     if (nd.arch_type.name != Tok.KW_CLASS) {
         base_classes.append(self.jaclib_obj(nd.arch_type.value.capitalize()));
     }
-    type_param_asts: list = [];
+    type_param_asts: list[CgNode] = [];
     if nd.type_params {
         for tp in nd.type_params {
             if self.outs(tp) {
@@ -1167,7 +1187,7 @@ impl JcirGenPass.exit_enum(nd: Enum) -> None {
         decorators.append(sem_decorator);
     }
     trailing_kind: str = "Enum";
-    extra_bases: list = [];
+    extra_bases: list[CgNode] = [];
     if nd.value_type {
         if (isinstance(nd.value_type, Name) and nd.value_type.value == "int") {
             trailing_kind = "IntEnum";
@@ -1510,14 +1530,14 @@ impl JcirGenPass.exit_func_signature(nd: FuncSignature) -> None {
     } else {
         params = params + [self.val(i) for i in nd.params];
     }
-    defaults: list = [];
+    defaults: list[CgNode] = [];
     for i in [*nd.posonly_params, *nd.params] {
         if i.value {
             defaults.append(self.val(i.value));
         }
     }
     kwonly_args = [self.val(i) for i in nd.kwonlyargs];
-    kw_defaults: list = [];
+    kw_defaults: list[CgNode | None] = [];
     for i in nd.kwonlyargs {
         if isinstance(i, ParamVar) and i.value {
             kw_defaults.append(self.val(i.value));
@@ -1658,7 +1678,7 @@ impl JcirGenPass.exit_arch_has(nd: ArchHas) -> None {
 impl JcirGenPass.exit_has_var(nd: HasVar) -> None {
     annotation = self.val(nd.type_tag) if nd.type_tag else None;
     if ((nd.accessors is not None) and (len(nd.accessors) > 0)) {
-        result_stmts: list = [];
+        result_stmts: list[CgItem] = [];
         for acc in nd.accessors {
             for stmt in self.outs(acc) {
                 result_stmts.append(stmt);
@@ -1993,7 +2013,7 @@ impl JcirGenPass.exit_finally_stmt(nd: FinallyStmt) -> None {
 }
 
 impl JcirGenPass.exit_iter_for_stmt(nd: IterForStmt) -> None {
-    py_nodes: list = [];
+    py_nodes: list[CgNode] = [];
     body = self.resolve_stmt_block(nd.body);
     body = body + [self.val(nd.count_by)];
     py_nodes.append(self.val(nd.iter));
@@ -3220,8 +3240,8 @@ impl JcirGenPass.exit_atom_unit(nd: AtomUnit) -> None {
 }
 
 impl JcirGenPass.gen_call_args(nd: FuncCall) -> tuple[(list, list)] {
-    args: list = [];
-    keywords: list = [];
+    args: list[CgNode] = [];
+    keywords: list[CgNode] = [];
     if nd.params {
         for x in nd.params {
             if (isinstance(x, UnaryExpr) and (x.op.name == Tok.STAR_POW)) {
@@ -3419,13 +3439,13 @@ impl JcirGenPass._cmp_op_str(op: CgNode) -> (str | None) {
 impl JcirGenPass._query_filter_kws(
     fc: FilterCompr, type_arg: str, preds_arg: str
 ) -> list {
-    kws: list = [];
+    kws: list[CgNode] = [];
     if fc.f_type {
         kws.append(
             self.nod('keyword', ['arg', 'value'], [type_arg, self.val(fc.f_type)])
         );
     }
-    preds: list = [];
+    preds: list[CgNode] = [];
     for x in fc.compares {
         cmp_ast = self.val(x);
         reason: (str | None) = None;
@@ -3501,7 +3521,7 @@ impl JcirGenPass.exit_edge_ref_trailer(nd: EdgeRefTrailer) -> None {
         cur = chomp.pop(0);
     }
     origin_ast = origin if origin is not None else self.val(cur);
-    hops: list = [];
+    hops: list[CgNode] = [];
     while True {
         if not isinstance(cur, EdgeOpRef) {
             raise self.ice('edge ref chain hop is not an EdgeOpRef');
@@ -3641,7 +3661,7 @@ impl JcirGenPass.exit_connect_op(nd: ConnectOp) -> None {
 
 impl JcirGenPass.exit_filter_compr(nd: FilterCompr) -> None {
     iter_name = 'i';
-    comprs: list = [];
+    comprs: list[CgNode] = [];
     if nd.f_type {
         f_type_recipe = self.val(nd.f_type);
         cur_loc = self.nod('Pass', [], []);
@@ -3725,8 +3745,8 @@ impl JcirGenPass.exit_filter_compr(nd: FilterCompr) -> None {
 }
 
 impl JcirGenPass.exit_assign_compr(nd: AssignCompr) -> None {
-    keys: list = [];
-    values: list = [];
+    keys: list[CgNode] = [];
+    values: list[CgNode] = [];
     for i in nd.assigns {
         if i.key {
             keys.append(self.const_of(i.key.sym_name));
@@ -3814,8 +3834,8 @@ impl JcirGenPass.exit_match_sequence(nd: MatchSequence) -> None {
 }
 
 impl JcirGenPass.exit_match_mapping(nd: MatchMapping) -> None {
-    map_keys: list = [];
-    map_patterns: list = [];
+    map_keys: list[CgNode] = [];
+    map_patterns: list[CgNode] = [];
     rest: (str | None) = None;
     for i in nd.values {
         if (
@@ -4188,8 +4208,8 @@ impl JcirGenPass.exit_comment_token(nd: CommentToken) -> None {
 
 impl JcirGenPass._gen_native_interop_stubs(nd: UniNode) -> None {
     manifest = self.ir_in.gen.interop_manifest;
-    parts: list = [];
-    names: list = [];
+    parts: list[str] = [];
+    names: list[str] = [];
     if (manifest and manifest.bindings) {
         import from jaclang.jac0core.interop_bridge { JAC_TO_CTYPES_STR }
         for binding in manifest.native_exports {
@@ -4237,7 +4257,7 @@ impl JcirGenPass._native_import_registration_map -> dict {
 
 impl JcirGenPass._top_level_bound_names(items: any) -> list {
     stmts = items if isinstance(items, list) else [items];
-    names: list = [];
+    names: list[str] = [];
     for stmt in stmts {
         if isinstance(stmt, list) {
             names.extend(self._top_level_bound_names(stmt));
@@ -4270,7 +4290,7 @@ impl JcirGenPass._native_test_shim_stmts(nd: Test) -> list {
     symbol = native_test_symbol(test_name, line);
     manifest = self.ir_in.gen.interop_manifest if self.ir_in?.gen else None;
     dep_sources = manifest.native_transitive_sources if manifest else [];
-    init_syms: list = [];
+    init_syms: list[str] = [];
     for dep_src in (dep_sources or []) {
         if dep_src {
             dep_init = f"__jac_glob_init_{native_safe_sym(dep_src)}";
@@ -4377,7 +4397,7 @@ impl JcirGenPass._gen_py_sv_func_stub(
     boundary_types: dict[(str, BoundaryTypeInfo)]
 ) -> str {
     params = ', '.join(binding.param_names) if binding.param_names else '';
-    args_kvs: list = [];
+    args_kvs: list[str] = [];
     for i in range(len(binding.param_names)) {
         pname = binding.param_names[i];
         ptype = binding.param_types[i] if i < len(binding.param_types) else '';
@@ -4425,12 +4445,12 @@ impl JcirGenPass._gen_py_sv_walker_stub(
 ) -> str {
     field_names = list(binding.param_names);
     field_types = list(binding.param_types);
-    fields_repr_pieces: list = [];
+    fields_repr_pieces: list[str] = [];
     for fname in field_names {
         fields_repr_pieces.append("'" + fname + "'");
     }
     fields_repr = '[' + ', '.join(fields_repr_pieces) + ']';
-    boundary_pairs: list = [];
+    boundary_pairs: list[str] = [];
     for i in range(len(field_names)) {
         ptype = field_types[i] if i < len(field_types) else '';
         if (ptype in boundary_types and boundary_types[ptype].kind != "enum") {
@@ -4438,7 +4458,7 @@ impl JcirGenPass._gen_py_sv_walker_stub(
         }
     }
     boundary_map = '{' + ', '.join(boundary_pairs) + '}';
-    args_kvs: list = [];
+    args_kvs: list[str] = [];
     for i in range(len(field_names)) {
         pname = field_names[i];
         ptype = field_types[i] if i < len(field_types) else '';
@@ -4462,7 +4482,7 @@ impl JcirGenPass._gen_py_sv_walker_stub(
     init_params = ', '.join(
         ['cls'] + [field_names[i] + '=None' for i in range(len(field_names))]
     );
-    lines: list = [];
+    lines: list[str] = [];
     lines.append('class ' + local_name + ':');
     lines.append('    __jac_fields__ = ' + fields_repr);
     lines.append('    __jac_walker_name__ = ' + "'" + walker_name + "'");
@@ -4515,12 +4535,12 @@ impl JcirGenPass._gen_py_boundary_stub_class(
     for f in info.fields {
         field_names.append(f[0]);
     }
-    fields_pieces: list = [];
+    fields_pieces: list[str] = [];
     for fname in field_names {
         fields_pieces.append("'" + fname + "'");
     }
     fields_repr = '[' + ', '.join(fields_pieces) + ']';
-    lines: list = [];
+    lines: list[str] = [];
     lines.append('class ' + class_name + ':');
     lines.append('    __jac_fields__ = ' + fields_repr);
     lines.append('    def __init__(self, **kw):');
@@ -4652,7 +4672,7 @@ impl JcirGenPass.gen_llm_body(nd: Ability) -> list {
     llm_call = self._invoke_llm_call(
         model=model_expr, caller=caller, args=args, is_async=nd.is_async
     );
-    statements: list = [];
+    statements: list[CgNode] = [];
     if nd.doc {
         statements.append(
             self.nod(

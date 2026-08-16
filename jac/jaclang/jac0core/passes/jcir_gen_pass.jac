@@ -210,7 +210,7 @@ obj CgItem { }
 
 obj CgNode(CgItem) {
     has cls: str,
-        keys: list,
+        keys: list[str],
         vals: list,
         l1: int = 0,
         c1: int = 0,
@@ -327,12 +327,20 @@ obj JcirGenPass(BaseAstGenPass[CgItem]) {
     def _is_native_ext_module -> bool;
     def _refuse(nd: (UniNode | None), construct: str) -> None;
     def nod(
-        cls_name: str, keys: list, vals: list, jac_node: (UniNode | None) = None
+        cls_name: str, keys: list[str], vals: list, jac_node: (UniNode | None) = None
     ) -> CgNode;
 
     def nod_loc(
-        cls_name: str, keys: list, vals: list, l1: int, c1: int, l2: int, c2: int
+        cls_name: str,
+        keys: list[str],
+        vals: list,
+        l1: int,
+        c1: int,
+        l2: int,
+        c2: int
     ) -> CgNode;
+
+    def _flatten_ast_list(items: list[CgItem | list[CgItem] | None]) -> list[CgItem];
 
     def outs(nd: UniNode) -> list[CgItem];
     def set_out(nd: UniNode, items: list[CgItem]) -> None;
