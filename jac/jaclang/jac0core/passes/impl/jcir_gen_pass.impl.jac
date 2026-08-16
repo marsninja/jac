@@ -3304,15 +3304,7 @@ impl JcirGenPass.exit_func_call(nd: FuncCall) -> None {
         and nd.params is not None
         and len(nd.params) == 1
     ) {
-        _ck_m = "";
-        try {
-            _ck_t = nd.target.target.type;
-            if _ck_t is not None {
-                _ck_m = _ck_t.mangle();
-            }
-        } except Exception {
-            _ck_m = "";
-        }
+        _ck_m = nd.chunks_recv_type if nd.chunks_recv_type is not None else "";
         if (
             _ck_m == "list"
             or _ck_m.startswith("list[")

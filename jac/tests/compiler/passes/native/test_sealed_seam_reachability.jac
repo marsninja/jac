@@ -568,29 +568,20 @@ test "the jcir walk reaches the emitter's own machinery" {
 }
 
 
-test "jcir stays out of the seal while its stubs are reachable" {
-    # The emitter's refusal, pinned so it self-clears. One waived seam is
-    # still reachable through native calls from the live entry surface:
-    # `translate_jac_bin_op` synthesizes a `FuncCall` for the pipe
-    # operators and self-calls `exit_func_call`, which is waived because
-    # its chunked-flow branch asks the type system for `TypeBase.mangle`.
+test "jcir: no waived seam is native-reachable from the live surface" {
+    # This root was refused for three reachable stubs and now has none.
+    # `_gen_native_interop_stubs` and unitree's `gen` accessor cleared when
+    # the interop stub emission moved off `enter_node`; `exit_func_call`
+    # cleared when its chunked-flow type question became a stamped field
+    # instead of a live `TypeBase.mangle` call.
     #
-    # Two others cleared when the interop stub emission moved off
-    # `enter_node` into `exit_module`. The `gen` accessor went with it:
-    # every remaining `self.ir_in.gen` read lives in a waived method that
-    # the traversal reaches through Python dispatch, so nothing native
-    # dispatches it any more. That is the whole of the gen-as-data
-    # question for this pass -- the emitter reads exactly one thing from
-    # `gen`, the interop manifest, and writes `gen.jcir`.
-    #
-    # The two `lit_value` accessors the walk also flags are carve-outs of
-    # the receiver-blind accessor rule, argued in ACCESSOR_ARGUED: the only
-    # live read is `exit_string`'s `nd.lit_value` on a parser-built
-    # `String`, so the only decoder a string can dispatch is the live one.
-    assert JCIR_ROOT not in NATIVE_SEAL_ROOTS , (
-        f"{JCIR_ROOT} joined NATIVE_SEAL_ROOTS while its waived stubs are "
-        "still natively reachable; a sealed build would abort on the first "
-        "module with a native-context node or a lambda body"
+    # The two `lit_value` accessors the walk flags are carve-outs of the
+    # receiver-blind accessor rule, argued in ACCESSOR_ARGUED: the only live
+    # read is `exit_string`'s `nd.lit_value` on a parser-built `String`, so
+    # the only decoder a string can dispatch is the live one.
+    assert JCIR_ROOT in NATIVE_SEAL_ROOTS , (
+        f"{JCIR_ROOT} left NATIVE_SEAL_ROOTS; if it was refused again, the "
+        "refusal belongs in NATIVE_SEAL_REFUSED_ROOTS with its blocker"
     );
     (seen, waived) = pass_reachable(JCIR_ROOT);
     argued = set(ACCESSOR_ARGUED.get(JCIR_ROOT, ()));
@@ -599,17 +590,11 @@ test "jcir stays out of the seal while its stubs are reachable" {
         for name in waived
         if name in seen and name not in argued
     );
-    assert hit , (
-        f"{JCIR_ROOT}: no waived seam is reachable any more, so the refusal "
-        "is stale: add the root back to NATIVE_SEAL_ROOTS, drop its entry "
-        "from NATIVE_SEAL_REFUSED_ROOTS, and restore the census "
-        "registration pin"
-    );
-    expected = ["JcirGenPass.exit_func_call"];
-    assert hit == expected , (
-        f"{JCIR_ROOT}: the reachable waived set moved. It was {expected} and "
-        f"is now {hit}. A name that left is progress and should shrink this "
-        "pin; a name that arrived is a new abort path"
+    assert not hit , (
+        f"{JCIR_ROOT}: {len(hit)} waived seam(s) are reachable through "
+        "native calls from the root's live entry surface, so the sealed "
+        "artifact can abort at runtime -- remove the waiver and fix the "
+        "seam:\n" + "\n".join(f"  {name}" for name in hit)
     );
 }
 

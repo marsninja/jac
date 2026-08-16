@@ -166,17 +166,14 @@ def _seams_by_key(rel: str) -> dict[(str, str)] {
 }
 
 
-test "the jcir root stays out of the seal while its stubs are reachable" {
-    assert JCIR_ROOT in NATIVE_SEAL_REFUSED_ROOTS , (
-        f"{JCIR_ROOT} is neither sealed nor recorded as refused. It has to "
-        "be one or the other: a root with reachable waived seams aborts the "
-        "process, so refusing it is a decision that gets written down"
+test "the jcir root is registered for the seal" {
+    assert JCIR_ROOT in NATIVE_SEAL_ROOTS , (
+        f"{JCIR_ROOT} is not in NATIVE_SEAL_ROOTS; this census would gate "
+        "nothing at seal time"
     );
-    assert JCIR_ROOT not in NATIVE_SEAL_ROOTS , (
-        f"{JCIR_ROOT} joined NATIVE_SEAL_ROOTS while "
-        "NATIVE_SEAL_REFUSED_ROOTS still records its blocker. If the "
-        "blocker cleared, drop the refusal entry and the self-clearing pin "
-        "in test_sealed_seam_reachability.jac with it"
+    assert JCIR_ROOT not in NATIVE_SEAL_REFUSED_ROOTS , (
+        f"{JCIR_ROOT} is both sealed and recorded as refused; it has to be "
+        "one or the other"
     );
     for member in JCIR_CLOSURE {
         assert member in NATIVE_SEAL_CLOSURE , (

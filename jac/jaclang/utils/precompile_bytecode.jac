@@ -293,26 +293,11 @@ glob NATIVE_SEAL_ROOTS: tuple = (
          "jac0core/passes/uni_pass.jac",
          "jac0core/passes/endpoint_effect_pass.jac",
          "compiler/passes/main/sem_def_match_pass.jac",
+         "jac0core/passes/jcir_gen_pass.jac",
          "compiler/native_materialize.jac",
 
      ),
-     NATIVE_SEAL_REFUSED_ROOTS: dict[str, str] = {
-         "jac0core/passes/jcir_gen_pass.jac": (
-             "one waived seam is natively reachable from the live entry "
-             "surface. `translate_jac_bin_op` synthesizes a `FuncCall` "
-             "for the pipe-forward and pipe-backward operators and "
-             "self-calls `exit_func_call`, which is waived because its "
-             "chunked-flow branch asks the type system for "
-             "`TypeBase.mangle`. A sealed emitter aborts on the first "
-             "pipe operator. It clears when that type decision is stamped "
-             "onto the node as data (the #8242 pattern), which is the "
-             "only way the emitter can have it: any read of a "
-             "type-system object is Python-only by construction. Two "
-             "further seams cleared when the interop stub emission moved "
-             "off `enter_node`, and the waived `UniNode.gen` accessor "
-             "went with them."
-         )
-     },
+     NATIVE_SEAL_REFUSED_ROOTS: dict[str, str] = { },
      NATIVE_SEAL_CLOSURE: tuple = (
          "jac0core/codegen_ir.jac",
          "jac0core/constant.jac",
@@ -396,7 +381,6 @@ glob _UNITREE_SEAM_WAIVERS: tuple = (
          "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_enum",
          "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_ctrl_stmt",
          "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_ellipsis",
-         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_func_call",
          "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_module",
          "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_multi_string",
          "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_jsx_element",
