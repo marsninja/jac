@@ -531,6 +531,12 @@ impl NaIRGenPass._codegen_archetype(nd: uni.Archetype) -> None {
         }
     }
 
+    for (_esn, _esv) in self._erased_sig_typevars(nd).items() {
+        if _esn not in erased_tv_fields {
+            erased_tv_fields[_esn] = _esv;
+        }
+    }
+
     struct_type.set_body(*field_types);
     self.struct_field_indices[arch_name] = field_index_map;
     self.struct_field_order[arch_name] = [f.name for f in layout.fields];
@@ -543,6 +549,39 @@ impl NaIRGenPass._codegen_archetype(nd: uni.Archetype) -> None {
         for tp in (nd.type_params or [])
         if tp?.name is not None
     ];
+}
+
+impl NaIRGenPass._erased_sig_typevars(nd: uni.Archetype) -> dict {
+    """The type params a method signature erases, keyed by the slot naming it.
+
+    A sequence of `T` in a signature lays out as the pointer-flavoured list,
+    exactly as a bare `T` lays out as a raw pointer, so an instantiation at a
+    by-value type is as unsound there as it is in a field. Recording those
+    slots alongside the erased fields lets the construction site refuse both
+    with one rule.
+    """;
+    out: dict = {};
+    if nd.body is None {
+        return out;
+    }
+    for stmt in nd.body {
+        if not isinstance(stmt, uni.Ability)
+            or not isinstance(stmt.signature, uni.FuncSignature) {
+            continue;
+        }
+        _mname = stmt.name_ref.sym_name if stmt.name_ref else "unnamed";
+        for p in stmt.signature.get_parameters() {
+            if p.type_tag is None or self._erased_seq_type(p?.type) is None {
+                continue;
+            }
+            _pname = p.name.value if p.name else "arg";
+            _star = "*" if p.is_vararg else "";
+            out[f"{_mname}({_star}{_pname})"] = self._erased_typevar_names(
+                (p.type.private.type_args or [None])[0]
+            );
+        }
+    }
+    return out;
 }
 
 impl NaIRGenPass._reject_scalar_type_args(nd: uni.UniNode, type_name: str) -> bool {
@@ -1084,6 +1123,78 @@ impl NaIRGenPass._trigger_struct_names(method: uni.Ability) -> list[str] {
         for nm in names
         if nm in self.struct_types
     ];
+}
+
+impl NaIRGenPass._read_field_or_refuse(
+    nd: uni.UniNode, obj_val: ir.Value, field_name: str, arch_name: str
+) -> (ir.Value | None) {
+    """Read a field, naming the ancestor when an inherited one is unreachable.
+
+    Only the inherited case speaks up here. Every other way a name can miss
+    the layout already has an owner further out that reports it, and claiming
+    them from this depth would rename diagnostics this change has no business
+    touching.
+    """;
+    _mark = len(self.errors_had);
+    _val = self._codegen_field_access(obj_val, field_name, arch_name);
+    if _val is None and len(self.errors_had) == _mark {
+        self._emit_field_access_refusal(nd, arch_name, field_name);
+    }
+    return _val;
+}
+
+impl NaIRGenPass._unadopted_field_owner(
+    arch_name: str, field_name: str
+) -> (str | None) {
+    """The ancestor that declares a field this class's layout does not hold.
+
+    A subclass whose ancestor lays out in another unit adopts that unit's slot
+    assignment, and where the two disagree about the header slots there is no
+    assignment to adopt. Naming the ancestor turns the resulting refusal from
+    'some attribute did not lower' into the layout fact behind it.
+    """;
+    _arch = self.arch_ast_map.get(arch_name);
+    if _arch is None {
+        return None;
+    }
+    for _base in (_arch.base_classes or []) {
+        _bn = self._get_name(_base);
+        if _bn is None or _bn == arch_name {
+            continue;
+        }
+        _blay = self._arch_layout(_bn);
+        if _blay is not None and field_name in _blay.field_index {
+            return _bn;
+        }
+        _up = self._unadopted_field_owner(_bn, field_name);
+        if _up is not None {
+            return _up;
+        }
+    }
+    return None;
+}
+
+impl NaIRGenPass._emit_field_access_refusal(
+    nd: uni.UniNode, arch_name: str, field_name: str
+) -> None {
+    _owner = self._unadopted_field_owner(arch_name, field_name);
+    if _owner is None {
+        return;
+    }
+    self.emit(
+        E5092,
+        node_override=nd,
+        kind="inherited field access",
+        name=field_name,
+        help_text=(
+            f"'{field_name}' is declared by '{_owner}', which lays out in "
+            f"another unit with no vtable slot, while '{arch_name}' needs "
+            f"that slot for one. No offset satisfies both units, so the "
+            f"field is not reachable from here. Read it through an "
+            f"'{_owner}'-typed value, or move this code to a @sv/Python "
+            f"context."
+        )
+    );
 }
 
 impl NaIRGenPass._mro_of(arch_name: str) -> list[str] {
@@ -1961,6 +2072,47 @@ impl NaIRGenPass._codegen_instantiation(
     return obj_ptr;
 }
 
+impl NaIRGenPass._unregistered_class_target(target: uni.UniNode) -> (str | None) {
+    """The class a `Cls.method(...)` names when the native lane has no `Cls`.
+
+    The native import walk registers a struct type for an imported archetype
+    only when it walked that archetype's module; a module it classified
+    Python-side (a Python base, a `::py::` body) leaves nothing behind, so the
+    class name resolves to no native type at all. That is the same crossing a
+    cross-module free-function call makes, and the free-function form refuses
+    out loud -- this lookup is what lets the class-qualified form say the same
+    thing instead of dropping the call on the floor.
+
+    Only a name that resolves to an archetype declared in *another* Jac module
+    answers, so an instance receiver, an enum, and an in-module class that has
+    simply not been registered yet all stay out of it.
+    """;
+    import os;
+    name = self._get_name(target);
+    if name is None or name in self.struct_types or name in self.local_vars {
+        return None;
+    }
+    sym = target?.sym;
+    decl = sym.decl if sym is not None else None;
+    if decl is None {
+        return None;
+    }
+    arch = decl.find_parent_of_type(uni.Archetype);
+    if arch is None or arch.name is None or arch.name.value != name {
+        return None;
+    }
+    decl_mod = decl.find_parent_of_type(uni.Module);
+    path = decl_mod.loc.mod_path if decl_mod?.loc else None;
+    if not path or not path.endswith(".jac") {
+        return None;
+    }
+    own_path = os.path.realpath(self.ir_in.loc.mod_path) if self.ir_in?.loc else "";
+    if os.path.realpath(path) == own_path {
+        return None;
+    }
+    return name;
+}
+
 impl NaIRGenPass._codegen_method_call(nd: uni.FuncCall) -> (ir.Value | None) {
     trailer = nd.target;
     if not isinstance(trailer, uni.AtomTrailer) or not trailer.is_attr {
@@ -2109,6 +2261,24 @@ impl NaIRGenPass._codegen_method_call(nd: uni.FuncCall) -> (ir.Value | None) {
         if _sfull is not None {
             return self._emit_class_routed_call(nd, _sfull, _mnames, None, None);
         }
+    }
+
+    _xmod_cls = self._unregistered_class_target(trailer.target);
+    if _xmod_cls is not None {
+        self.emit(
+            E5092,
+            node_override=nd,
+            kind="method",
+            name=f"{_xmod_cls}.{method_name}",
+            help_text=(
+                f"'{_xmod_cls}' is declared in a module the native lane did "
+                f"not lower, so it has no native '{method_name}' to call. A "
+                f"free function from that module refuses here for the same "
+                f"reason. Call it from a Python/@sv context, or move the "
+                f"shared code into a module the native lane can lower."
+            )
+        );
+        return None;
     }
 
     _fld_struct = self._struct_name_of(trailer.target);
@@ -3052,7 +3222,7 @@ impl NaIRGenPass._codegen_field_aug_assign(
         return None;
     }
 
-    current = self._codegen_field_access(obj_val, field_name, type_name);
+    current = self._read_field_or_refuse(target, obj_val, field_name, type_name);
     if current is None {
         return None;
     }
