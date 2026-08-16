@@ -4,6 +4,7 @@ import marshal;
 import os;
 import shutil;
 import sys;
+import time;
 import zlib;
 
 import from pathlib { Path }
@@ -1057,6 +1058,35 @@ def _sym_name_fingerprint(mod: any) -> list[str] {
     return out;
 }
 
+"""Render the per-root seal cost table printed after every native seal.
+
+`rows` carries one `(rel, total_s, compile_s, link_s, canary_s)` tuple per
+sealed root, in seal order. The table is sorted most-expensive-first because
+the only question anyone asks of it is "which root is the seal waiting on",
+and it names the three costs separately because they have different fixes:
+`compile` is the front end plus LLVM codegen for the root's whole native
+closure, `link` is `emit_shared_library`, and `canary` is the load probe (plus
+the parse-parity probe on the materializer root). A sha-incremental seal can
+only skip the first two, so a root whose cost is mostly canary is not worth
+caching.
+"""
+def seal_timing_report(rows: list[tuple]) -> list[str] {
+    if not rows {
+        return [];
+    }
+    total = sum(r[1] for r in rows);
+    width = max(len(str(r[0])) for r in rows);
+    lines = [f"  Seal timing: {len(rows)} root(s) in {total:.1f}s"];
+    for r in sorted(rows, key=lambda (x: tuple) { -x[1]; }) {
+        share = (100.0 * r[1] / total) if total > 0 else 0.0;
+        lines.append(
+            f"    {str(r[0]).ljust(width)}  {r[1]:7.1f}s  {share:4.1f}%  "
+            f"(compile {r[2]:.1f}s, link {r[3]:.1f}s, canary {r[4]:.1f}s)"
+        );
+    }
+    return lines;
+}
+
 def _native_lib_filename(stem: str) -> str {
     if sys.platform.startswith("win") {
         return f"jac_{stem}.dll";
@@ -1093,8 +1123,11 @@ def seal_native_artifacts(
     _seal_layouts: dict[str, dict] = {};
     _mat_manifest: (dict[str, any] | None) = None;
     _gen_root_src: (Path | None) = None;
+    _timings: list[tuple] = [];
     for rel in (NATIVE_SEAL_ROOTS if modules is None else modules) {
         src: Path = pkg_path / str(rel);
+        _root_t0 = time.perf_counter();
+        _canary_s = 0.0;
         if rel == "compiler/native_materialize.jac" {
             unitree_layout = _seal_layouts.get("jac0core/unitree.jac");
             if unitree_layout is None {
@@ -1128,6 +1161,7 @@ def seal_native_artifacts(
         }
         prog = JacProgram();
         na_census_begin();
+        _compile_t0 = time.perf_counter();
         try {
             ir = prog.compile(
                 file_path=str(src),
@@ -1142,6 +1176,7 @@ def seal_native_artifacts(
             );
         } finally {
             census = na_census_end();
+            _compile_s = time.perf_counter() - _compile_t0;
         }
         closure_deps: list[str] = [];
         if ir is not None and ir.gen.interop_manifest is not None {
@@ -1271,6 +1306,7 @@ def seal_native_artifacts(
         stem = ext_registry.base_stem(os.path.basename(rel));
         lib_path = out_dir / _native_lib_filename(stem);
         transitive = list(manifest.native_transitive_sources) if manifest else [];
+        _link_t0 = time.perf_counter();
         (ok, err) = emit_shared_library(
             str(ir.gen.llvm_ir),
             transitive,
@@ -1279,12 +1315,15 @@ def seal_native_artifacts(
             clib_paths=list(ir.gen._clib_paths or []),
             clib_symbol_lib=dict(ir.gen._clib_symbol_lib or {})
         );
+        _link_s = time.perf_counter() - _link_t0;
         if not ok {
             console.error(f"NATIVE SEAL: {rel}: {err}");
             purge_native_ir_cache(str(src), closure_deps);
             return None;
         }
+        _canary_t0 = time.perf_counter();
         canary = seal_native_canary(str(lib_path), exports);
+        _canary_s += time.perf_counter() - _canary_t0;
         if canary {
             console.error(
                 f"NATIVE SEAL: {rel}: the emitted artifact "
@@ -1301,7 +1340,9 @@ def seal_native_artifacts(
             json.dumps(layout_dict, sort_keys=True) + "\n", encoding="utf-8"
         );
         if rel == "compiler/native_materialize.jac" {
+            _parity_t0 = time.perf_counter();
             parity = seal_parse_parity_canary(str(lib_path), layout_dict);
+            _canary_s += time.perf_counter() - _parity_t0;
             if parity {
                 console.error(
                     f"NATIVE SEAL: {rel}: the emitted artifact "
@@ -1333,10 +1374,16 @@ def seal_native_artifacts(
             _gen_root_src.unlink(missing_ok=True);
             _gen_root_src = None;
         }
+        _root_s = time.perf_counter() - _root_t0;
+        _timings.append((str(rel), _root_s, _compile_s, _link_s, _canary_s));
         console.print(
             f"  Native artifact: {fullname} -> {lib_path.name} "
-            f"({lib_path.stat().st_size:,} bytes, {len(exports)} exports)"
+            f"({lib_path.stat().st_size:,} bytes, {len(exports)} exports, "
+            f"{_root_s:.1f}s)"
         );
+    }
+    for line in seal_timing_report(_timings) {
+        console.print(line);
     }
     return artifacts;
 }
