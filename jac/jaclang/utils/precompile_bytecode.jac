@@ -292,12 +292,15 @@ glob NATIVE_SEAL_ROOTS: tuple = (
          "jac0core/passes/uni_pass.jac",
          "jac0core/passes/endpoint_effect_pass.jac",
          "compiler/passes/main/sem_def_match_pass.jac",
+         "jac0core/passes/jcir_gen_pass.jac",
          "compiler/native_materialize.jac",
 
      ),
      NATIVE_SEAL_CLOSURE: tuple = (
+         "jac0core/codegen_ir.jac",
          "jac0core/constant.jac",
          "jac0core/diagnostics.jac",
+         "jac0core/jcir_facts.jac",
          "jac0core/parser/lexer.jac",
          "jac0core/parser/parser.jac",
          "jac0core/parser/tokens.jac",
@@ -305,6 +308,7 @@ glob NATIVE_SEAL_ROOTS: tuple = (
          "jac0core/passes/annex_weave.jac",
          "jac0core/passes/ast_validation_pass.jac",
          "jac0core/passes/endpoint_effect_pass.jac",
+         "jac0core/passes/jcir_gen_pass.jac",
          "jac0core/passes/module_codegen_pass.jac",
          "jac0core/passes/semantic_analysis_pass.jac",
          "jac0core/passes/uni_pass.jac",
@@ -313,6 +317,7 @@ glob NATIVE_SEAL_ROOTS: tuple = (
          "compiler/native_materialize.jac",
          "compiler/passes/main/sem_def_match_pass.jac",
          "runtimelib/na_stdlib/keyword.jac",
+         "runtimelib/na_stdlib/textwrap.jac",
 
      );
 
@@ -352,6 +357,45 @@ glob _UNITREE_SEAM_WAIVERS: tuple = (
          "jac0core/passes/semantic_analysis_pass.jac::SemanticAnalysisPass.enter_has_var",
 
      ),
+     _JCIR_INTEROP_SEAM_WAIVERS: tuple = (
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass._gen_native_interop_stubs",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass._generate_sv_to_sv_stubs",
+         (
+             "jac0core/passes/jcir_gen_pass.jac::"
+             "JcirGenPass._native_import_registration_map"
+         ),
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass._native_test_shim_stmts",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass._gen_py_sv_func_stub",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass._gen_py_sv_walker_stub",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass._gen_py_boundary_stub_class",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_test",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_import",
+
+     ),
+     _JCIR_LOWERING_SEAM_WAIVERS: tuple = (
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass._get_sem_decorator",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_ability",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_archetype",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_enum",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_ctrl_stmt",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_ellipsis",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_func_call",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_module",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_multi_string",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_jsx_element",
+
+     ),
+     _JCIR_ENTITY_SEAM_WAIVERS: tuple = (
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_jsx_normal_attribute",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_jsx_text",
+
+     ),
+     _JCIR_EMITTER_ICE_SEAM_WAIVERS: tuple = (
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass._query_filter_kws",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_atom_trailer",
+         "jac0core/passes/jcir_gen_pass.jac::JcirGenPass.exit_edge_ref_trailer",
+
+     ),
      NATIVE_SEAL_DEMOTION_WAIVERS: dict[str, tuple] = {
          "compiler/native_materialize.jac": _UNITREE_SEAM_WAIVERS,
          "jac0core/unitree.jac": _UNITREE_SEAM_WAIVERS,
@@ -369,7 +413,14 @@ glob _UNITREE_SEAM_WAIVERS: tuple = (
          "jac0core/passes/semantic_analysis_pass.jac": (
              _UNITREE_SEAM_WAIVERS + _SEMANTIC_ANALYSIS_SEAM_WAIVERS
          ),
-         "compiler/passes/main/sem_def_match_pass.jac": _UNITREE_SEAM_WAIVERS
+         "compiler/passes/main/sem_def_match_pass.jac": _UNITREE_SEAM_WAIVERS,
+         "jac0core/passes/jcir_gen_pass.jac": (
+             _UNITREE_SEAM_WAIVERS
+             + _JCIR_INTEROP_SEAM_WAIVERS
+             + _JCIR_LOWERING_SEAM_WAIVERS
+             + _JCIR_ENTITY_SEAM_WAIVERS
+             + _JCIR_EMITTER_ICE_SEAM_WAIVERS
+         )
      };
 
 def _seal_module_label(path: str, pkg_path: (Path | None)) -> str {

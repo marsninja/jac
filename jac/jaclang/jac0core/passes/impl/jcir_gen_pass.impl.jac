@@ -462,10 +462,13 @@ impl JcirGenPass._get_sem_decorator(nd: UniNode) -> (CgNode | None) {
             }
         }
     }
-    if (
-        not semstr
-        and (not inner_semstr or all(not inner_semstr[k] for k in inner_semstr))
-    ) {
+    has_inner = False;
+    for k in inner_semstr {
+        if inner_semstr[k] {
+            has_inner = True;
+        }
+    }
+    if (not semstr and not has_inner) {
         return None;
     }
     return self.nod(
@@ -2168,39 +2171,39 @@ impl JcirGenPass.exit_ctrl_stmt(nd: CtrlStmt) -> None {
     }
 }
 
-impl JcirGenPass._delete_targets(nd: DeleteStmt) -> list {
+impl JcirGenPass._delete_targets(nd: DeleteStmt) -> list[CgNode] {
     if (isinstance(nd.target, TupleVal) and nd.target.values) {
         return [self.val(i) for i in nd.target.values];
     }
-    return self.outs(nd.target);
+    return [
+        i
+        for i in self.outs(nd.target)
+        if isinstance(i, CgNode)
+    ];
+}
+
+impl JcirGenPass._delete_ctx_targets(
+    targets: list[CgNode], ctx_cls: str
+) -> list[CgNode] {
+    items: list[CgNode] = targets;
+    head = items[0] if items else None;
+    if (head is not None and head.cls in ('List', 'Tuple')) {
+        items = [
+            i
+            for i in head.get('elts')
+            if isinstance(i, CgNode)
+        ];
+    }
+    result: list[CgNode] = [];
+    for target in items {
+        result.append(
+            self._with_ctx(target, ctx_cls) if target.hasf('ctx') else target
+        );
+    }
+    return result;
 }
 
 impl JcirGenPass.exit_delete_stmt(nd: DeleteStmt) -> None {
-    def set_ctx(targets: any, ctx_cls: str) -> list[CgNode] {
-        items: list = [];
-        if isinstance(targets, list) {
-            items = targets;
-        } else {
-            items = [targets];
-        }
-        head = items[0] if items else None;
-        if (isinstance(head, CgNode) and head.cls in ('List', 'Tuple')) {
-            items = [
-                i
-                for i in head.get('elts')
-                if isinstance(i, CgNode)
-            ];
-        }
-        result: list[CgNode] = [];
-        for target in items {
-            if isinstance(target, CgNode) {
-                result.append(
-                    self._with_ctx(target, ctx_cls) if target.hasf('ctx') else target
-                );
-            }
-        }
-        return result;
-    }
     destroy_expr = self.nod(
         'Expr',
         ['value'],
@@ -2215,7 +2218,9 @@ impl JcirGenPass.exit_delete_stmt(nd: DeleteStmt) -> None {
                             'List',
                             ['elts', 'ctx'],
                             [
-                                set_ctx(self._delete_targets(nd), 'Load'),
+                                self._delete_ctx_targets(
+                                    self._delete_targets(nd), 'Load'
+                                ),
                                 self.nod('Load', [], [])
                             ]
                         )
@@ -2226,7 +2231,9 @@ impl JcirGenPass.exit_delete_stmt(nd: DeleteStmt) -> None {
         ]
     );
     delete_stmt = self.nod(
-        'Delete', ['targets'], [set_ctx(self._delete_targets(nd), 'Del')]
+        'Delete',
+        ['targets'],
+        [self._delete_ctx_targets(self._delete_targets(nd), 'Del')]
     );
     self.set_out(nd, [destroy_expr, delete_stmt]);
 }
@@ -2779,36 +2786,37 @@ impl JcirGenPass.exit_if_else_expr(nd: IfElseExpr) -> None {
     );
 }
 
+impl JcirGenPass._multi_string_pieces(str_seq: Sequence[UniNode]) -> list {
+    pieces: list[any] = [];
+    for i in str_seq {
+        if isinstance(i, String) {
+            pieces.append(i.lit_value);
+        } elif isinstance(i, (FString, ExprStmt)) {
+            py_val = self.val(i);
+            if py_val.cls == 'JoinedStr' {
+                for v in py_val.get('values') {
+                    pieces.append(v);
+                }
+            } else {
+                pieces.append(py_val);
+            }
+        } elif (isinstance(i, Token) and (i.name in [Tok.LBRACE, Tok.RBRACE])) {
+            continue;
+        } else {
+            raise self.ice('Multi string made of something weird.');
+        }
+    }
+    return pieces;
+}
+
 impl JcirGenPass.exit_multi_string(nd: MultiString) -> None {
     lone = nd.strings[0] if (len(nd.strings) == 1) else None;
     if (isinstance(lone, FString) and self.outs(lone)) {
         self.set_out(nd, self.outs(lone));
         return;
     }
-    def get_pieces(str_seq: Sequence[UniNode]) -> list {
-        pieces: list[any] = [];
-        for i in str_seq {
-            if isinstance(i, String) {
-                pieces.append(i.lit_value);
-            } elif isinstance(i, (FString, ExprStmt)) {
-                py_val = self.val(i);
-                if py_val.cls == 'JoinedStr' {
-                    for v in py_val.get('values') {
-                        pieces.append(v);
-                    }
-                } else {
-                    pieces.append(py_val);
-                }
-            } elif (isinstance(i, Token) and (i.name in [Tok.LBRACE, Tok.RBRACE])) {
-                continue;
-            } else {
-                raise self.ice('Multi string made of something weird.');
-            }
-        }
-        return pieces;
-    }
     combined_multi: list = [];
-    for item in get_pieces(nd.strings) {
+    for item in self._multi_string_pieces(nd.strings) {
         if (
             combined_multi
             and isinstance(item, str)

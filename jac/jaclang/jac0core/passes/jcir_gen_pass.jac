@@ -418,7 +418,11 @@ obj JcirGenPass(BaseAstGenPass[CgItem]) {
     def _is_in_type_annotation(nd: UniNode) -> bool;
     def _is_descendant_of(nd: UniNode, ancestor: UniNode) -> bool;
     def gen_call_args(nd: FuncCall) -> tuple[(list, list)];
-    def _delete_targets(nd: DeleteStmt) -> list;
+    def _delete_targets(nd: DeleteStmt) -> list[CgNode];
+    def _delete_ctx_targets(
+        targets: list[CgNode], ctx_cls: str
+    ) -> list[CgNode];
+
     def ir_bytes -> bytes;
     def exit_sub_tag(nd: SubTag) -> None;
     def exit_module(nd: Module) -> None;
@@ -484,6 +488,7 @@ obj JcirGenPass(BaseAstGenPass[CgItem]) {
     def exit_unary_expr(nd: UnaryExpr) -> None;
     def _emit_jobj_ref(nd: UnaryExpr) -> None;
     def exit_if_else_expr(nd: IfElseExpr) -> None;
+    def _multi_string_pieces(str_seq: Sequence[UniNode]) -> list;
     def exit_multi_string(nd: MultiString) -> None;
     def exit_f_string(nd: FString) -> None;
     def exit_formatted_value(nd: FormattedValue) -> None;
