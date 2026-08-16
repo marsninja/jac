@@ -909,6 +909,19 @@ impl JacCompiler.compile(
         } except Exception as _e {
             _crash = _e;
         }
+        if _crash is not None {
+            _re_entered = import_error_re_enters(_crash, file_path);
+            if _re_entered is not None {
+                raise CompilerSourceError(
+                    f"compiling {file_path} re-entered it: a pass imported "
+                    f"'{_re_entered}' while Python was still executing that "
+                    "module, so the name is not bound yet. A pass's run-time "
+                    "imports must be pre-imported while the schedule loads "
+                    "(see get_ir_gen_sched / get_symtab_ir_sched), never "
+                    "reached for the first time during a compile."
+                ) from _crash;
+            }
+        }
         _resolved = os.path.realpath(file_path);
         _probe = _mod if _mod is not None else _wrap_prog.mod.hub.get(_resolved);
         _inferred_native = (
@@ -1263,7 +1276,12 @@ impl JacCompiler._compile_once(
             cancel_token=options.cancel_token
         );
         if mod_targ.decided_codespace == 'native' {
-            JacCompiler._scrub_native_artifacts_on_error(actual_program, mod_targ);
+            _scrubbed = JacCompiler._scrub_native_artifacts_on_error(
+                actual_program, mod_targ
+            );
+            if options.aot_mode and not _scrubbed {
+                JacCompiler._report_missing_native_ir(actual_program, mod_targ);
+            }
         }
     }
     return mod_targ;
@@ -1392,6 +1410,60 @@ impl JacCompiler._scrub_native_artifacts_on_error(
     gen.native_bitcode = None;
     gen.native_layout = None;
     return True;
+}
+
+impl JacCompiler._report_missing_native_ir(
+    target_program: JacProgram, mod: uni.Module
+) -> None {
+    if mod?.gen is None or mod.gen.llvm_ir is not None {
+        return;
+    }
+    mod_path = mod.loc.mod_path if mod?.loc else '';
+    if not mod_path or JacCompiler._count_module_errors(target_program, mod_path) > 0 {
+        return;
+    }
+    import from jaclang.jac0core.diagnostics { E5092 }
+    import from jaclang.jac0core.passes.module_codegen_pass { ModuleCodegenPass }
+    import from jaclang.jac0core.passes.transform { Alert }
+    reason = native_schedule_failure();
+    if not reason {
+        (_avail, _why) = native_pipeline_available();
+        if not _avail {
+            reason = _why;
+        }
+    }
+    if reason {
+        detail = f"the native codegen schedule could not be built ({reason})";
+    } elif not ModuleCodegenPass.has_native_context_stmts(mod) {
+        detail = "the module declares no native code for the backend to lower";
+    } else {
+        detail = (
+            "the native codegen passes ran but emitted neither IR nor a "
+            "diagnostic; this is a compiler bug -- please report it"
+        );
+    }
+    from_pass: any = PyastGenPass;
+    try {
+        import from jaclang.compiler.passes.native { NaIRGenPass }
+        from_pass = NaIRGenPass;
+    } except Exception {
+        ;
+    }
+    deliver_alerts(
+        [
+            Alert(
+                msg=E5092.format_message(
+                    kind='module', name=os.path.basename(mod_path)
+                ),
+                loc=mod.loc.snapshot(),
+                from_pass=from_pass,
+                code=E5092,
+                help_text=detail
+            )
+        ],
+        [],
+        target_program
+    );
 }
 
 impl JacCompiler._prepare_tool_program(
