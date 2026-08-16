@@ -161,14 +161,11 @@ glob UNITREE_CLOSURE: tuple = (
              "Backend gap: same `TypeFlags(...)` constructor call as "
              "`clone_as_instance`."
          ),
-         "types.jac::ClassType.get_class_symbol": (
-             "Python-only: reaches `UniScopeNode.name.sym`, and `Symbol` is a "
-             "symbol-table handle the native unit does not model."
-         ),
          "types.jac::ClassType.lookup_member_symbol": (
-             "Python-only: walks a symbol table and reads `Symbol.value`, the "
-             "same unmodelled handle `get_class_symbol` stops on. It used to "
-             "stop earlier, on a `type_utils` call that is now in the unit."
+             "Backend gap -- imported generics: calls "
+             "`UniNode.get_all_sub_nodes`, an imported generic method with no "
+             "layout slot to monomorphize from, the same shape "
+             "`type_utils.lookup_symtab` stops on."
          ),
          "types.jac::create_callable_type": (
              "Backend gap -- class-level slot: reads "
@@ -176,14 +173,9 @@ glob UNITREE_CLOSURE: tuple = (
              "the class, which has no instance layout."
          ),
          "type_utils.jac::expr_primitive_name": (
-             "Python-only: reaches `prog.get_type_evaluator`, the evaluator "
-             "handle. `type_evaluator.jac` is not in this unit and cannot be "
-             "-- it is the stage's upper half and refuses module-scope."
-         ),
-         "type_utils.jac::collect_member_syms": (
-             "Python-only: passes a unitree node to `evaluate_version_condition`, "
-             "itself waived below for reading unitree through a function-local "
-             "Python module import."
+             "Python-only: narrows its `prog` to `JacProgram` and reaches "
+             "`get_type_evaluator`. `type_evaluator.jac` is not in this unit "
+             "and cannot be, so the attribute chain has no layout to walk."
          ),
          "type_utils.jac::lookup_symtab": (
              "Backend gap -- cross-module generics: calls "
@@ -221,20 +213,24 @@ glob UNITREE_CLOSURE: tuple = (
              "the emitter cannot place in expression position."
          ),
          "type_utils.jac::apply_solved_type_vars": (
-             "Backend gap -- type-var identity: reads `TypeVarType.name` off a "
-             "value the emitter has erased to the abstract `TypeBase`."
+             "Cascade: calls `ClassType.clone_as_instance`, waived above for "
+             "its `TypeFlags(...)` constructor."
          ),
          "type_utils.jac::build_type_var_solution": (
-             "Backend gap: the same erased `.name` read as "
-             "`apply_solved_type_vars`, four times over."
+             "Backend gap: iterates `enumerate(...)` directly, and a "
+             "`FuncCall` is not a lowerable for-loop iterable. This is the "
+             "seam that keeps `unitree` out of NATIVE_SEAL_ROOTS: "
+             "`FunctionType.specialize` lowers and calls it across a module "
+             "boundary, so the artifact links against a name the demotion "
+             "renamed away."
          ),
          "type_utils.jac::shadowed_type_var_names": (
              "Backend gap: a comprehension over an element-erased collection, "
              "so the emitter has no layout for the element it binds."
          ),
          "type_utils.jac::build_solution_from_specialized_class": (
-             "Backend gap: iterates a call's result directly, and a `FuncCall` "
-             "is not a lowerable for-loop iterable."
+             "Backend gap: the same `enumerate(...)` for-loop iterable as "
+             "`build_type_var_solution`."
          ),
          "helpers.jac::pretty_print_source_location": (
              "Backend gap -- class-level slot: formats with `ANSIColors.RED` "

@@ -95,12 +95,20 @@ that erasure but for a reason their old text did not name -- the two
 remaining `clone_*` methods and `specialize_func_type_vars` -- so their
 waivers were rewritten rather than kept.
 
-Two more left when `type_utils` joined the closure. `FunctionType.specialize`
-and `FunctionType.specialize_func_type_vars` were both waived as calling a
-function "outside this closure", and it is inside now, so they lower.
-`ClassType.lookup_member_symbol` was waived for the same crossing and still
-demotes, but on its own `Symbol.value` read rather than the call -- a
-different reason, so the entry is rewritten rather than kept.
+Four more left when `type_utils` joined the closure. `FunctionType.specialize`,
+`FunctionType.specialize_func_type_vars` and `ClassType.lookup_member_symbol`
+were all waived as calling a function "outside this closure", and it is inside
+now, so they lower. `ClassType.get_class_symbol` left for a different reason:
+it read `UniScopeNode.name`, which the declared scope type does not have, and
+narrowing it to the `Archetype` the runtime always passes made it lower.
+
+`lookup_member_symbol` is the one entry that reads differently in the two
+census files, and the difference is real rather than a bookkeeping slip. From
+this root it lowers; from `unitree`'s root it stops on
+`UniNode.get_all_sub_nodes`, because which generic methods can be
+monomorphized depends on whether the module defining them is the compile root
+or an import. `test_unitree_seal_census.jac` waives it for that reason, and
+the seal reads that file's view, not this one's.
 """
 glob TYPES_SEAM_WAIVERS: dict[(str, str)] = {
          "types.jac::TypeBase.category.__get__": (
@@ -116,14 +124,6 @@ glob TYPES_SEAM_WAIVERS: dict[(str, str)] = {
          "types.jac::ClassType.clone_as_class": (
              "Backend gap: same `TypeFlags(...)` constructor call as "
              "`clone_as_instance`."
-         ),
-         "types.jac::ClassType.get_class_symbol": (
-             "Python-only: reaches `UniScopeNode.name.sym`, and `Symbol` is a "
-             "symbol-table handle the native unit does not model."
-         ),
-         "types.jac::ClassType.lookup_member_symbol": (
-             "Python-only: walks a symbol table and reads `Symbol.value`, the "
-             "same unmodelled handle `get_class_symbol` stops on."
          ),
          "types.jac::create_callable_type": (
              "Backend gap: reads `ParameterCategory.Positional`, an `IntEnum` "
@@ -151,8 +151,12 @@ demotable like any other callable, and now read as
 """
 glob EVALUATOR_FATAL_WAIVERS: dict[(str, str)] = {
          "type_evaluator.jac::Native lowering failed for type '[MultiString]'": (
-             "Field declaration: a list of `MultiString` unitree nodes. "
-             "`MultiString` has a layout, but the list erases its element."
+             "Field declaration: `TypeEvaluator.program` is annotated "
+             "`\"JacProgram\"`, a quoted forward reference. The backend reads "
+             "the quotes literally, so `[MultiString]` names the string "
+             "literal node rather than any list of unitree nodes. Unquoting it "
+             "needs `JacProgram` to have a native layout, which is the same "
+             "thing `enum_utils` and `operations` wait on below."
          ),
          (
              "type_evaluator.jac::Native lowering failed for type "
