@@ -1,0 +1,61 @@
+glob JCIR_BUILTIN_NAMES: frozenset = frozenset(
+         {
+             "APIProtocol",
+             "AccessLevel",
+             "JacListView",
+             "Region",
+             "ScheduleTrigger",
+             "_jac_chunks",
+             "_jac_region_close",
+             "_jac_region_instrument",
+             "_jac_region_open",
+             "_jac_region_register",
+             "allroots",
+             "archetype_alias",
+             "commit",
+             "grant",
+             "jid",
+             "jobj",
+             "jref",
+             "llm",
+             "managed",
+             "new",
+             "on_commit",
+             "printgraph",
+             "restspec",
+             "revoke",
+             "save",
+             "schedule",
+             "schema_alias",
+             "schema_drop",
+             "schema_upgrade",
+             "schema_was",
+             "store",
+             "unsafe_html"
+         }
+     ),
+     JCIR_AMBIENT_TYPING_NAMES: frozenset = frozenset(
+         {
+             "Annotated",
+             "AsyncIterable",
+             "AsyncIterator",
+             "Awaitable",
+             "Callable",
+             "ClassVar",
+             "Coroutine",
+             "Generic",
+             "Iterable",
+             "Iterator",
+             "Literal",
+             "Mapping",
+             "MutableMapping",
+             "MutableSequence",
+             "Protocol",
+             "Sequence",
+             "TypeVar"
+         }
+     );
+
+def jcir_is_test_path(path: str) -> bool {
+    return path.endswith(".test.jac");
+}
