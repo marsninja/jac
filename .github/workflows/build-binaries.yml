@@ -299,6 +299,53 @@ jobs:
         working-directory: jac
         run: zig build fetch-llvm $DTARGET --summary all
 
+      # The seal that closes `zig build` compiles every NATIVE_SEAL_ROOTS entry
+      # in ONE process, and each materializer crossing strands that crossing's
+      # native tree: the unitree parent/kid cycles defeat plain RC and the
+      # artifact collector is not yet multi-module-safe to arm (the reclaim
+      # tracks with #8139; ci.yml chunks test-compiler against the same
+      # accumulation). Wave 4 took the seal from nine roots to eleven and its
+      # peak is now 19.3 GiB resident, measured by replaying this build on
+      # cd049457a. Both hosted Linux images pair 15 GiB of RAM with a 3 GiB
+      # stock swapfile, so 18 GiB is the whole budget and both legs died
+      # mid-seal with "the runner has received a shutdown signal" and exit 143
+      # -- no zig diagnostic, no failed command, the signature of a runner
+      # whose memory is gone. The stranded pages are cold, written once and
+      # never read again, which is why macOS pages them out and finishes;
+      # this gives Linux the same room. Retire it when the crossing reclaims
+      # its tree.
+      - name: Swap headroom for the sealed precompile (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          echo "--- before"
+          free -h
+          swapon --show || true
+          df -h "$RUNNER_TEMP"
+          # Both images run one volume with 85-107 GiB free, so the 24 GiB cap
+          # is what binds; the reserve keeps the build's own tree (LLVM slice,
+          # zig cache, staged payload) ahead of the swapfile on a tighter image,
+          # and says so in the log rather than silently starving the build.
+          AVAIL_GB=$(( $(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {print $4}') / 1048576 ))
+          SIZE_GB=$(( AVAIL_GB - 25 ))
+          if [ "$SIZE_GB" -gt 24 ]; then
+            SIZE_GB=24
+          fi
+          if [ "$SIZE_GB" -lt 4 ]; then
+            echo "::warning::only ${AVAIL_GB}G free under $RUNNER_TEMP, too little" \
+                 "to spare; the seal runs on the stock swap and may exhaust the runner"
+            exit 0
+          fi
+          SWAP_FILE="$RUNNER_TEMP/jac-seal-swap"
+          sudo fallocate -l "${SIZE_GB}G" "$SWAP_FILE" \
+            || sudo dd if=/dev/zero of="$SWAP_FILE" bs=1M count=$(( SIZE_GB * 1024 ))
+          sudo chmod 600 "$SWAP_FILE"
+          sudo mkswap "$SWAP_FILE"
+          sudo swapon "$SWAP_FILE"
+          echo "--- after"
+          free -h
+          swapon --show
+
       - name: Build the jac binary (one command)
         working-directory: jac
         # On a dev-channel shim-cache hit, stage the shim outside its in-tree
