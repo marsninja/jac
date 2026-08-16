@@ -423,6 +423,114 @@ glob _UNITREE_SEAM_WAIVERS: tuple = (
          )
      };
 
+"""Every waiver family, with the mechanism that clears it.
+
+`seal_demotion_report` proves a waived name still names a real seam and
+`test_sealed_seam_reachability.jac` proves it ships dead. This table
+carries the third obligation: that the waiver is a recorded debt with a
+way out, not a permanent exemption.
+`test_sealed_demotion_audit.jac` fails when a waiver has no family here
+or a family covers nothing, so the table cannot drift from the tuples.
+"""
+glob NATIVE_SEAL_WAIVER_FAMILIES: tuple = (
+         (
+             "unitree Python-only surface",
+             _UNITREE_SEAM_WAIVERS,
+             "Import resolution, filesystem and jac.toml reads, the "
+             "CPython ast bridge, the type system's mangler, the "
+             "`type`-object literal map and the `...` value, plus the lazy "
+             "`CodeGenTarget` construction behind `UniNode.gen`. Each is "
+             "infrastructure no native unit can host. They clear as the "
+             "driver hands the tree data instead of handles: import "
+             "detection stamped onto the node (the #8242 `absorbed_mod` "
+             "pattern), codegen state crossing as records, and a native "
+             "value for `Ellipsis`."
+         ),
+         (
+             "module_codegen erased-operand isinstance",
+             _MODULE_CODEGEN_SEAM_WAIVERS,
+             "One backend gap and five call-cascades of it: "
+             "`iter_context_stmts` runs `isinstance` over an "
+             "element-erased sequence element, because `module.body` "
+             "reaches it as a bare `Sequence`. All six clear together "
+             "when the backend lowers `isinstance` over erased operands, "
+             "the unlanded remainder of the #8214 family."
+         ),
+         (
+             "uni_pass TypeVar-generic statics",
+             _UNI_PASS_SEAM_WAIVERS,
+             "`get_all_sub_nodes` and `find_parent_of_type` are "
+             "`type[T]`-generic statics that only forward to the "
+             "same-named `UniNode` methods, and the backend cannot lower "
+             "a TypeVar-bound signature. They clear when generic statics "
+             "lower, or when the forwarding shims are retired for the "
+             "`UniNode` methods they wrap."
+         ),
+         (
+             "endpoint effects written as codegen state",
+             _ENDPOINT_EFFECT_SEAM_WAIVERS,
+             "Both write endpoint classifications through `UniNode.gen` "
+             "into the `InteropManifest`, Python-only codegen state, the "
+             "same family as unitree's waived `UniNode.gen.__get__`. They "
+             "clear when endpoint effects are emitted as data the driver "
+             "collects, the diagnostics-as-data pattern."
+         ),
+         (
+             "semantic_analysis ice construction",
+             _SEMANTIC_ANALYSIS_SEAM_WAIVERS,
+             "`Transform.ice` raises through Python diagnostics "
+             "machinery. Clears when ice construction lowers, or when the "
+             "internal-error guard moves behind the emit-as-data path."
+         ),
+         (
+             "jcir interop manifest and driver reads",
+             _JCIR_INTEROP_SEAM_WAIVERS,
+             "The native-export and sv-to-sv stub surface reads "
+             "`gen.interop_manifest` and the `InteropBinding` / "
+             "`BoundaryTypeInfo` codeinfo objects, which are Python "
+             "codegen state, and `exit_import` asks the driver for "
+             "`native_only_import_target`. Clears when the driver stamps "
+             "import decisions onto the node as data and the manifest "
+             "crosses as a native-clean record instead of a Python "
+             "object."
+         ),
+         (
+             "jcir named backend gaps",
+             _JCIR_LOWERING_SEAM_WAIVERS,
+             "Named constructs the backend does not yet lower: an "
+             "`Ellipsis` constant, element-erased list reads, and "
+             "`_merge_module_bodies` on the generic base pass. Each "
+             "clears when the named construct lowers; the generic-base "
+             "one also clears by the monomorphic-override route that "
+             "already cleared `_flatten_ast_list` on this pass."
+         ),
+         (
+             "jcir html entity decoding",
+             _JCIR_ENTITY_SEAM_WAIVERS,
+             "Jsx text and string attributes decode html entities through "
+             "the Python `html` module. Clears with an na_stdlib `html` "
+             "shim carrying the full html5 entity table, pinned against "
+             "`html.unescape` the way `test_jcir_facts_sync.jac` pins the "
+             "other baked facts. A reduced table is not acceptable: the "
+             "two lanes must agree byte for byte, so a missing entity is "
+             "a silent divergence rather than a missing feature."
+         ),
+         (
+             "jcir emitter-internal refusal",
+             _JCIR_EMITTER_ICE_SEAM_WAIVERS,
+             "`_query_filter_kws` refuses with an emitter-internal error "
+             "rather than a named gap, and takes its two callers with it. "
+             "Restructuring away union locals, `any` locals, conditional "
+             "expressions and continue-guards does not move it, which "
+             "places the fault in the native emitter rather than in the "
+             "shape of the source. Its sibling `exit_delete_stmt` was in "
+             "the same state and cleared when its nested function became "
+             "a method, so nested-function lowering is the first place to "
+             "look. Clears when that emitter fault is fixed."
+         )
+
+     );
+
 def _seal_module_label(path: str, pkg_path: (Path | None)) -> str {
     if pkg_path is not None {
         try {

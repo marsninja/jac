@@ -255,19 +255,21 @@ test "the container format and the baked facts carry no seam" {
 }
 
 
-test "no waived module-level function is advertised as an export" {
+test "no waived dependency function is advertised as an export" {
     (allowed, _bare) = seal_waiver_names(JCIR_ROOT);
-    bare_functions = sorted(
+    offenders = sorted(
         q
         for q in allowed
-        if "." not in q.split("::")[-1]
+        if "." not in q.partition("::")[2] and q.partition("::")[0] != JCIR_ROOT
     );
-    assert not bare_functions , (
-        "a waived method ships as an abort stub and links, but a waived "
-        "module-level function is advertised as an export and is absent "
-        "from the artifact, so the seal's load canary rejects it. Move it "
-        "out of the sealed closure or make it lower; waiving it produces "
-        "an artifact that cannot be loaded at all:\n"
-        + "\n".join(f"  {q}" for q in bare_functions)
+    assert not offenders , (
+        "the load canary resolves every name the layout advertises. A "
+        "demoted method ships as an abort stub and resolves, and so does a "
+        "demoted module-level function of the root itself. A module-level "
+        "function of a demoted dependency gets no stub, so it is advertised "
+        "and absent and the artifact will not dlopen. `codegen_ir`'s "
+        "`decode_ops` was exactly that and cost a three-minute link to "
+        "find; move such a name out of the sealed closure or make it "
+        "lower:\n" + "\n".join(f"  {q}" for q in offenders)
     );
 }

@@ -423,9 +423,16 @@ assumed away.
   diagnostics registry objects (severity policies, fix-its) stay
   Python-side. If the sealed pipeline ever needs to emit a diagnostic kind
   the flat record cannot express, that is a format version bump.
-- **Exact-minor `python_version` refusal** may be relaxable to a range
-  once the native transcriber exists and the parity canary runs per
-  CPython minor; until proven, exact match stands.
+- **Exact-minor `python_version` is now a baked fact.** `sys.version_info`
+  does not lower, so the stamp comes from `jcir_facts.JCIR_PYTHON_MAJOR`
+  and `JCIR_PYTHON_MINOR` through `jcir_python_version()`. The container
+  still stamps and still refuses on a mismatch; the refusal now compares
+  against the minor the build targets rather than the minor the reader
+  happens to run under, and `test_jcir_facts_sync.jac` pins the baked
+  target to the interpreter running the build. A cross-minor mismatch
+  therefore fails at build time instead of on the first container read.
+  Relaxing the exact match to a range still waits on the native
+  transcriber and a per-minor parity canary.
 - **Field-set completeness is not validated at bind time.** A producer
   that omits a field CPython requires surfaces as a `compile()` error
   (E5043) rather than a bind error. Acceptable for now because the parity
@@ -434,6 +441,29 @@ assumed away.
 - **`OP_TUPLE` currently has no producer.** It exists because tuple-valued
   ast fields are a plausible near-term need and its transcription is
   unambiguous; if v2 arrives without a use, drop it.
+- **Not every demoted name can be waived.** The seal's load canary
+  resolves every name the layout advertises. A demoted *method* ships as
+  an `abort()` stub and resolves, and so does a demoted module-level
+  function of the root module itself -- `module_codegen_pass`'s waived
+  `client_capability_violations` is the standing example. Two kinds get
+  no stub and so are advertised and absent, which fails `dlopen`: a
+  nested function inside a demoted method, and a module-level function of
+  a *dependency* in the closure. The jcir seal hit all four at once
+  (`set_ctx`, `get_pieces`, `decode_ops`, `read_container`). Nested
+  functions hoist to methods; a dependency function must lower or leave
+  the closure, never be waived. `decode_ops` was the latter: it decodes
+  into heterogeneous tuples, does not lower, and now lives in
+  `codegen_shim` where the reader belonged anyway.
+  `test_sealed_demotion_audit.jac` and `test_jcir_seal_census.jac` fail
+  on such a waiver now, so the finding surfaces in a census rather than
+  three minutes into a link.
+- **Nested functions and the emitter's internal refusal.** Two emitter
+  methods refused with an emitter-internal error rather than a named gap.
+  Hoisting a nested function to a method cleared one of them
+  (`exit_delete_stmt`); the other (`_query_filter_kws`) does not move
+  under any reshaping of union locals, `any` locals, conditional
+  expressions or continue-guards, which places that fault in the native
+  emitter. Nested-function lowering is the first place to look.
 
 ## 11. Module placement
 
@@ -445,7 +475,12 @@ assumed away.
 - `jac0core/codegen_shim.jac`: the Python-side consumer, beside the format
   it consumes, mirroring how `parser/materialize.jac` sits beside the
   parser it binds. It uses `import ast` freely: the shim IS the Python
-  side, and this module is never sealed.
+  side, and this module is never sealed. `decode_ops` lives here rather
+  than in `codegen_ir` for the same reason: it decodes into
+  heterogeneous tuples, which does not lower, and as a module-level
+  function it cannot be waived (section 10). `codegen_ir` keeps
+  `read_container`, which does lower, so the writer and the container
+  reader both reach zero seams.
 - One bootstrap-dialect note: jac0core is compiled by the jac0 bootstrap,
   which has no `**kwargs` call splat, so the shim builds its single
   keyword-apply trampoline through one `eval` of a two-argument lambda at
@@ -481,14 +516,28 @@ assumed away.
   currently never produces the construct, and the differential suite
   pins both refusals on a synthetic node).
 
-  Sealed-lane producer caveats (producer-side facts or string transforms
-  that the dev lane satisfies through ordinary Python; the sealing wave
-  must supply them natively): the builtin-name set read from
-  `jaclang.runtimelib.builtin.__all__` (bake at seal time), the ambient
-  typing names (already an ast-free text scan of `typing_ambient.pyi`),
-  `textwrap.dedent` for `::py::` blocks, and `html.unescape` for jsx
-  text and string attributes (na `html` shim or a vendored entity
-  table).
+  Sealed-lane producer caveats, all but one resolved. The builtin-name
+  set and the ambient typing names are baked into `jcir_facts.jac` and
+  pinned against their sources by `test_jcir_facts_sync.jac`;
+  `textwrap.dedent` lowers through the na_stdlib shim, which joins the
+  measured closure and contributes zero seams; the CPython minor joins
+  the same baked facts (section 10). What remains is `html.unescape` for
+  jsx text and string attributes, waived as
+  `_JCIR_ENTITY_SEAM_WAIVERS`. It clears with an na_stdlib `html` shim
+  carrying the full html5 entity table, pinned against `html.unescape`.
+  A reduced table is not acceptable: the two lanes must agree byte for
+  byte, so a missing entity is a silent divergence rather than a missing
+  feature.
+
+  The emitter is a native seal root. `seal_native_artifacts` builds
+  `libjac_jcir_gen_pass.so` from it with an eight-module closure
+  (`codegen_ir`, `constant`, `diagnostics`, `jcir_facts`, `srcloc`,
+  `unitree`, the `textwrap` shim, and the emitter), and the artifact
+  passes a load canary and a container crossing canary before it is
+  accepted. `test_jcir_seal_census.jac` pins the closure and the seam
+  set; the residual seams are waived by family in
+  `NATIVE_SEAL_WAIVER_FAMILIES`, each naming what clears it, and
+  `test_sealed_demotion_audit.jac` holds the whole seal to that.
 - `jac0core/passes/jcir_bc_gen_pass.jac` (+impl): the shim-seat pipeline
   pass. Reads `gen.jcir`, transcribes through the reference shim into
   `gen.py_ast`, unparses the tree into `gen.py` (so tooling consumers of
