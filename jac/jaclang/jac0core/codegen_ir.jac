@@ -398,7 +398,7 @@ obj CodegenIrWriter {
         }
         _w_varint(buf, len(self.diags));
         for d in self.diags {
-            buf.append(d.severity & 255);
+            buf.append(int(d.severity) & 255);
             _w_varint(buf, self.str_ref(d.code_str));
             _w_varint(buf, self.str_ref(d.message));
             _w_varint(buf, self.str_ref(d.help));

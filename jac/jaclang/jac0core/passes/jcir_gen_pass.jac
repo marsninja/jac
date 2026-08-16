@@ -1,5 +1,4 @@
 import textwrap;
-import from typing { ClassVar }
 import from collections.abc { Sequence }
 import from jaclang.jac0core.unitree {
     Ability,
@@ -307,20 +306,17 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
         _lambda_counter: int = 0,
         _hoist_frames: list[list] postinit,
         preamble: list postinit,
-        _sink: dict postinit,
+        _sink: dict[UniNode, list] postinit,
         _module_root: (CgNode | None) = None,
         _module_path: str = "";
 
-    with entry {
-        _builtin_names: ClassVar[(set[str] | None)] = None;
-        _ambient_typing_names: ClassVar[(set[str] | None)] = None;
-    }
+    with entry { }
 
     @classmethod
-    def _get_builtin_names(cls: any) -> set[str];
+    def _get_builtin_names -> set[str];
 
     @classmethod
-    def _get_ambient_typing_names(cls: any) -> set[str];
+    def _get_ambient_typing_names -> set[str];
 
     def postinit -> None;
     def enter_node(nd: UniNode) -> None;
@@ -350,9 +346,7 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
     def _next_lambda_name -> str;
     def _push_hoist_frame -> None;
     def _hoist_lambda(func_def: CgNode) -> None;
-    def _ancestor_is_one_of(
-        nd: (UniNode | None), roots: list[UniNode]
-    ) -> bool;
+    def _ancestor_is_one_of(nd: (UniNode | None), roots: list[UniNode]) -> bool;
 
     def _split_scope_hoists(
         hoists: list, sig_roots: list[UniNode]
@@ -396,12 +390,13 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
     def resolve_switch_pattern(pattern: MatchPattern, target: Expr) -> CgNode;
     def resolve_switch_stmt(nd: SwitchStmt) -> list;
     def resolve_stmt_block(
-        nd: (
-            Sequence[UniNode]
-            | Sequence[CodeBlockStmt]
-            | Sequence[EnumBlockStmt]
-            | None
-        ),
+        nd:
+            (
+                Sequence[UniNode]
+                | Sequence[CodeBlockStmt]
+                | Sequence[EnumBlockStmt]
+                | None
+            ),
         doc: (String | None) = None
     ) -> list;
 

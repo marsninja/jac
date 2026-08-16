@@ -1,17 +1,9 @@
-@classmethod
-impl JcirGenPass._get_builtin_names(cls: any) -> set[str] {
-    if (cls._builtin_names is None) {
-        cls._builtin_names = set(JCIR_BUILTIN_NAMES);
-    }
-    return cls._builtin_names;
+impl JcirGenPass._get_builtin_names -> set[str] {
+    return set(JCIR_BUILTIN_NAMES);
 }
 
-@classmethod
-impl JcirGenPass._get_ambient_typing_names(cls: any) -> set[str] {
-    if (cls._ambient_typing_names is None) {
-        cls._ambient_typing_names = set(JCIR_AMBIENT_TYPING_NAMES);
-    }
-    return cls._ambient_typing_names;
+impl JcirGenPass._get_ambient_typing_names -> set[str] {
+    return set(JCIR_AMBIENT_TYPING_NAMES);
 }
 
 impl JcirGenPass.postinit -> None {
@@ -198,9 +190,7 @@ impl JcirGenPass.const_of(value: any, jac_node: (UniNode | None) = None) -> CgNo
     return self.nod('Constant', ['value'], [value], jac_node=jac_node);
 }
 
-impl JcirGenPass.name_load(
-    name_id: str, jac_node: (UniNode | None) = None
-) -> CgNode {
+impl JcirGenPass.name_load(name_id: str, jac_node: (UniNode | None) = None) -> CgNode {
     return self.nod(
         'Name',
         ['id', 'ctx'],
@@ -445,9 +435,7 @@ impl JcirGenPass._get_sem_decorator(nd: UniNode) -> (CgNode | None) {
     );
 }
 
-impl JcirGenPass.resolve_switch_pattern(
-    pattern: MatchPattern, target: Expr
-) -> CgNode {
+impl JcirGenPass.resolve_switch_pattern(pattern: MatchPattern, target: Expr) -> CgNode {
     if isinstance(pattern, MatchValue) {
         return self.nod(
             'Compare',
@@ -1072,11 +1060,7 @@ impl JcirGenPass.exit_module_item(nd: ModuleItem) -> None {
                 'alias',
                 ['name', 'asname'],
                 [
-                    (
-                        nd.name.sym_name
-                            if isinstance(nd.name, Name)
-                            else nd.name.value
-                    ),
+                    (nd.name.sym_name if isinstance(nd.name, Name) else nd.name.value),
                     nd.alias.sym_name if nd.alias else None
                 ]
             )
@@ -1091,12 +1075,10 @@ impl JcirGenPass.enter_archetype(nd: Archetype) -> None {
 }
 
 impl JcirGenPass.exit_archetype(nd: Archetype) -> None {
-    inner: (
-        Sequence[UniNode]
-        | Sequence[CodeBlockStmt]
-        | Sequence[EnumBlockStmt]
-        | None
-    ) = None;
+    inner:
+        (
+            Sequence[UniNode] | Sequence[CodeBlockStmt] | Sequence[EnumBlockStmt] | None
+        ) = None;
     if isinstance(nd.body, ImplDef) {
         inner = nd.body.body if not isinstance(nd.body.body, Expr) else None;
     } elif isinstance(nd.body, list) {
@@ -1158,12 +1140,10 @@ impl JcirGenPass.enter_enum(nd: Enum) -> None {
 }
 
 impl JcirGenPass.exit_enum(nd: Enum) -> None {
-    inner: (
-        Sequence[UniNode]
-        | Sequence[CodeBlockStmt]
-        | Sequence[EnumBlockStmt]
-        | None
-    ) = None;
+    inner:
+        (
+            Sequence[UniNode] | Sequence[CodeBlockStmt] | Sequence[EnumBlockStmt] | None
+        ) = None;
     if isinstance(nd.body, ImplDef) {
         inner = nd.body.body if not isinstance(nd.body.body, Expr) else None;
     } elif isinstance(nd.body, list) {
@@ -1239,15 +1219,11 @@ impl JcirGenPass.exit_ability(nd: Ability) -> None {
             prop_owner_name = hv.name.value;
         }
     }
-    body_loc_node: (UniNode | None) = (
-        nd.body if isinstance(nd.body, UniNode) else None
-    );
-    stmt_body: (
-        Sequence[UniNode]
-        | Sequence[CodeBlockStmt]
-        | Sequence[EnumBlockStmt]
-        | None
-    ) = None;
+    body_loc_node: (UniNode | None) = nd.body if isinstance(nd.body, UniNode) else None;
+    stmt_body:
+        (
+            Sequence[UniNode] | Sequence[CodeBlockStmt] | Sequence[EnumBlockStmt] | None
+        ) = None;
     if isinstance(nd.body, ImplDef) and not isinstance(nd.body.body, Expr) {
         stmt_body = nd.body.body;
     } elif isinstance(nd.body, list) {
@@ -1285,8 +1261,7 @@ impl JcirGenPass.exit_ability(nd: Ability) -> None {
         if event_sig.arch_tag_info {
             tinfo = self.val(event_sig.arch_tag_info);
             if (
-                tinfo.cls == 'Tuple'
-                and isinstance(event_sig.arch_tag_info, TupleVal)
+                tinfo.cls == 'Tuple' and isinstance(event_sig.arch_tag_info, TupleVal)
             ) {
                 telts = tinfo.get('elts');
                 if (len(telts) > 1) {
@@ -1431,9 +1406,7 @@ impl JcirGenPass.exit_ability(nd: Ability) -> None {
     func_name_out = (
         prop_owner_name
             if (is_prop_acc and (prop_owner_name is not None))
-            else self._py_name(name_ref_node)
-                if name_ref_node is not None
-                else ""
+            else self._py_name(name_ref_node) if name_ref_node is not None else ""
     );
     func_args_out: CgNode;
     if (is_prop_acc and (nd.signature is None)) {
@@ -1609,10 +1582,7 @@ impl JcirGenPass.exit_event_signature(nd: EventSignature) -> None {
                 [
                     [],
                     [self.nod('arg', ['arg', 'annotation'], ['self', None]), arch_arg]
-                        if (
-                            (abl := nd.find_parent_of_type(Ability))
-                            and abl.is_method
-                        )
+                        if ((abl := nd.find_parent_of_type(Ability)) and abl.is_method)
                         else [arch_arg],
                     [],
                     None,
@@ -2629,9 +2599,7 @@ impl JcirGenPass.exit_lambda_expr(nd: LambdaExpr) -> None {
     self._emit_lambda_expr_body(nd, nd.body);
 }
 
-impl JcirGenPass._emit_lambda_expr_body(
-    nd: LambdaExpr, body_node: Expr
-) -> None {
+impl JcirGenPass._emit_lambda_expr_body(nd: LambdaExpr, body_node: Expr) -> None {
     if nd.signature {
         self._remove_lambda_param_annotations(nd.signature);
     }
@@ -2658,9 +2626,7 @@ impl JcirGenPass._emit_lambda_expr_body(
     );
 }
 
-impl JcirGenPass._remove_lambda_param_annotations(
-    signature: FuncSignature
-) -> None {
+impl JcirGenPass._remove_lambda_param_annotations(signature: FuncSignature) -> None {
     for param in signature.params {
         if (self.outs(param) and self.val(param).cls == 'arg') {
             self.val(param).setf('annotation', None);
@@ -2784,9 +2750,7 @@ impl JcirGenPass.exit_multi_string(nd: MultiString) -> None {
                 } else {
                     pieces.append(py_val);
                 }
-            } elif (
-                isinstance(i, Token) and (i.name in [Tok.LBRACE, Tok.RBRACE])
-            ) {
+            } elif (isinstance(i, Token) and (i.name in [Tok.LBRACE, Tok.RBRACE])) {
                 continue;
             } else {
                 raise self.ice('Multi string made of something weird.');
@@ -3409,10 +3373,7 @@ impl JcirGenPass._is_edge_ref_target(target: UniNode) -> bool {
     if isinstance(target, EdgeRefTrailer) {
         return not target.edges_only and not target.is_async;
     }
-    if (
-        isinstance(target, AtomTrailer)
-        and isinstance(target.right, FilterCompr)
-    ) {
+    if (isinstance(target, AtomTrailer) and isinstance(target.right, FilterCompr)) {
         return self._is_edge_ref_target(target.target);
     }
     return False;
@@ -4039,9 +4000,7 @@ impl JcirGenPass.exit_builtin_type(nd: BuiltinType) -> None {
     if nd.sym_name == "any" {
         parent = nd.parent;
         is_call_func = (
-            parent is not None
-            and isinstance(parent, FuncCall)
-            and parent.target is nd
+            parent is not None and isinstance(parent, FuncCall) and parent.target is nd
         );
         if not is_call_func {
             self.typing_imports.add("Any");
@@ -4170,8 +4129,8 @@ impl JcirGenPass.exit_jsx_normal_attribute(nd: JsxNormalAttribute) -> None {
     key_ast = self.const_of(nd.name.value, jac_node=nd.name);
     value_ast: CgNode;
     if (nd.value and isinstance(nd.value, String)) {
-        import html;
-        value_ast = self.const_of(html.unescape(nd.value.lit_value), jac_node=nd.value);
+        import from html { unescape }
+        value_ast = self.const_of(unescape(nd.value.lit_value), jac_node=nd.value);
     } elif (nd.value and self.outs(nd.value)) {
         value_ast = self.val(nd.value);
     } else {
@@ -4191,10 +4150,8 @@ impl JcirGenPass.exit_jsx_normal_attribute(nd: JsxNormalAttribute) -> None {
 }
 
 impl JcirGenPass.exit_jsx_text(nd: JsxText) -> None {
-    import html;
-    self.set_out(
-        nd, [self.const_of(html.unescape(nd.get_normalized_text()), jac_node=nd)]
-    );
+    import from html { unescape }
+    self.set_out(nd, [self.const_of(unescape(nd.get_normalized_text()), jac_node=nd)]);
 }
 
 impl JcirGenPass.exit_jsx_expression(nd: JsxExpression) -> None {
