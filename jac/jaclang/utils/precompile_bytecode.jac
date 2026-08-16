@@ -1071,6 +1071,153 @@ def _merge_probe_parity(np: any) -> str {
     return "";
 }
 
+glob _JCIR_PROBE_LINES: tuple = (
+         "\"\"\"Container probe.\"\"\"",
+         "# a comment the crossing must not move",
+         "glob seeded: int = 1;",
+         "",
+         "def widen(n: int) -> int {",
+         "    total = n + seeded;  # a trailing comment",
+         "    return total;",
+         "}",
+         "",
+         "test \"a string named probe\" { assert widen(1) == 2; }",
+         "",
+         "with entry { widened = widen(2); }",
+
+     );
+
+def _jcir_code_field_diffs(a: any, b: any, at: str, out: list[str]) -> list[str] {
+    import types;
+    for attr in (
+        "co_name",
+        "co_qualname",
+        "co_filename",
+        "co_firstlineno",
+        "co_argcount",
+        "co_posonlyargcount",
+        "co_kwonlyargcount",
+        "co_nlocals",
+        "co_stacksize",
+        "co_flags",
+        "co_code",
+        "co_names",
+        "co_varnames",
+        "co_freevars",
+        "co_cellvars",
+        "co_linetable",
+        "co_exceptiontable"
+    ) {
+        av = getattr(a, attr, None);
+        bv = getattr(b, attr, None);
+        if av != bv {
+            out.append(f"{at}.{attr}: pyast {av!r} vs jcir {bv!r}");
+        }
+    }
+    if len(a.co_consts) != len(b.co_consts) {
+        out.append(f"{at}.co_consts length {len(a.co_consts)} vs {len(b.co_consts)}");
+        return out;
+    }
+    for (i, (x, y)) in enumerate(zip(a.co_consts, b.co_consts)) {
+        if (isinstance(x, types.CodeType) and isinstance(y, types.CodeType)) {
+            _jcir_code_field_diffs(x, y, f"{at}.consts[{i}]", out);
+        } elif (x != y or type(x) is not type(y)) {
+            out.append(f"{at}.consts[{i}]: pyast {x!r} vs jcir {y!r}");
+        }
+    }
+    return out;
+}
+
+def seal_jcir_container_canary(lib_path: str) -> str {
+    import ast as pyast;
+    import traceback;
+    import from jaclang.jac0core.codegen_shim { transcribe }
+    import from jaclang.jac0core.compile_options { CompileOptions, env_na_debug }
+    import from jaclang.jac0core.passes.jcir_gen_pass { JcirGenPass }
+    import from jaclang.jac0core.program { JacProgram }
+
+    nl = chr(10);
+    probe_path = "__seal_jcir_probe__.jac";
+    probe_src = nl.join(list(_JCIR_PROBE_LINES));
+    sys.stderr.write(
+        f"    canary: jcir container crossing in {os.path.basename(lib_path)}{nl}"
+    );
+    sys.stderr.flush();
+    blobs: list[bytes] = [];
+    trees: list[any] = [];
+    for _round in (0, 1) {
+        prog = JacProgram();
+        try {
+            mod = prog.compile(
+                use_str=probe_src,
+                file_path=probe_path,
+                options=CompileOptions(
+                    force_codespace="server",
+                    skip_native_engine=True,
+                    no_ir_cache=True,
+                    suppress_codes=["E5092"]
+                )
+            );
+        } except Exception as probe_exc {
+            if env_na_debug() {
+                traceback.print_exc(file=sys.stderr);
+            }
+            return (
+                f"the probe did not compile: "
+                f"{type(probe_exc).__name__}: {probe_exc}"
+            );
+        }
+        if prog.errors_had {
+            return (
+                f"the probe did not compile cleanly: "
+                f"{[str(e) for e in prog.errors_had][:3]}"
+            );
+        }
+        blobs.append(JcirGenPass(ir_in=mod, prog=prog).ir_bytes());
+        trees.append(mod.gen.py_ast[0]);
+    }
+    if blobs[0] != blobs[1] {
+        return (
+            f"the container is not byte stable: two emissions of the probe "
+            f"produced {len(blobs[0])} and {len(blobs[1])} bytes that differ. "
+            "The container is what crosses the boundary and what a cache keys "
+            "on, so an unstable encoding cannot ship."
+        );
+    }
+    (mods, diags) = transcribe(blobs[0]);
+    if diags {
+        return f"the probe container carried unexpected diagnostics: {diags}";
+    }
+    if len(mods) != 1 or mods[0][0] != probe_path {
+        return f"the probe container carried {len(mods)} module(s), not the probe";
+    }
+    want = pyast.dump(trees[0], include_attributes=True);
+    got = pyast.dump(mods[0][1], include_attributes=True);
+    if want != got {
+        i = 0;
+        n = min(len(want), len(got));
+        while (i < n and want[i] == got[i]) {
+            i += 1;
+        }
+        lo = max(0, i - 120);
+        return (
+            f"the crossing lost fidelity at offset {i}{nl}"
+            f"want: ...{want[lo:i + 200]}{nl}"
+            f"got:  ...{got[lo:i + 200]}"
+        );
+    }
+    ref_code = compile(trees[0], probe_path, "exec");
+    got_code = compile(mods[0][1], probe_path, "exec");
+    code_diffs = _jcir_code_field_diffs(ref_code, got_code, "<module>", []);
+    if code_diffs {
+        return (
+            f"{len(code_diffs)} code object field(s) diverged across the "
+            f"crossing:{nl}" + nl.join(f"    {d}" for d in code_diffs[:10])
+        );
+    }
+    return "";
+}
+
 def _sym_name_fingerprint(mod: any) -> list[str] {
     import jaclang.jac0core.unitree as uni;
     out: list[str] = [];
@@ -1351,6 +1498,22 @@ def seal_native_artifacts(
         layout_path.write_text(
             json.dumps(layout_dict, sort_keys=True) + "\n", encoding="utf-8"
         );
+        if rel == "jac0core/passes/jcir_gen_pass.jac" {
+            crossing = seal_jcir_container_canary(str(lib_path));
+            if crossing {
+                console.error(
+                    f"NATIVE SEAL: {rel}: the emitted artifact "
+                    f"{lib_path.name} failed its container crossing canary. "
+                    "The seal refuses a JCIR producer whose container is not "
+                    "byte stable or whose crossing is lossy; set "
+                    f"JAC_NA_DEBUG=1 for the traceback.{chr(10)}{crossing}"
+                );
+                lib_path.unlink(missing_ok=True);
+                layout_path.unlink(missing_ok=True);
+                purge_native_ir_cache(str(src), closure_deps);
+                return None;
+            }
+        }
         if rel == "compiler/native_materialize.jac" {
             parity = seal_parse_parity_canary(str(lib_path), layout_dict);
             if parity {
