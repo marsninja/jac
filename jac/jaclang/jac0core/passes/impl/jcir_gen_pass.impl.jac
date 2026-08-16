@@ -340,8 +340,8 @@ impl JcirGenPass._ancestor_is_one_of(
 }
 
 impl JcirGenPass._split_scope_hoists(
-    hoists: list, sig_roots: list[UniNode]
-) -> tuple[(list, list)] {
+    hoists: list[CgNode], sig_roots: list[UniNode]
+) -> tuple[(list[CgNode], list[CgNode])] {
     body_hoists: list[CgNode] = [];
     enclosing_hoists: list[CgNode] = [];
     for func_def in hoists {
@@ -355,7 +355,22 @@ impl JcirGenPass._split_scope_hoists(
     return (body_hoists, enclosing_hoists);
 }
 
-impl JcirGenPass._drain_module_hoists -> list {
+impl JcirGenPass._docstring_offset(body: list[CgItem]) -> int {
+    if not body {
+        return 0;
+    }
+    head = body[0];
+    if (not isinstance(head, CgNode)) or (head.cls != 'Expr') {
+        return 0;
+    }
+    inner = head.get('value');
+    if (not isinstance(inner, CgNode)) or (inner.cls != 'Constant') {
+        return 0;
+    }
+    return 1 if isinstance(inner.get('value'), str) else 0;
+}
+
+impl JcirGenPass._drain_module_hoists -> list[CgNode] {
     if not self._hoist_frames {
         self._hoist_frames = [[]];
     }
@@ -614,9 +629,10 @@ impl JcirGenPass.exit_sub_tag(nd: SubTag) -> None {
 }
 
 impl JcirGenPass.exit_module(nd: Module) -> None {
+    mod_path = nd.loc.mod_path;
     is_builtin_module = (
-        nd.loc.mod_path.endswith(('builtin.jac', 'builtin.py'))
-        and ('runtimelib' in nd.loc.mod_path)
+        (mod_path.endswith('builtin.jac') or mod_path.endswith('builtin.py'))
+        and ('runtimelib' in mod_path)
     );
     if (self.builtin_imports and not is_builtin_module) {
         self.preamble.append(
@@ -789,16 +805,7 @@ impl JcirGenPass.exit_test(nd: Test) -> None {
     }
     test_directives = self.scope_directive_stmts([nd]);
     if test_directives {
-        insert_at = 1
-            if (
-                len(body_stmts) > 0
-                and isinstance(body_stmts[0], CgNode)
-                and body_stmts[0].cls == 'Expr'
-                and isinstance(body_stmts[0].get('value'), CgNode)
-                and body_stmts[0].get('value').cls == 'Constant'
-                and isinstance(body_stmts[0].get('value').get('value'), str)
-            )
-            else 0;
+        insert_at = self._docstring_offset(body_stmts);
         body_stmts = [
             *body_stmts[:insert_at],
             *test_directives,
@@ -929,10 +936,12 @@ impl JcirGenPass.exit_py_inline_code(nd: PyInlineCode) -> None {
         doc = self.nod('Expr', ['value'], [self.val(nd.doc)], jac_node=nd.doc);
         shift = nd.loc.first_line;
         inner = doc.get('value');
-        doc.l1 += shift;
-        doc.l2 += shift;
-        inner.l1 += shift;
-        inner.l2 += shift;
+        doc.l1 = doc.l1 + shift;
+        doc.l2 = doc.l2 + shift;
+        if isinstance(inner, CgNode) {
+            inner.l1 = inner.l1 + shift;
+            inner.l2 = inner.l2 + shift;
+        }
         self.set_out(nd, [doc, CgSplice(src=nd.code.value, offset=shift)]);
     } else {
         self.set_out(
@@ -1399,16 +1408,7 @@ impl JcirGenPass.exit_ability(nd: Ability) -> None {
         [nd, nd.body if isinstance(nd.body, ImplDef) else None]
     );
     if directive_stmts {
-        insert_at = 1
-            if (
-                len(body) > 0
-                and isinstance(body[0], CgNode)
-                and body[0].cls == 'Expr'
-                and isinstance(body[0].get('value'), CgNode)
-                and body[0].get('value').cls == 'Constant'
-                and isinstance(body[0].get('value').get('value'), str)
-            )
-            else 0;
+        insert_at = self._docstring_offset(body);
         body = [*body[:insert_at], *directive_stmts, *body[insert_at:]];
     }
     ast_returns: CgNode = self.const_of(None);
@@ -2163,26 +2163,24 @@ impl JcirGenPass._delete_targets(nd: DeleteStmt) -> list {
 }
 
 impl JcirGenPass.exit_delete_stmt(nd: DeleteStmt) -> None {
-    def set_ctx(targets: any, ctx_cls: str) -> list {
-        if not isinstance(targets, list) {
-            targets = [targets];
-        } elif (
-            targets
-            and isinstance(targets[0], CgNode)
-            and targets[0].cls in ('List', 'Tuple')
-        ) {
-            targets = [
+    def set_ctx(targets: any, ctx_cls: str) -> list[CgNode] {
+        items: list = targets if isinstance(targets, list) else [targets];
+        head = items[0] if items else None;
+        if (isinstance(head, CgNode) and head.cls in ('List', 'Tuple')) {
+            items = [
                 i
-                for i in targets[0].get('elts')
+                for i in head.get('elts')
                 if isinstance(i, CgNode)
             ];
         }
-        result: list = [];
-        for target in targets {
-            if (isinstance(target, CgNode) and target.hasf('ctx')) {
-                target = self._with_ctx(target, ctx_cls);
+        result: list[CgNode] = [];
+        for target in items {
+            if not isinstance(target, CgNode) {
+                continue;
             }
-            result.append(target);
+            result.append(
+                self._with_ctx(target, ctx_cls) if target.hasf('ctx') else target
+            );
         }
         return result;
     }
@@ -2709,8 +2707,8 @@ impl JcirGenPass.exit_unary_expr(nd: UnaryExpr) -> None {
         }
         return;
     }
-    op_tok = Tok(nd.op.name) if (nd.op.name in TOK_MEMBER_NAMES) else None;
-    op_cls = UNARY_CLS_MAP.get(op_tok) if op_tok else None;
+    op_name = nd.op.name;
+    op_cls = UNARY_CLS_BY_NAME[op_name] if op_name in UNARY_CLS_BY_NAME else '';
     if op_cls {
         self.set_out(
             nd,
@@ -2813,30 +2811,25 @@ impl JcirGenPass.exit_multi_string(nd: MultiString) -> None {
             combined_multi[i] = self.const_of(v);
         }
     }
-    merged: list = [];
+    merged: list[CgNode] = [];
     for v in combined_multi {
-        if (
-            merged
-            and isinstance(v, CgNode)
-            and v.cls == 'Constant'
-            and isinstance(v.get('value'), str)
-            and isinstance(merged[-1], CgNode)
-            and merged[-1].cls == 'Constant'
-            and isinstance((prev_const := merged[-1].get('value')), str)
-            and isinstance((next_const := v.get('value')), str)
-        ) {
-            merged[-1] = self.const_of(prev_const + next_const);
-        } else {
+        prev: (CgNode | None) = merged[-1] if merged else None;
+        folded = False;
+        if (prev is not None and isinstance(v, CgNode) and v.cls == 'Constant') {
+            next_const = v.get('value');
+            prev_const = prev.get('value') if prev.cls == 'Constant' else None;
+            if (isinstance(next_const, str) and isinstance(prev_const, str)) {
+                merged[-1] = self.const_of(prev_const + next_const);
+                folded = True;
+            }
+        }
+        if not folded {
             merged.append(v);
         }
     }
     if not merged {
         self.set_out(nd, [self.const_of('')]);
-    } elif (
-        len(merged) == 1
-        and isinstance(merged[0], CgNode)
-        and merged[0].cls == 'Constant'
-    ) {
+    } elif (len(merged) == 1 and merged[0].cls == 'Constant') {
         self.set_out(nd, [merged[0]]);
     } else {
         self.set_out(nd, [self.nod('JoinedStr', ['values'], [merged])]);
@@ -3449,17 +3442,28 @@ impl JcirGenPass._query_filter_kws(
     for x in fc.compares {
         cmp_ast = self.val(x);
         reason: (str | None) = None;
+        field_name: str = '';
+        op_str: (str | None) = None;
+        rhs: any = None;
         if cmp_ast.cls != 'Compare' {
             reason = 'not a comparison';
-        } elif len(cmp_ast.get('ops')) != 1 {
-            reason = 'chained comparisons are not admitted';
-        } elif (
-            not isinstance(cmp_ast.get('left'), CgNode)
-            or cmp_ast.get('left').cls != 'Name'
-        ) {
-            reason = 'left side must be a declared field name';
-        } elif self._cmp_op_str(cmp_ast.get('ops')[0]) is None {
-            reason = f"operator '{cmp_ast.get('ops')[0].cls}' is not admitted";
+        } else {
+            ops = cmp_ast.get('ops');
+            left = cmp_ast.get('left');
+            if len(ops) != 1 {
+                reason = 'chained comparisons are not admitted';
+            } elif (not isinstance(left, CgNode)) or (left.cls != 'Name') {
+                reason = 'left side must be a declared field name';
+            } else {
+                op_node = ops[0];
+                op_str = self._cmp_op_str(op_node);
+                if op_str is None {
+                    reason = f"operator '{op_node.cls}' is not admitted";
+                } else {
+                    field_name = left.get('id');
+                    rhs = cmp_ast.get('comparators')[0];
+                }
+            }
         }
         if reason is not None {
             self.emit(E5094, node_override=x, reason=reason);
@@ -3476,21 +3480,12 @@ impl JcirGenPass._query_filter_kws(
                         self.nod(
                             'keyword',
                             ['arg', 'value'],
-                            ['field', self.const_of(cmp_ast.get('left').get('id'))]
+                            ['field', self.const_of(field_name)]
                         ),
                         self.nod(
-                            'keyword',
-                            ['arg', 'value'],
-                            [
-                                'op',
-                                self.const_of(self._cmp_op_str(cmp_ast.get('ops')[0]))
-                            ]
+                            'keyword', ['arg', 'value'], ['op', self.const_of(op_str)]
                         ),
-                        self.nod(
-                            'keyword',
-                            ['arg', 'value'],
-                            ['value', cmp_ast.get('comparators')[0]]
-                        )
+                        self.nod('keyword', ['arg', 'value'], ['value', rhs])
                     ]
                 ]
             )
@@ -3683,33 +3678,34 @@ impl JcirGenPass.exit_filter_compr(nd: FilterCompr) -> None {
     }
     for x in nd.compares {
         x_recipe = self.val(x);
-        if (
-            x_recipe.cls == 'Compare'
-            and isinstance(x_recipe.get('left'), CgNode)
-            and x_recipe.get('left').cls == 'Name'
-        ) {
-            comprs.append(
-                self.nod(
-                    'Compare',
-                    ['left', 'ops', 'comparators'],
-                    [
-                        self.nod(
-                            'Attribute',
-                            ['value', 'attr', 'ctx'],
-                            [
-                                self.name_load(iter_name, jac_node=x),
-                                x_recipe.get('left').get('id'),
-                                self.nod('Load', [], [], jac_node=x)
-                            ],
-                            jac_node=x
-                        ),
-                        x_recipe.get('ops'),
-                        x_recipe.get('comparators')
-                    ],
-                    jac_node=x
-                )
-            );
+        if x_recipe.cls != 'Compare' {
+            continue;
         }
+        left = x_recipe.get('left');
+        if (not isinstance(left, CgNode)) or (left.cls != 'Name') {
+            continue;
+        }
+        comprs.append(
+            self.nod(
+                'Compare',
+                ['left', 'ops', 'comparators'],
+                [
+                    self.nod(
+                        'Attribute',
+                        ['value', 'attr', 'ctx'],
+                        [
+                            self.name_load(iter_name, jac_node=x),
+                            left.get('id'),
+                            self.nod('Load', [], [], jac_node=x)
+                        ],
+                        jac_node=x
+                    ),
+                    x_recipe.get('ops'),
+                    x_recipe.get('comparators')
+                ],
+                jac_node=x
+            )
+        );
     }
     body: (CgNode | None) = None;
     if (len(comprs) > 1) {
@@ -3893,10 +3889,8 @@ impl JcirGenPass.exit_match_arch(nd: MatchArch) -> None {
 }
 
 impl JcirGenPass.exit_token(nd: Token) -> None {
-    tok = Tok(nd.name) if (nd.name in TOK_MEMBER_NAMES) else None;
-    op_cls = TOKEN_CLS_MAP.get(tok) if tok else None;
-    if op_cls {
-        self.set_out(nd, [self.nod(op_cls, [], [])]);
+    if nd.name in TOKEN_CLS_BY_NAME {
+        self.set_out(nd, [self.nod(TOKEN_CLS_BY_NAME[nd.name], [], [])]);
     }
 }
 

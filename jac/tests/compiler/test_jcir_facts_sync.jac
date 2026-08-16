@@ -21,7 +21,12 @@ import jaclang;
 import jaclang.runtimelib.builtin as builtin_mod;
 import from pathlib { Path }
 import from jaclang.jac0core.codegen_ir { cir_python_version }
+import from jaclang.jac0core.constant { Tokens }
 import from jaclang.jac0core.ext_registry { is_test }
+import from jaclang.jac0core.passes.jcir_gen_pass {
+    TOKEN_CLS_BY_NAME,
+    UNARY_CLS_BY_NAME
+}
 import from jaclang.jac0core.jcir_facts {
     JCIR_AMBIENT_TYPING_NAMES,
     JCIR_BUILTIN_NAMES,
@@ -108,4 +113,20 @@ test "the container version stamp is the baked target" {
         "the container version stamp does not encode this interpreter's "
         "major/minor in the documented (major << 8) | minor form"
     );
+}
+
+
+test "every operator-map key is a real Tokens member name" {
+    live = {member.name for member in Tokens};
+    for (label, table) in (
+        ("TOKEN_CLS_BY_NAME", TOKEN_CLS_BY_NAME),
+        ("UNARY_CLS_BY_NAME", UNARY_CLS_BY_NAME)
+    ) {
+        unknown = sorted(set(table.keys()) - live);
+        assert not unknown , (
+            f"{label} keys on token names so the emitter never has to build "
+            f"an enum member at emit time; these are not Tokens members: "
+            f"{unknown}"
+        );
+    }
 }

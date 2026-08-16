@@ -134,7 +134,6 @@ import from jaclang.jac0core.constant {
 import from jaclang.jac0core.constant { Constants as Con }
 import from jaclang.jac0core.constant { Tokens as Tok }
 
-glob TOK_MEMBER_NAMES: frozenset = frozenset(member.name for member in Tok);
 import from jaclang.jac0core.codegen_ir { CodegenIrWriter }
 import from jaclang.jac0core.codeinfo { BoundaryTypeInfo, InteropBinding }
 import from jaclang.jac0core.jcir_facts {
@@ -156,54 +155,54 @@ import from jaclang.jac0core.diagnostics {
     E5098
 }
 
-glob TOKEN_CLS_MAP: dict[(Tok, str)] = {
-         Tok.KW_AND: 'And',
-         Tok.KW_OR: 'Or',
-         Tok.PLUS: 'Add',
-         Tok.ADD_EQ: 'Add',
-         Tok.BW_AND: 'BitAnd',
-         Tok.BW_AND_EQ: 'BitAnd',
-         Tok.BW_OR: 'BitOr',
-         Tok.BW_OR_EQ: 'BitOr',
-         Tok.BW_XOR: 'BitXor',
-         Tok.BW_XOR_EQ: 'BitXor',
-         Tok.DIV: 'Div',
-         Tok.DIV_EQ: 'Div',
-         Tok.FLOOR_DIV: 'FloorDiv',
-         Tok.FLOOR_DIV_EQ: 'FloorDiv',
-         Tok.LSHIFT: 'LShift',
-         Tok.LSHIFT_EQ: 'LShift',
-         Tok.MOD: 'Mod',
-         Tok.MOD_EQ: 'Mod',
-         Tok.STAR_MUL: 'Mult',
-         Tok.MUL_EQ: 'Mult',
-         Tok.DECOR_OP: 'MatMult',
-         Tok.MATMUL_EQ: 'MatMult',
-         Tok.STAR_POW: 'Pow',
-         Tok.STAR_POW_EQ: 'Pow',
-         Tok.RSHIFT: 'RShift',
-         Tok.RSHIFT_EQ: 'RShift',
-         Tok.MINUS: 'Sub',
-         Tok.SUB_EQ: 'Sub',
-         Tok.BW_NOT: 'Invert',
-         Tok.NOT: 'Not',
-         Tok.EQ: 'NotEq',
-         Tok.EE: 'Eq',
-         Tok.GT: 'Gt',
-         Tok.GTE: 'GtE',
-         Tok.KW_IN: 'In',
-         Tok.KW_IS: 'Is',
-         Tok.KW_ISN: 'IsNot',
-         Tok.LT: 'Lt',
-         Tok.LTE: 'LtE',
-         Tok.NE: 'NotEq',
-         Tok.KW_NIN: 'NotIn'
+glob TOKEN_CLS_BY_NAME: dict[(str, str)] = {
+         'KW_AND': 'And',
+         'KW_OR': 'Or',
+         'PLUS': 'Add',
+         'ADD_EQ': 'Add',
+         'BW_AND': 'BitAnd',
+         'BW_AND_EQ': 'BitAnd',
+         'BW_OR': 'BitOr',
+         'BW_OR_EQ': 'BitOr',
+         'BW_XOR': 'BitXor',
+         'BW_XOR_EQ': 'BitXor',
+         'DIV': 'Div',
+         'DIV_EQ': 'Div',
+         'FLOOR_DIV': 'FloorDiv',
+         'FLOOR_DIV_EQ': 'FloorDiv',
+         'LSHIFT': 'LShift',
+         'LSHIFT_EQ': 'LShift',
+         'MOD': 'Mod',
+         'MOD_EQ': 'Mod',
+         'STAR_MUL': 'Mult',
+         'MUL_EQ': 'Mult',
+         'DECOR_OP': 'MatMult',
+         'MATMUL_EQ': 'MatMult',
+         'STAR_POW': 'Pow',
+         'STAR_POW_EQ': 'Pow',
+         'RSHIFT': 'RShift',
+         'RSHIFT_EQ': 'RShift',
+         'MINUS': 'Sub',
+         'SUB_EQ': 'Sub',
+         'BW_NOT': 'Invert',
+         'NOT': 'Not',
+         'EQ': 'NotEq',
+         'EE': 'Eq',
+         'GT': 'Gt',
+         'GTE': 'GtE',
+         'KW_IN': 'In',
+         'KW_IS': 'Is',
+         'KW_ISN': 'IsNot',
+         'LT': 'Lt',
+         'LTE': 'LtE',
+         'NE': 'NotEq',
+         'KW_NIN': 'NotIn'
      },
-     UNARY_CLS_MAP: dict[(Tok, str)] = {
-         Tok.NOT: 'Not',
-         Tok.BW_NOT: 'Invert',
-         Tok.PLUS: 'UAdd',
-         Tok.MINUS: 'USub'
+     UNARY_CLS_BY_NAME: dict[(str, str)] = {
+         'NOT': 'Not',
+         'BW_NOT': 'Invert',
+         'PLUS': 'UAdd',
+         'MINUS': 'USub'
      };
 
 obj CgItem { }
@@ -216,7 +215,7 @@ obj CgNode(CgItem) {
         c1: int = 0,
         l2: int = 0,
         c2: int = 0,
-        jac_src: any = None;
+        jac_src: (UniNode | None) = None;
 
     def get(key: str) -> any {
         i = 0;
@@ -287,8 +286,7 @@ def write_ir_value(w: CodegenIrWriter, v: object) {
         w.emit_list(len(v));
     } else {
         raise ValueError(
-            "JCIR emitter produced a value outside the v1 constant "
-                + f"domain: {type(v).__name__}"
+            "JCIR emitter produced a value outside the v1 constant domain"
         );
     }
 }
@@ -315,10 +313,7 @@ obj JcirGenPass(BaseAstGenPass[CgItem]) {
 
     with entry { }
 
-    @classmethod
     def _get_builtin_names -> set[str];
-
-    @classmethod
     def _get_ambient_typing_names -> set[str];
 
     def postinit -> None;
@@ -360,10 +355,11 @@ obj JcirGenPass(BaseAstGenPass[CgItem]) {
     def _ancestor_is_one_of(nd: (UniNode | None), roots: list[UniNode]) -> bool;
 
     def _split_scope_hoists(
-        hoists: list, sig_roots: list[UniNode]
-    ) -> tuple[(list, list)];
+        hoists: list[CgNode], sig_roots: list[UniNode]
+    ) -> tuple[(list[CgNode], list[CgNode])];
 
-    def _drain_module_hoists -> list;
+    def _drain_module_hoists -> list[CgNode];
+    def _docstring_offset(body: list[CgItem]) -> int;
     def _report_leaked_hoisted_lambdas -> None;
     def _function_expr_from_def(func_def: CgNode, jac_node: UniNode) -> CgNode;
     def _get_sem_decorator(nd: UniNode) -> (CgNode | None);
