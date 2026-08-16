@@ -460,13 +460,13 @@ test "the chess AOT binary stays inside its recorded run envelope" {
 
 test "the seal timing report ranks roots by what they cost" {
     rows = [
-        ("jac0core/unitree.jac", 40.0, 30.0, 8.0, 2.0),
-        ("jac0core/passes/uni_pass.jac", 10.0, 7.0, 2.0, 1.0),
-        ("compiler/native_materialize.jac", 50.0, 20.0, 5.0, 25.0)
+        ("jac0core/unitree.jac", "compiled", 40.0, 0.1, 30.0, 8.0, 2.0),
+        ("jac0core/passes/uni_pass.jac", "compiled", 10.0, 0.1, 7.0, 2.0, 1.0),
+        ("compiler/native_materialize.jac", "compiled", 50.0, 0.1, 20.0, 5.0, 25.0)
     ];
     lines = seal_timing_report(rows);
     assert len(lines) == 4 , f"expected a header and three rows, got {lines}";
-    assert "3 root(s) in 100.0s" in lines[0] , lines[0];
+    assert "3 root(s) in 100.0s -- 0 reused, 3 rebuilt" in lines[0] , lines[0];
     ordered = [line.split()[0] for line in lines[1:]];
     assert ordered
         == [
@@ -476,4 +476,20 @@ test "the seal timing report ranks roots by what they cost" {
         ] , f"the report must lead with the most expensive root: {ordered}";
     assert "50.0%" in lines[1] and "canary 25.0s" in lines[1] , lines[1];
     assert seal_timing_report([]) == [] , "an empty seal reports no table";
+}
+
+test "a reused root is labelled, counted, and never priced as a rebuild" {
+    rows = [
+        ("jac0core/unitree.jac", "reused", 0.2, 0.05, 0.0, 0.0, 0.15),
+        ("compiler/native_materialize.jac", "compiled", 9.8, 0.05, 7.0, 2.0, 0.75)
+    ];
+    lines = seal_timing_report(rows);
+    assert "2 root(s) in 10.0s -- 1 reused, 1 rebuilt" in lines[0] , lines[0];
+    assert "compiled" in lines[1] and "compile 7.0s" in lines[1] , lines[1];
+    assert "reused" in lines[2] , lines[2];
+    assert "compile" not in lines[2] , (
+        "a reused root never ran the compiler, so quoting a compile cost for it "
+        f"would invent work that did not happen: {lines[2]}"
+    );
+    assert "check 0.05s" in lines[2] and "canary 0.15s" in lines[2] , lines[2];
 }
