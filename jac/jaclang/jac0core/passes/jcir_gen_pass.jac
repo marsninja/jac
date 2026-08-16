@@ -119,6 +119,7 @@ import from jaclang.jac0core.unitree {
     TypedCtxBlock,
     UnaryExpr,
     UniNode,
+    UniScopeNode,
     VisitStmt,
     WhileStmt,
     WithStmt,
@@ -205,7 +206,9 @@ glob TOKEN_CLS_MAP: dict[(Tok, str)] = {
          Tok.MINUS: 'USub'
      };
 
-obj CgNode {
+obj CgItem { }
+
+obj CgNode(CgItem) {
     has cls: str,
         keys: list,
         vals: list,
@@ -244,10 +247,10 @@ obj CgNode {
     }
 }
 
-obj CgSplice {
+obj CgSplice(CgItem) {
     has src: str,
         offset: int = 0,
-        bound_names: list = [];
+        bound_names: list[str] = [];
 }
 
 def write_ir_value(w: CodegenIrWriter, v: object) {
@@ -298,15 +301,15 @@ def module_container_bytes(mod_path: str, root_node: CgNode) -> bytes {
     return w.to_bytes();
 }
 
-obj JcirGenPass(BaseAstGenPass[CgNode]) {
+obj JcirGenPass(BaseAstGenPass[CgItem]) {
     has already_added: list[str] = [],
         jaclib_imports: set[str] postinit,
         builtin_imports: set[str] postinit,
         typing_imports: set[str] postinit,
         _lambda_counter: int = 0,
-        _hoist_frames: list[list] postinit,
-        preamble: list postinit,
-        _sink: dict[UniNode, list] postinit,
+        _hoist_frames: list[list[CgNode]] postinit,
+        preamble: list[CgItem] postinit,
+        _sink: dict[UniNode, list[CgItem]] postinit,
         _module_root: (CgNode | None) = None,
         _module_path: str = "";
 
@@ -331,8 +334,8 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
         cls_name: str, keys: list, vals: list, l1: int, c1: int, l2: int, c2: int
     ) -> CgNode;
 
-    def outs(nd: UniNode) -> list;
-    def set_out(nd: UniNode, items: list) -> None;
+    def outs(nd: UniNode) -> list[CgItem];
+    def set_out(nd: UniNode, items: list[CgItem]) -> None;
     def val(nd: UniNode) -> CgNode;
     def const_of(value: any, jac_node: (UniNode | None) = None) -> CgNode;
     def name_load(name_id: str, jac_node: (UniNode | None) = None) -> CgNode;
@@ -388,7 +391,7 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
     def _query_filter_kws(fc: FilterCompr, type_arg: str, preds_arg: str) -> list;
     def _recipe_contains_root(v: any) -> bool;
     def resolve_switch_pattern(pattern: MatchPattern, target: Expr) -> CgNode;
-    def resolve_switch_stmt(nd: SwitchStmt) -> list;
+    def resolve_switch_stmt(nd: SwitchStmt) -> list[CgItem];
     def resolve_stmt_block(
         nd:
             (
@@ -398,9 +401,9 @@ obj JcirGenPass(BaseAstGenPass[CgNode]) {
                 | None
             ),
         doc: (String | None) = None
-    ) -> list;
+    ) -> list[CgItem];
 
-    def scope_directive_stmts(scopes: list) -> list;
+    def scope_directive_stmts(scopes: list[UniScopeNode | None]) -> list[CgNode];
     def _resolve_self_type(nd: Name) -> (CgNode | None);
     def _is_in_type_annotation(nd: UniNode) -> bool;
     def _is_descendant_of(nd: UniNode, ancestor: UniNode) -> bool;

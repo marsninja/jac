@@ -1,5 +1,5 @@
 import struct;
-import sys;
+import from jaclang.jac0core.jcir_facts { jcir_python_version }
 
 glob CIR_MAGIC: bytes = b"JCIR",
      CIR_FORMAT_VERSION: int = 1,
@@ -31,7 +31,7 @@ class CodegenIrVersionError(CodegenIrError) {}
 class CodegenIrFormatError(CodegenIrError) {}
 
 def cir_python_version -> int {
-    return (sys.version_info.major << 8) | sys.version_info.minor;
+    return jcir_python_version();
 }
 
 obj CirDiag {
@@ -54,11 +54,11 @@ obj CirModule {
 obj CirContainer {
     has format_version: int = CIR_FORMAT_VERSION,
         python_version: int = 0,
-        class_names: list = [],
-        key_names: list = [],
-        strings: list = [],
-        modules: list = [],
-        diags: list = [];
+        class_names: list[str] = [],
+        key_names: list[str] = [],
+        strings: list[str] = [],
+        modules: list[CirModule] = [],
+        diags: list[CirDiag] = [];
 }
 
 def _w_varint(buf: bytearray, v: int) -> None {
@@ -125,14 +125,14 @@ def _r_str_entry(data: bytes, pos: int, what: str) -> tuple[str, int] {
 }
 
 obj CodegenIrWriter {
-    has class_names: list = [],
-        class_idx: dict = {},
-        key_names: list = [],
-        key_idx: dict = {},
-        strings: list = [],
-        string_idx: dict = {},
-        modules: list = [],
-        diags: list = [],
+    has class_names: list[str] = [],
+        class_idx: dict[str, int] = {},
+        key_names: list[str] = [],
+        key_idx: dict[str, int] = {},
+        strings: list[str] = [],
+        string_idx: dict[str, int] = {},
+        modules: list[CirModule] = [],
+        diags: list[CirDiag] = [],
         _code: any = None,
         _mod_path: str = "",
         _depth: int = 0,
@@ -143,32 +143,32 @@ obj CodegenIrWriter {
         _loc_c2: int = 0;
 
     def class_ref(name: str) -> int {
-        idx = self.class_idx.get(name);
-        if idx is None {
-            idx = len(self.class_names);
-            self.class_names.append(name);
-            self.class_idx[name] = idx;
+        if name in self.class_idx {
+            return self.class_idx[name];
         }
+        idx = len(self.class_names);
+        self.class_names.append(name);
+        self.class_idx[name] = idx;
         return idx;
     }
 
     def key_ref(name: str) -> int {
-        idx = self.key_idx.get(name);
-        if idx is None {
-            idx = len(self.key_names);
-            self.key_names.append(name);
-            self.key_idx[name] = idx;
+        if name in self.key_idx {
+            return self.key_idx[name];
         }
+        idx = len(self.key_names);
+        self.key_names.append(name);
+        self.key_idx[name] = idx;
         return idx;
     }
 
     def str_ref(s: str) -> int {
-        idx = self.string_idx.get(s);
-        if idx is None {
-            idx = len(self.strings);
-            self.strings.append(s);
-            self.string_idx[s] = idx;
+        if s in self.string_idx {
+            return self.string_idx[s];
         }
+        idx = len(self.strings);
+        self.strings.append(s);
+        self.string_idx[s] = idx;
         return idx;
     }
 
@@ -430,10 +430,10 @@ def read_container(data: bytes) -> CirContainer {
         );
     }
     if py_ver != cir_python_version() {
+        want = cir_python_version();
         raise CodegenIrVersionError(
             f"JCIR container targets Python {py_ver >> 8}.{py_ver & 255} but this "
-            f"runtime is Python {sys.version_info.major}.{sys.version_info.minor}; "
-            "refusing to read"
+            f"build targets Python {want >> 8}.{want & 255}; refusing to read"
         );
     }
     pos = 8;

@@ -165,17 +165,19 @@ impl JcirGenPass.nod_loc(
     return CgNode(cls=cls_name, keys=keys, vals=vals, l1=l1, c1=c1, l2=l2, c2=c2);
 }
 
-impl JcirGenPass.outs(nd: UniNode) -> list {
-    got = self._sink.get(nd);
-    return got if got is not None else [];
+impl JcirGenPass.outs(nd: UniNode) -> list[CgItem] {
+    if nd in self._sink {
+        return self._sink[nd];
+    }
+    return [];
 }
 
-impl JcirGenPass.set_out(nd: UniNode, items: list) -> None {
+impl JcirGenPass.set_out(nd: UniNode, items: list[CgItem]) -> None {
     self._sink[nd] = items;
 }
 
 impl JcirGenPass.val(nd: UniNode) -> CgNode {
-    got = self._sink.get(nd);
+    got: list[CgItem] = self._sink[nd] if nd in self._sink else [];
     if not got {
         loc = nd.loc;
         raise self.ice(
@@ -183,7 +185,15 @@ impl JcirGenPass.val(nd: UniNode) -> CgNode {
             f"at {loc.mod_path}:{loc.first_line}:{loc.col_start}"
         );
     }
-    return got[0];
+    first = got[0];
+    if not isinstance(first, CgNode) {
+        loc = nd.loc;
+        raise self.ice(
+            f"JCIR recipe on {type(nd).__name__} is a splice, not a value "
+            f"at {loc.mod_path}:{loc.first_line}:{loc.col_start}"
+        );
+    }
+    return first;
 }
 
 impl JcirGenPass.const_of(value: any, jac_node: (UniNode | None) = None) -> CgNode {
@@ -462,14 +472,14 @@ impl JcirGenPass.resolve_switch_pattern(pattern: MatchPattern, target: Expr) -> 
     }
 }
 
-impl JcirGenPass.resolve_switch_stmt(nd: SwitchStmt) -> list {
+impl JcirGenPass.resolve_switch_stmt(nd: SwitchStmt) -> list[CgItem] {
     var_executed = self.nod(
         'Name', ['id', 'ctx'], ['__executed', self.nod('Store', [], [])]
     );
     assign_var = self.nod(
         'Assign', ['targets', 'value'], [[var_executed], self.const_of(False)]
     );
-    ast_nodes: list = [];
+    ast_nodes: list[CgItem] = [];
     executed_assign = self.nod(
         'Assign', ['targets', 'value'], [[var_executed], self.const_of(True)]
     );
@@ -510,14 +520,14 @@ impl JcirGenPass.resolve_switch_stmt(nd: SwitchStmt) -> list {
 impl JcirGenPass.resolve_stmt_block(
     nd: Sequence[CodeBlockStmt] | Sequence[EnumBlockStmt] | None,
     doc: (String | None) = None
-) -> list {
+) -> list[CgItem] {
     items = list(nd) if nd else [];
     valid_stmts = [
         i
         for i in items
         if not isinstance(i, Semi)
     ];
-    ret: list = [self.nod('Pass', [], [])]
+    ret: list[CgItem] = [self.nod('Pass', [], [])]
         if (isinstance(nd, Sequence) and not valid_stmts)
         else self._flatten_ast_list(
             [
@@ -536,10 +546,12 @@ impl JcirGenPass.resolve_stmt_block(
     return ret;
 }
 
-impl JcirGenPass.scope_directive_stmts(scopes: list) -> list {
-    global_names: list = [];
-    nonlocal_names: list = [];
-    seen: set = set();
+impl JcirGenPass.scope_directive_stmts(
+    scopes: list[UniScopeNode | None]
+) -> list[CgNode] {
+    global_names: list[str] = [];
+    nonlocal_names: list[str] = [];
+    seen: set[str] = set();
     for scope in scopes {
         if scope is None {
             continue;
@@ -557,7 +569,7 @@ impl JcirGenPass.scope_directive_stmts(scopes: list) -> list {
             }
         }
     }
-    stmts: list = [];
+    stmts: list[CgNode] = [];
     if global_names {
         stmts.append(self.nod('Global', ['names'], [sorted(global_names)]));
     }
