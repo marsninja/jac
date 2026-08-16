@@ -205,6 +205,12 @@ glob TOKEN_CLS_BY_NAME: dict[(str, str)] = {
          'MINUS': 'USub'
      };
 
+glob EDGE_DIR_NAMES: dict[(int, str)] = {
+         int(EdgeDir.IN): 'IN',
+         int(EdgeDir.OUT): 'OUT',
+         int(EdgeDir.ANY): 'ANY'
+     };
+
 obj CgItem { }
 
 obj CgNode(CgItem) {

@@ -686,7 +686,10 @@ impl JcirGenPass.exit_module(nd: Module) -> None {
         );
     }
     mod_path_norm = nd.loc.mod_path.replace('\\', '/');
-    is_jaclib_module = mod_path_norm.endswith(('/jaclang/lib.jac', '/jaclang/lib.py'));
+    is_jaclib_module = (
+        mod_path_norm.endswith('/jaclang/lib.jac')
+        or mod_path_norm.endswith('/jaclang/lib.py')
+    );
     if (self.jaclib_imports and not is_jaclib_module) {
         self.preamble.append(
             self.nod(
@@ -1540,8 +1543,9 @@ impl JcirGenPass.exit_func_signature(nd: FuncSignature) -> None {
         params = params + [self.val(i) for i in nd.params];
     }
     defaults: list[CgNode] = [];
-    for i in [*nd.posonly_params, *nd.params] {
-        if i.value {
+    all_params: list[UniNode] = list(nd.posonly_params) + list(nd.params);
+    for i in all_params {
+        if (isinstance(i, ParamVar) and i.value) {
             defaults.append(self.val(i.value));
         }
     }
@@ -2153,7 +2157,7 @@ impl JcirGenPass.exit_ctrl_stmt(nd: CtrlStmt) -> None {
     if (nd.ctrl.name == Tok.KW_BREAK) {
         self.set_out(nd, [self.nod('Break', [], [])]);
     } elif (nd.ctrl.name == Tok.KW_CONTINUE) {
-        if (iter_for_parent := self.find_parent_of_type(nd, IterForStmt)) {
+        if (iter_for_parent := nd.find_parent_of_type(IterForStmt)) {
             count_by = iter_for_parent.count_by;
             self.set_out(nd, [self.val(count_by), self.nod('Continue', [], [])]);
         } else {
@@ -2441,7 +2445,7 @@ impl JcirGenPass.exit_binary_expr(nd: BinaryExpr) -> None {
                             ['value', 'attr', 'ctx'],
                             [
                                 self.jaclib_obj('EdgeDir'),
-                                nd.op.edge_spec.edge_dir.name,
+                                EDGE_DIR_NAMES[int(nd.op.edge_spec.edge_dir)],
                                 self.nod('Load', [], [])
                             ]
                         )
@@ -2782,7 +2786,7 @@ impl JcirGenPass.exit_multi_string(nd: MultiString) -> None {
         return;
     }
     def get_pieces(str_seq: Sequence[UniNode]) -> list {
-        pieces: list = [];
+        pieces: list[any] = [];
         for i in str_seq {
             if isinstance(i, String) {
                 pieces.append(i.lit_value);
