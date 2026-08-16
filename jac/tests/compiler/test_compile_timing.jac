@@ -15,13 +15,14 @@ or a phase that took no time at all -- because a wall-clock gate on a developer
 laptop is a coin flip, and a coin flip that fails the suite teaches people to
 ignore it.
 
-`against the pinned baseline` is the same corpus measured twice: once here, and
-once against a snapshot of `BASELINE_REF`, so the delta belongs to the branch
-rather than to the machine. The snapshot is a `git archive` of the pinned ref
-plus symlinks to this checkout's gitignored build artifacts, cached under the
-jac cache root and reused across runs. It is opt-in (`JAC_TIMING_BASELINE=1`)
-because the first run bootstraps a second compiler from scratch, which takes
-minutes and belongs in a deliberate measurement, never in `jac test`.
+`against the pinned baseline` is the same corpus measured on this checkout and
+on a snapshot of `BASELINE_REF`, in alternating rounds, so the delta belongs to
+the branch rather than to the machine or to the order the two were run in. The
+snapshot is a `git archive` of the pinned ref plus symlinks to this checkout's
+gitignored build artifacts, cached under the jac cache root and reused across
+runs. It is opt-in (`JAC_TIMING_BASELINE=1`) because the first run bootstraps a
+second compiler from scratch, which takes minutes and belongs in a deliberate
+measurement, never in `jac test`.
 
 `the chess AOT binary` is a real GATE, and the only one here. The AOT lane's
 output is the product; if a compiled chess game gets multiples slower, that is
@@ -117,6 +118,9 @@ glob CHESS_RUNS: int = 5,
      CHESS_CEILING_S: float = 0.75,
      CHESS_RECORDED_S: str = "0.07-0.08s measured, 0.23-0.26s previously recorded";
 
+"""How many alternating rounds the baseline comparison measures each tree for."""
+glob PAIRED_ROUNDS: int = 2;
+
 glob _PROBE_CACHE: dict[str, list[dict]] = {};
 
 """This checkout's cache root, which is also where the probe subprocess writes."""
@@ -152,9 +156,13 @@ def _probe_env(cache: str) -> dict[str, str] {
     return env;
 }
 
-"""Run the probe against the tree at `tree_dir`, returning one row per module."""
-def run_probe(tree_dir: str, cache: str) -> list[dict] {
-    key = os.path.abspath(tree_dir);
+"""Run the probe against the tree at `tree_dir`, returning one row per module.
+
+Memoized per `(tree, round)` so the paired comparison can ask for a specific
+round and the HEAD-only report can share round zero with it.
+"""
+def run_probe(tree_dir: str, cache: str, round_no: int = 0) -> list[dict] {
+    key = f"{os.path.abspath(tree_dir)}#{round_no}";
     if key in _PROBE_CACHE {
         return _PROBE_CACHE[key];
     }
@@ -177,6 +185,43 @@ def run_probe(tree_dir: str, cache: str) -> list[dict] {
     );
     _PROBE_CACHE[key] = rows;
     return rows;
+}
+
+"""Fold several runs of one tree into one row set, keeping each phase's minimum."""
+def merge_runs(runs: list[list[dict]]) -> list[dict] {
+    merged = [dict(r) for r in runs[0]];
+    for later in runs[1:] {
+        by_rel = {str(r["rel"]): r for r in later};
+        for row in merged {
+            other = by_rel.get(str(row["rel"]));
+            if other is None {
+                continue;
+            }
+            for phase in PHASES {
+                row[phase] = min(row[phase], other[phase]);
+            }
+            row["errors"] += other["errors"];
+        }
+    }
+    return merged;
+}
+
+"""Measure both trees in alternating rounds, so drift cannot favour either one.
+
+Running one tree to completion and then the other hands the second tree a
+warmer page cache and a hotter CPU, and the first version of this comparison
+duly reported HEAD faster on every phase of every module -- a result shaped
+like the ordering, not like the branch. Alternating and keeping each phase's
+minimum across rounds removes the monotonic half of that bias.
+"""
+def paired_rows(base_tree: str, base_cache: str) -> tuple[list[dict], list[dict]] {
+    base_runs: list[list[dict]] = [];
+    head_runs: list[list[dict]] = [];
+    for round_no in range(PAIRED_ROUNDS) {
+        base_runs.append(run_probe(base_tree, base_cache, round_no));
+        head_runs.append(run_probe(JAC_ROOT, head_cache(), round_no));
+    }
+    return (merge_runs(base_runs), merge_runs(head_runs));
 }
 
 """Materialize the pinned baseline as a compilable tree, or explain why not.
@@ -340,12 +385,12 @@ test "warm-compile phase timings against the pinned baseline" {
     }
     tree = baseline_tree();
     cache = str(Path(tree).parent / "cache");
-    base_rows = run_probe(tree, cache);
-    head_rows = run_probe(JAC_ROOT, head_cache());
+    (base_rows, head_rows) = paired_rows(tree, cache);
     publish(
         "phase-timings-baseline",
         "\n".join(
             [
+                f"{PAIRED_ROUNDS} alternating round(s) per tree, per-phase minimum",
                 phase_table(f"baseline {BASELINE_REF[:12]}:", base_rows),
                 phase_table("HEAD:", head_rows),
                 f"delta (HEAD vs {BASELINE_REF[:12]}, + is slower):",
