@@ -463,7 +463,8 @@ impl JcirGenPass._get_sem_decorator(nd: UniNode) -> (CgNode | None) {
         }
     }
     if (
-        not semstr and (not inner_semstr or all(not v for v in inner_semstr.values()))
+        not semstr
+        and (not inner_semstr or all(not inner_semstr[k] for k in inner_semstr))
     ) {
         return None;
     }
@@ -479,7 +480,7 @@ impl JcirGenPass._get_sem_decorator(nd: UniNode) -> (CgNode | None) {
                     ['keys', 'values'],
                     [
                         [self.const_of(k) for k in inner_semstr],
-                        [self.const_of(v) for v in inner_semstr.values()]
+                        [self.const_of(inner_semstr[k]) for k in inner_semstr]
                     ]
                 )
             ],
@@ -676,7 +677,7 @@ impl JcirGenPass.exit_module(nd: Module) -> None {
                             ['name', 'asname'],
                             [name, None],
                             jac_node=self.ir_out
-                        ) for name in sorted(self.typing_imports)
+                        ) for name in sorted(list(self.typing_imports))
                     ],
                     0
                 ],
@@ -699,7 +700,7 @@ impl JcirGenPass.exit_module(nd: Module) -> None {
                             ['name', 'asname'],
                             [name, None],
                             jac_node=self.ir_out
-                        ) for name in sorted(self.jaclib_imports)
+                        ) for name in sorted(list(self.jaclib_imports))
                     ],
                     0
                 ],
@@ -2172,7 +2173,12 @@ impl JcirGenPass._delete_targets(nd: DeleteStmt) -> list {
 
 impl JcirGenPass.exit_delete_stmt(nd: DeleteStmt) -> None {
     def set_ctx(targets: any, ctx_cls: str) -> list[CgNode] {
-        items: list = targets if isinstance(targets, list) else [targets];
+        items: list = [];
+        if isinstance(targets, list) {
+            items = targets;
+        } else {
+            items = [targets];
+        }
         head = items[0] if items else None;
         if (isinstance(head, CgNode) and head.cls in ('List', 'Tuple')) {
             items = [
@@ -2183,12 +2189,11 @@ impl JcirGenPass.exit_delete_stmt(nd: DeleteStmt) -> None {
         }
         result: list[CgNode] = [];
         for target in items {
-            if not isinstance(target, CgNode) {
-                continue;
+            if isinstance(target, CgNode) {
+                result.append(
+                    self._with_ctx(target, ctx_cls) if target.hasf('ctx') else target
+                );
             }
-            result.append(
-                self._with_ctx(target, ctx_cls) if target.hasf('ctx') else target
-            );
         }
         return result;
     }
@@ -2776,7 +2781,7 @@ impl JcirGenPass.exit_multi_string(nd: MultiString) -> None {
         self.set_out(nd, self.outs(lone));
         return;
     }
-    def get_pieces(str_seq: Sequence) -> list {
+    def get_pieces(str_seq: Sequence[UniNode]) -> list {
         pieces: list = [];
         for i in str_seq {
             if isinstance(i, String) {
@@ -3452,10 +3457,9 @@ impl JcirGenPass._query_filter_kws(
     preds: list[CgNode] = [];
     for x in fc.compares {
         cmp_ast = self.val(x);
-        reason: (str | None) = None;
+        reason: str = '';
         field_name: str = '';
-        op_str: (str | None) = None;
-        rhs: any = None;
+        op_str: str = '';
         if cmp_ast.cls != 'Compare' {
             reason = 'not a comparison';
         } else {
@@ -3467,42 +3471,55 @@ impl JcirGenPass._query_filter_kws(
                 reason = 'left side must be a declared field name';
             } else {
                 op_node = ops[0];
-                op_str = self._cmp_op_str(op_node) if isinstance(op_node, CgNode)
-                    else None;
-                if op_str is None {
-                    op_label = op_node.cls if isinstance(op_node, CgNode) else '?';
+                op_label = '?';
+                if isinstance(op_node, CgNode) {
+                    op_label = op_node.cls;
+                    resolved = self._cmp_op_str(op_node);
+                    if resolved is not None {
+                        op_str = resolved;
+                    }
+                }
+                if not op_str {
                     reason = f"operator '{op_label}' is not admitted";
                 } else {
-                    field_name = left.get('id');
-                    rhs = cmp_ast.get('comparators')[0];
+                    field_id = left.get('id');
+                    if isinstance(field_id, str) {
+                        field_name = field_id;
+                    }
                 }
             }
         }
-        if reason is not None {
+        if reason {
             self.emit(E5094, node_override=x, reason=reason);
-            continue;
-        }
-        preds.append(
-            self.nod(
-                'Call',
-                ['func', 'args', 'keywords'],
-                [
-                    self.jaclib_obj('QPred'),
-                    [],
+        } else {
+            preds.append(
+                self.nod(
+                    'Call',
+                    ['func', 'args', 'keywords'],
                     [
-                        self.nod(
-                            'keyword',
-                            ['arg', 'value'],
-                            ['field', self.const_of(field_name)]
-                        ),
-                        self.nod(
-                            'keyword', ['arg', 'value'], ['op', self.const_of(op_str)]
-                        ),
-                        self.nod('keyword', ['arg', 'value'], ['value', rhs])
+                        self.jaclib_obj('QPred'),
+                        [],
+                        [
+                            self.nod(
+                                'keyword',
+                                ['arg', 'value'],
+                                ['field', self.const_of(field_name)]
+                            ),
+                            self.nod(
+                                'keyword',
+                                ['arg', 'value'],
+                                ['op', self.const_of(op_str)]
+                            ),
+                            self.nod(
+                                'keyword',
+                                ['arg', 'value'],
+                                ['value', cmp_ast.get('comparators')[0]]
+                            )
+                        ]
                     ]
-                ]
-            )
-        );
+                )
+            );
+        }
     }
     if preds {
         kws.append(
@@ -4278,24 +4295,32 @@ impl JcirGenPass._top_level_bound_names(items: any) -> list {
                 }
             } elif stmt.cls in ('Import', 'ImportFrom') {
                 for alias in stmt.get('names') {
-                    if not isinstance(alias, CgNode) {
-                        continue;
-                    }
-                    asname = alias.get('asname') if alias.hasf('asname') else None;
-                    bound = asname if isinstance(asname, str) and asname
-                        else alias.get('name');
-                    if isinstance(bound, str) {
-                        names.append(bound);
+                    if isinstance(alias, CgNode) {
+                        bound: str = '';
+                        if alias.hasf('asname') {
+                            asname = alias.get('asname');
+                            if isinstance(asname, str) {
+                                bound = asname;
+                            }
+                        }
+                        if not bound {
+                            plain = alias.get('name');
+                            if isinstance(plain, str) {
+                                bound = plain;
+                            }
+                        }
+                        if bound {
+                            names.append(bound);
+                        }
                     }
                 }
             } elif stmt.cls == 'Assign' {
                 for target in stmt.get('targets') {
-                    if (not isinstance(target, CgNode)) or (target.cls != 'Name') {
-                        continue;
-                    }
-                    target_id = target.get('id');
-                    if isinstance(target_id, str) {
-                        names.append(target_id);
+                    if (isinstance(target, CgNode) and (target.cls == 'Name')) {
+                        target_id = target.get('id');
+                        if isinstance(target_id, str) {
+                            names.append(target_id);
+                        }
                     }
                 }
             }
