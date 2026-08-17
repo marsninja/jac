@@ -29,16 +29,20 @@ it describes changes, so none of them can quietly go stale.
 
   3. **The blocker, pinned self-clearing.** A sealed pass artifact
      carries the pass's own method bodies and not its base classes:
-     `jac0core/passes/transform.jac` is in no root's closure. Until it
-     is, `BaseTransform.postinit` does not exist natively, and a
-     natively constructed pass is an object whose transform never ran.
-     Measured on `bd272af79`: a `UniPass` subclass constructed inside a
-     native root lowers to `__jac_pyb_bridge("_pyb_instantiate", ...)`,
-     whose result is immediately `Py_DecRef`ed and discarded, after
-     which the field read returns the field's *declared default*. The
-     pass does not run and nothing says so. This test pins the closure
-     fact; when rung 2 of the ladder puts `transform.jac` in the
-     closure, this fails and the pin comes out.
+     `jac0core/passes/transform.jac` is in no root's closure. It cannot
+     be, because `BaseTransform[T_in, T_out]` is a generic archetype and
+     the native lane does not lower generic archetype construction or
+     field access. Measured on `bd272af79` by reading the emitted LLVM:
+     a `UniPass` subclass constructed inside a native root lowers to
+     `__jac_pyb_bridge("_pyb_instantiate", ...)`, whose result is
+     immediately `Py_DecRef`ed and discarded, after which the field read
+     returns the field's *declared default* -- the pass does not run and
+     nothing says so. A plain local archetype, an imported unitree
+     archetype, and an archetype with an `ABC` base all lower to real
+     native code with no bridge, which is how genericity was isolated.
+     This test pins the closure fact; when rungs 1 and 2 of the ladder
+     put `transform.jac` in the closure, this fails and the pin comes
+     out.
 """
 
 import jaclang;

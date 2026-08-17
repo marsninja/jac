@@ -497,26 +497,35 @@ section-11.1 blocker as a self-clearing refusal keyed on
 `bd272af79`. This is what makes every later rung falsifiable, which is
 why it is rung 0 rather than a deliverable of rung 3.
 
-**Rung 1 -- the pass object becomes constructible without the driver.**
-`BaseTransform.prog` is a `JacProgram`-typed required field, and it is
-the single reason a `UniPass` subclass will not lower (measured: section
-11.1). Exactly one sealed pass reads it --
+**Rung 1 -- the pass base chain stops being generic.**
+`BaseTransform[T_in, T_out]` and `Transform[T, R]` are generic
+archetypes, and genericity is what makes a pass unconstructible natively
+(measured: section 11.1). Either the base chain is monomorphized -- every
+compiler pass is `Module -> Module`, so the parameters carry no
+information the driver uses -- or the native lane learns generic
+archetype construction and field access. The first is a compiler-side
+change and is small; the second is native-lane work with a much wider
+blast radius. Measure both before choosing; do not do both.
+
+Two smaller deletions ride along, because they block the same door.
+`BaseTransform.prog` is a `JacProgram`-typed required field and is the
+first error message you meet; exactly one sealed pass reads it --
 `jcir_gen_pass.impl.jac`'s `native_only_import_target(nd, self.prog)` --
 and that read is an import-resolution question, which is the
 `absorbed_mod` pattern's home ground. Retire the read into a stamped
 fact, then move `prog` off `BaseTransform` onto the rim-facing subtype
-the unsealed passes use. Deletion, not a flag.
+the unsealed passes use.
 
 **Rung 2 -- `transform.jac` joins the sealed closure.** Today the sealed
 pass artifacts contain the passes' own method bodies and **not** their
 base classes: `jcir_gen_pass`'s measured closure is eight modules and
 contains neither `uni_pass.jac` nor `module_codegen_pass.jac` nor
-`transform.jac`. Until `BaseTransform.postinit` and `timed_transform`
-lower, a natively constructed pass is a hollow object whose transform
-never ran (section 11.1). This rung is where `ABC`, `time.time()`, and
-the tier check are dealt with: the tier check moves to the rim (it is a
-statement about the *image*, not about a pass), and timing becomes a rim
-measurement.
+`transform.jac`. Once rung 1 lands the chain can lower, and this rung
+finishes the job: `time.time()` leaves `timed_transform` (timing is a rim
+measurement), and the tier check leaves `postinit` for the rim, where it
+belongs -- it is a statement about the *image*, not about a pass. Until
+`BaseTransform.postinit` exists natively, a natively constructed pass is
+a hollow object whose transform never ran.
 
 **Rung 3 -- the fused root, with two passes.** Generate
 `jc_compile_unit` into a fused root, sealed with the parser, `uni_pass`,
@@ -603,16 +612,40 @@ Measured on this tree, by native-lane census (`na_census_begin` /
   raw native address.
 - Constructing an **imported** sealed pass (`ASTValidationPass`,
   `JcirGenPass`) still demotes -- the pass module never joins the closure
-  at all. Constructing an imported *unitree* archetype (`Name`) lowers
-  natively, and `unitree.jac` does join the closure. So cross-module
-  construction is not the wall; **closure membership is**.
+  at all.
 
-This is the same failure family as the silent no-ops #8250 fixed, and it
-is why rung 2 exists and why rung 3 must not be attempted before it. It
-is also worth reporting on its own account: a lowering that silently
-returns a field's default instead of the constructed object's value is a
-wrong answer, not a gap, and the native lane should refuse it rather than
-emit it.
+The obvious suspects were then eliminated one at a time, each by reading
+the emitted LLVM rather than the census verdict:
+
+| Probe | pyb bridges in the emitted body | Verdict |
+|---|---|---|
+| a plain local `obj`, constructed and mutated | 0 | ordinary archetype construction is real native code |
+| an imported *unitree* archetype (`Name`), constructed | 0 | cross-module construction of a closure member is real native code |
+| a local `obj` with an `ABC` base | 0 | an `ABC` base is not the problem |
+| a local `obj` parameterized on a generic archetype | -- | **demoted**, on the *field read*: "Native lowering failed for expression 'BinaryExpr'" over `g.marker + g.extra` |
+| a `UniPass` subclass | 1, discarded | the hollow construction above |
+
+So it is not cross-module-ness, not `ABC`, and not closure membership.
+**It is genericity.** `BaseTransform[T_in, T_out]` and `Transform[T, R]`
+are generic archetypes; the native lane demotes field access on a
+generic-parameterized archetype -- shipping an `abort()` stub, which is
+the correct loud behavior -- and falls back to a discarded
+`_pyb_instantiate` for construction of a subclass of one, which is not.
+Every pass in the compiler inherits from that chain, which is why
+`transform.jac` is in no closure: it cannot be, and the absence is a
+symptom rather than the disease.
+
+Two things follow. The ladder's rung 1 is not "`prog` loses its type" --
+that is only the first error message you meet -- it is **"the pass base
+classes stop being generic, or the native lane learns generic
+archetypes"**, and which of those two is the right fix is a native-lane
+question, not a compiler-driver one. And the pyb fallback is a bug worth
+filing on its own account: a lowering that silently returns a field's
+declared default instead of the constructed object's value is a wrong
+answer, not a gap. It is the same failure family as the silent no-ops
+#8250 fixed, and the native lane should demote it to an `abort()` stub --
+exactly as it already does for the generic field read one row above --
+rather than emit it.
 
 ### 11.2 The pipeline is not sealed-then-unsealed; it is interleaved
 
