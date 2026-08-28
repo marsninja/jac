@@ -14,6 +14,11 @@ import from pathlib { Path }
 import from tempfile { TemporaryDirectory }
 import from uuid { UUID }
 import from jaclang.runtime.archetype { EdgeAnchor, NodeAnchor, Root }
+import from jaclang.runtime.osp_graph_sv {
+    sv_conn,
+    sv_live_edges,
+    sv_register_hydrated
+}
 import from jaclang.runtime.runtime { JacRuntime }
 import from jaclang.runtime.context { ExecutionContext }
 
@@ -54,8 +59,7 @@ def _fan(ctx: ExecutionContext, count: int) -> UUID {
             archetype=_as_any(DLink()), source=hub, target=leaf, is_undirected=False
         );
         link.persistent = True;
-        hub.edges.append(link);
-        leaf.edges.append(link);
+        sv_conn(hub, leaf, link, False, ctx.mem);
         ctx.mem.put(leaf);
         ctx.mem.put(link);
     }
@@ -122,11 +126,13 @@ test "adjacency still resolves from the edge rows after a cold reload" {
         try {
             hub = ctx2.mem.get(hub_id);
             assert isinstance(hub, NodeAnchor);
-            assert len(hub.edges) == 12 , (
-                f"cold reload lost adjacency: {len(hub.edges)} edges, expected 12"
+            sv_register_hydrated(hub, ctx2.mem, fetch_stubs=True);
+            live = sv_live_edges(hub, 3, None, True, ctx2.mem);
+            assert len(live) == 12 , (
+                f"cold reload lost adjacency: {len(live)} edges, expected 12"
             );
             seen = set();
-            for e in hub.edges {
+            for e in live {
                 assert isinstance(e, EdgeAnchor);
                 seen.add(e.id);
             }

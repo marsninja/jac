@@ -969,7 +969,7 @@ impl Session._materialize(
                 edges.append(stub);
             }
         }
-        anchor.edges = edges;
+        anchor.__dict__['_edge_stubs'] = edges;
     }
     if isinstance(anchor, NodeAnchor) {
         anchor.version = row.version;

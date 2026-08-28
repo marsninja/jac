@@ -1917,7 +1917,7 @@ test "Session async mirrors (aget/aput/adelete/ahas/acommit) work" {
     with TemporaryDirectory() as tmpdir {
         # Store-less session (pure in-memory).
         vol = Session();
-        anchor = NodeAnchor(archetype=Root(), edges=[]);
+        anchor = NodeAnchor(archetype=Root());
         aid = anchor.ensure_id();
         async def exercise_volatile -> bool {
             await vol.aput(anchor);
@@ -1932,7 +1932,7 @@ test "Session async mirrors (aget/aput/adelete/ahas/acommit) work" {
         assert asyncio.run(exercise_volatile());
         # Postgres-backed session on the project database.
         sess = Session(base_path=tmpdir);
-        persist_anchor = NodeAnchor(archetype=Root(), edges=[]);
+        persist_anchor = NodeAnchor(archetype=Root());
         persist_anchor.persistent = True;
         pid = persist_anchor.ensure_id();
         async def exercise_store -> bool {
@@ -1974,7 +1974,7 @@ test "Session concurrent commits from worker threads do not race" {
         # below knows exactly what to expect.
         anchor_ids = [uuid4() for _ in range(n_threads)];
         def worker(idx: int) {
-            a = NodeAnchor(archetype=Root(), edges=[]);
+            a = NodeAnchor(archetype=Root());
             a.id = anchor_ids[idx];
             a.persistent = True;
             mem.put(a);

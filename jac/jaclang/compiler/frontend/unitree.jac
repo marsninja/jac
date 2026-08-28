@@ -151,7 +151,7 @@ import from jaclang.compiler.frontend.relations {
 
 node UniNode {
     has _ctx_parent: (UniNode | None) postinit,
-        _struct_frozen: bool postinit,
+        _layout: (list | None) postinit,
         _in_mod_nodes: list[UniNode] postinit,
         _gen: (CodeGenTarget | None) postinit,
         loc: CodeLocInfo postinit,
@@ -173,9 +173,6 @@ node UniNode {
     def detached_copy -> UniNode;
     def sever_external_edges -> None;
     def _conn_light(tgt: any, e: any) -> None;
-    def _assert_thawed -> None;
-    def freeze_structure -> None;
-    def thaw_structure -> None;
     def _attach(child: UniNode, role: type, in_kid: bool) -> None;
     def _role_edges -> list[Role];
     def _edge_target(e: Role) -> UniNode;

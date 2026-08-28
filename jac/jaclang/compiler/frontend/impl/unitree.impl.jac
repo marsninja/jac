@@ -1,7 +1,9 @@
 impl UniNode.postinit -> None {
     self.__sub_node_tab = None;
     self._ctx_parent = None;
-    self._struct_frozen = False;
+    if self?._layout is None {
+        self._layout = None;
+    }
     self._in_mod_nodes = [];
     self._gen = None;
     self.ct_pruned = False;
@@ -39,12 +41,28 @@ impl UniNode._link(kid: Sequence[UniNode], roles: dict[type, any]) -> None {
         }
     }
     attached: set[int] = set();
+    layout: list = [];
+    ordinals: dict[type, int] = {};
     for k in kid {
-        if k is not None {
-            self._attach(k, role_of.get(id(k), KidRole), True);
-            attached.add(id(k));
+        if k is None {
+            continue;
         }
+        role = role_of.get(id(k));
+        if role is None and isinstance(k, Token) {
+            k._ctx_parent = self;
+            layout.append(k);
+            continue;
+        }
+        if role is None {
+            role = KidRole;
+        }
+        self._attach(k, role, True);
+        attached.add(id(k));
+        n = ordinals.get(role, 0);
+        ordinals[role] = n + 1;
+        layout.append((role, n));
     }
+    self._layout = layout;
     for (role, value) in roles.items() {
         vals = value if isinstance(value, (list, tuple)) else [value];
         for v in vals {
@@ -69,7 +87,33 @@ impl UniNode._role_pairs -> list[tuple[type, UniNode, bool]] {
 }
 
 impl UniNode.kid.getter -> list[UniNode] {
-    return [self->:Role:in_kid==True:->];
+    lay = self._layout;
+    if lay is None {
+        return [self->:Role:in_kid==True:->];
+    }
+    if not lay {
+        return [];
+    }
+    import from jaclang.jac0core.osp0 { refs0 }
+    out: list[UniNode] = [];
+    per_role: dict[type, list] = {};
+    for item in lay {
+        if isinstance(item, tuple) {
+            role = item[0];
+            lst = per_role.get(role);
+            if lst is None {
+                lst = refs0(self, 2, role, False, (("in_kid", "==", True), ));
+                per_role[role] = lst;
+            }
+            idx = item[1];
+            if idx < len(lst) {
+                out.append(lst[idx]);
+            }
+        } else {
+            out.append(item);
+        }
+    }
+    return out;
 }
 
 impl UniNode.parent.getter -> (UniNode | None) {
@@ -88,53 +132,7 @@ impl UniNode._role_shaped(role: type[Role], found: list[UniNode]) -> any {
     return None;
 }
 
-impl UniNode._assert_thawed -> None {
-    if self._struct_frozen {
-        raise RuntimeError(
-            f"structural mutation of frozen node {type(self).__name__}; "
-            "call thaw_structure() on the module first"
-        );
-    }
-}
-
-impl UniNode.freeze_structure -> None {
-    stack: list[UniNode] = [self];
-    seen: set[int] = set();
-    while stack {
-        nd = stack.pop();
-        if id(nd) in seen {
-            continue;
-        }
-        seen.add(id(nd));
-        nd._struct_frozen = True;
-        for (role, tgt, in_kid) in nd._role_pairs() {
-            if id(tgt) not in seen {
-                stack.append(tgt);
-            }
-        }
-    }
-}
-
-impl UniNode.thaw_structure -> None {
-    stack: list[UniNode] = [self];
-    seen: set[int] = set();
-    while stack {
-        nd = stack.pop();
-        if id(nd) in seen {
-            continue;
-        }
-        seen.add(id(nd));
-        nd._struct_frozen = False;
-        for (role, tgt, in_kid) in nd._role_pairs() {
-            if id(tgt) not in seen {
-                stack.append(tgt);
-            }
-        }
-    }
-}
-
 impl UniNode._reconnect_kids(nodes: Sequence[UniNode], roles: dict[int, type]) -> None {
-    self._assert_thawed();
     role_of: dict[int, type] = {};
     for (role, n, in_kid) in self._role_pairs() {
         if role is not KidRole {
@@ -153,16 +151,31 @@ impl UniNode._reconnect_kids(nodes: Sequence[UniNode], roles: dict[int, type]) -
             del e;
         }
     }
+    layout: list = [];
+    ordinals: dict[type, int] = {};
     for n in nodes {
-        if n is not None {
-            self._attach(n, role_of.get(id(n), KidRole), True);
+        if n is None {
+            continue;
         }
+        role = role_of.get(id(n));
+        if role is None and isinstance(n, Token) {
+            n._ctx_parent = self;
+            layout.append(n);
+            continue;
+        }
+        if role is None {
+            role = KidRole;
+        }
+        self._attach(n, role, True);
+        k = ordinals.get(role, 0);
+        ordinals[role] = k + 1;
+        layout.append((role, k));
     }
+    self._layout = layout;
     self._invalidate_sub_node_tab();
 }
 
 impl UniNode._role_set(role: type[Role], value: any) -> None {
-    self._assert_thawed();
     shapes: dict[type, str] = self?._role_shapes or {};
     self._role_shapes = shapes;
     if value is None {
@@ -373,11 +386,26 @@ impl UniNode.sever_external_edges -> None {
 }
 
 impl UniNode._after_clone -> None {
+    import copy;
     self.__sub_node_tab = None;
     self._ctx_parent = None;
-    self._struct_frozen = False;
     self._role_shapes = dict(self._role_shapes) if self._role_shapes else {};
     self.loc = CodeLocInfo(self.loc.first_tok, self.loc.last_tok);
+    lay = self._layout;
+    if lay {
+        fresh: list = [];
+        for item in lay {
+            if isinstance(item, tuple) {
+                fresh.append(item);
+            } else {
+                t = copy.copy(item);
+                t.__dict__.pop("__jac__", None);
+                t._ctx_parent = self;
+                fresh.append(t);
+            }
+        }
+        self._layout = fresh;
+    }
 }
 
 impl UniNode.detached_copy -> UniNode {
@@ -754,6 +782,10 @@ impl UniScopeNode.insert(
             }
         }
         self +>:ScopePrimary:+> symbol;
+        import from jaclang.jac0core.osp0 { edge_key_put }
+        for e in [edge self->:ScopePrimary:->symbol] {
+            edge_key_put(e, nd.sym_name);
+        }
         self._names_index[nd.sym_name] = symbol;
         winner = symbol;
     } else {

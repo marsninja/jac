@@ -109,8 +109,12 @@ impl Anchor.__setstate__(state: dict[(str, any)]) -> None {
     }
 
     if isinstance(self, NodeAnchor) {
+        stubs = self.__dict__.pop('edges', None);
+        if stubs is not None {
+            self.__dict__['_edge_stubs'] = `list(stubs);
+        }
         self.__dict__['_initial_edge_ids'] = frozenset(
-            e.ensure_id() for e in self.__dict__.get('edges', [])
+            e.ensure_id() for e in (stubs or [])
         );
     }
 }
@@ -156,8 +160,7 @@ impl Anchor.__eq__(other: object) -> bool {
 }
 
 impl NodeAnchor.is_populated -> bool {
-    d = self.__dict__;
-    return 'edges' in d and 'archetype' in d;
+    return 'archetype' in self.__dict__;
 }
 
 impl EdgeAnchor.is_populated -> bool {
@@ -168,19 +171,12 @@ impl EdgeAnchor.is_populated -> bool {
 impl NodeAnchor.__getstate__ -> dict[(str, object)] {
     state = super.__getstate__();
     if self.is_populated() {
-        state['edges'] = [`edge.make_stub() for `edge in self.edges];
+        import from jaclang.runtime.osp_graph_sv { sv_live_edges }
+        pending = self.__dict__.get('_edge_stubs');
+        live = pending if pending is not None else sv_live_edges(self, 3, None, True);
+        state['edges'] = [`edge.make_stub() for `edge in live];
     }
     return state;
-}
-
-impl NodeAnchor.edge_delta -> (tuple[(set[UUID], set[UUID])] | None) {
-    initial_fs: (frozenset | None) = self.__dict__.get('_initial_edge_ids');
-    if initial_fs is None {
-        return None;
-    }
-    initial: set[UUID] = set(initial_fs);
-    current: set[UUID] = set(e.ensure_id() for e in self.edges);
-    return (current - initial, initial - current);
 }
 
 impl EdgeAnchor.__getstate__ -> dict[(str, object)] {
@@ -197,18 +193,18 @@ impl EdgeAnchor.__getstate__ -> dict[(str, object)] {
     return state;
 }
 
-impl NodeAnchor.remove_edge(`edge: EdgeAnchor) -> None {
-    for (idx, ed) in enumerate(self.edges) {
-        if same_anchor(ed, `edge) {
-            self.edges.pop(idx);
-            break;
+impl EdgeAnchor.detach -> None {
+    for node_a in (self.source, self.target) {
+        stubs = node_a.__dict__.get('_edge_stubs') if node_a is not None else None;
+        if stubs {
+            for (idx, ed) in enumerate(stubs) {
+                if same_anchor(ed, self) {
+                    stubs.pop(idx);
+                    break;
+                }
+            }
         }
     }
-}
-
-impl EdgeAnchor.detach -> None {
-    self.source.remove_edge(self);
-    self.target.remove_edge(self);
     import from jaclang.runtime.osp_graph_sv { sv_forget_edge }
     sv_forget_edge(self);
 
@@ -319,7 +315,7 @@ impl GenericEdge.__repr__ -> str {
 
 @cached_property
 impl Root.__jac__ -> NodeAnchor {
-    anchor = NodeAnchor(archetype=self, edges=[]);
+    anchor = NodeAnchor(archetype=self);
     anchor.persistent = True;
     anchor.ensure_id();
     return anchor;

@@ -35,49 +35,7 @@ glob SCAN_ROOTS: list[str] = [
          "scale",
          "byllm"
      ],
-     SANCTIONED: dict[str, tuple] = {
-         "runtime/impl/archetype.impl.jac": (
-             4,
-             "the field's own primitives: __getstate__ stubs the list for "
-             "pickling, edge_delta derives the OCC add/remove sets, and "
-             "remove_edge is the mutation bookkeeping detach() rides on"
-         ),
-         "runtime/impl/runtime.impl.jac": (
-             7,
-             "mutation bookkeeping and persistence: build_edge's dual-write "
-             "appends (the store write sits beside them), disconnect's "
-             "stub-populate priming before driver hydration, save's cascade "
-             "over unsaved edges, destroy's detach iteration, and "
-             "reset_graph's persistence-record rewrite (paired with "
-             "sv_forget_by_id so the store retracts in step)"
-         ),
-         "runtime/osp_graph_sv.jac": (
-             1,
-             "THE hydration mint: sv_register_hydrated loading the "
-             "persistence record into the store is the one sanctioned live "
-             "read"
-         ),
-         "runtime/graph_walk.jac": (
-             1,
-             "the in-memory traversal primitive enumerates live anchor "
-             "objects directly; detach keeps node.edges and the sv store in "
-             "step, and the store-backed arm in data/query_planner is pure "
-             "SQL (epic #7945). Moved here from that planner in #8743: "
-             "walking a graph is not a persistence concern"
-         ),
-         "data/impl/serializer.impl.jac": (
-             3,
-             "serialization proper: writing data.edges on save and "
-             "rebuilding the stub list plus _initial_edge_ids on load"
-         ),
-         "server/impl/session.impl.jac": (
-             1,
-             "hydration: _materialize rebuilds the stub list from the "
-             "store's src/dst adjacency (ordered by seq) since node rows "
-             "no longer rewrite on edge changes (epic #7945)"
-         ),
-
-     };
+     SANCTIONED: dict[str, tuple] = {};
 
 test "NodeAnchor.edges has no unsanctioned readers" {
     base = Path(str(jaclang.__file__)).parent;

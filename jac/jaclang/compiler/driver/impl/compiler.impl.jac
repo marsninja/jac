@@ -1152,6 +1152,7 @@ impl JacCompiler.compile(
     _outer_opts: (CompileOptions | None) = None;
     _outer_prog: (JacProgram | None) = None;
     _scratch_prog: (JacProgram | None) = None;
+    _mod: (uni.Module | None) = None;
 
     import from jaclang.compiler.driver.jir {
         native_ir_cache_set_suspended,
@@ -1161,6 +1162,8 @@ impl JacCompiler.compile(
     if options.no_ir_cache {
         native_ir_cache_set_suspended(True);
     }
+    import from jaclang.jac0core.osp0 { inflight_depth, release_inflight_to }
+    _inflight_depth = inflight_depth();
     try {
         if options.force_target_program {
             _wrap_prog = target_program;
@@ -1176,7 +1179,6 @@ impl JacCompiler.compile(
         }
         _pre_errs = len(_wrap_prog.errors_had);
         _pre_warns = len(_wrap_prog.warnings_had);
-        _mod: (uni.Module | None) = None;
         _crash: (Exception | None) = None;
         try {
             _mod = self._compile_once(
@@ -1266,13 +1268,15 @@ impl JacCompiler.compile(
         } except Exception {
             ;
         }
-        return self._compile_once(
+        _mod = self._compile_once(
             file_path=file_path,
             target_program=target_program,
             use_str=use_str,
             options=options
         );
+        return _mod;
     } finally {
+        release_inflight_to(_inflight_depth);
         native_ir_cache_set_suspended(_na_cache_prev);
         set_effective_default_codespace(_prev_cs);
         self._reentrant_depth = _depth_prev;
@@ -1345,6 +1349,8 @@ impl JacCompiler._compile_once(
     mod_targ = self.parse_str(
         keep_str, file_path, actual_program, cancel_token=options.cancel_token
     );
+    import from jaclang.jac0core.osp0 { mark_inflight }
+    mark_inflight(mod_targ._osp_region);
     had_parse_errors = len(actual_program.errors_had) > had_parse_errors;
 
     cur_mod_path = os.path.normpath(file_path);

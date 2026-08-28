@@ -1,12 +1,6 @@
 def _eouts(origin: any, ecls: type) -> list {
-    me = getattr(origin, "__jac__");
-    found: list = [];
-    for ea in me.edges {
-        if (ea.source is me) and isinstance(ea.archetype, ecls) {
-            found.append(ea);
-        }
-    }
-    return found;
+    import from jaclang.jac0core.osp0 { refs0 }
+    return [getattr(e, "__jac__") for e in refs0(origin, 2, ecls, True)];
 }
 
 def _tgt(ea: any) -> any {
@@ -14,18 +8,13 @@ def _tgt(ea: any) -> any {
 }
 
 def _edel(ea: any) {
-    ea.source.edges.remove(ea);
-    ea.target.edges.remove(ea);
+    import from jaclang.jac0core.osp0 { destroy0 }
+    destroy0(ea.archetype);
 }
 
 def _econn(src: any, tgt: any, e: any) {
-    import from jaclang.runtime.archetype { EdgeAnchor }
-    sa = getattr(src, "__jac__");
-    ta = getattr(tgt, "__jac__");
-    ea = EdgeAnchor(archetype=e, source=sa, target=ta, is_undirected=False);
-    e.__jac__ = ea;
-    sa.edges.append(ea);
-    ta.edges.append(ea);
+    import from jaclang.jac0core.osp0 { connect0 }
+    connect0(src, tgt, e);
 }
 
 impl ModuleType.symbol_table.getter -> (SymbolTable | None) {

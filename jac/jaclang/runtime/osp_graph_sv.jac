@@ -331,11 +331,18 @@ def sv_register_hydrated(
     }
     m = _mem_or_ctx(mem);
     _mint(_store_for(m), node_a);
+    stubs = node_a.__dict__.get('_edge_stubs');
+    if not stubs {
+        return;
+    }
     pending: list[EdgeAnchor] = [];
-    for e in list(node_a.edges) {
+    keep: list[EdgeAnchor] = [];
+    for e in list(stubs) {
         if not e.is_populated() {
             if fetch_stubs {
                 pending.append(e);
+            } else {
+                keep.append(e);
             }
             continue;
         }
@@ -352,8 +359,17 @@ def sv_register_hydrated(
             fa = fetched.get(p.id);
             if isinstance(fa, EdgeAnchor) and fa.is_populated() {
                 _conn_hydrated(fa, m);
+            } else {
+                keep.append(p);
             }
         }
+    } elif pending {
+        keep.extend(pending);
+    }
+    if keep {
+        node_a.__dict__['_edge_stubs'] = keep;
+    } else {
+        node_a.__dict__.pop('_edge_stubs', None);
     }
 }
 

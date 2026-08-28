@@ -97,9 +97,12 @@ def push_region(rgn: int = 0) -> int:
 
 
 def pop_region() -> int:
-    if _regions:
-        return _regions.pop()
-    return 0
+    if not _regions:
+        return 0
+    rgn = _regions.pop()
+    if _pending_regions:
+        _sweep_regions()
+    return rgn
 
 
 def current_region() -> int:
@@ -121,20 +124,40 @@ def _free_handle(h: int) -> None:
     a = objs[h]
     if a is None:
         return
-    _ST.h_of_key.pop(id(a), None)
-    aid = a.id
-    if aid is not None:
-        _ST.h_of_key.pop(aid, None)
-    a.__dict__.pop("_osp_h", None)
+    if a is not _ROW:
+        _ST.h_of_key.pop(id(a), None)
+        aid = a.id
+        if aid is not None:
+            _ST.h_of_key.pop(aid, None)
+        a.__dict__.pop("_osp_h", None)
     objs[h] = None
     _SV._h_free.append(h)
 
 
-def region_close(rgn: int) -> int:
-    """Retire every row touching the region's nodes and free their handles
-    (nodes and edges). Returns the number of rows retired."""
-    if rgn == 0:
-        return 0
+_pending_regions: set[int] = set()
+_backref_tags: list[int] | None = None
+
+
+def _backref_tag_list() -> list[int]:
+    """Edge kinds that point from a dependency back at its users; they never
+    keep the target region alive."""
+    global _backref_tags
+    if _backref_tags is None:
+        tags: list[int] = []
+        try:
+            from jaclang.compiler.frontend.relations import Uses
+
+            tags.append(_SV.tag_of_cls(Uses))
+        except Exception:
+            pass
+        _backref_tags = tags
+    return _backref_tags
+
+
+_closed_regions: set[int] = set()
+
+
+def _close_now(rgn: int) -> int:
     g = _kernel()
     nodes = g.osp_region_handles(rgn)
     edges = g.osp_region_edges(rgn)
@@ -143,7 +166,91 @@ def region_close(rgn: int) -> int:
         _free_handle(h)
     for h in nodes:
         _free_handle(h)
+    _closed_regions.add(rgn)
     return n
+
+
+def region_is_closed(rgn: int) -> bool:
+    return rgn in _closed_regions
+
+
+_inflight: dict[int, int] = {}
+_inflight_stack: list[int] = []
+
+
+def mark_inflight(rgn: int) -> None:
+    """A module whose compile is in progress: its region is never closed,
+    whatever the hub does, until the mark is released. Marks form a stack so a
+    compile scope releases exactly what was pushed inside it, crash or not."""
+    if rgn:
+        _inflight[rgn] = _inflight.get(rgn, 0) + 1
+        _inflight_stack.append(rgn)
+
+
+def unmark_inflight(rgn: int) -> int:
+    if not rgn:
+        return 0
+    n = _inflight.get(rgn, 0) - 1
+    if n <= 0:
+        _inflight.pop(rgn, None)
+    else:
+        _inflight[rgn] = n
+    if _pending_regions:
+        return _sweep_regions()
+    return 0
+
+
+def inflight_depth() -> int:
+    return len(_inflight_stack)
+
+
+def release_inflight_to(depth: int) -> int:
+    total = 0
+    while len(_inflight_stack) > depth:
+        total += unmark_inflight(_inflight_stack.pop())
+    return total
+
+
+def _held(rgn: int) -> bool:
+    return rgn in _inflight or rgn in _regions
+
+
+def _sweep_regions() -> int:
+    g = _kernel()
+    total = 0
+    progress = True
+    skip = _backref_tag_list()
+    while progress and _pending_regions:
+        progress = False
+        for r in list(_pending_regions):
+            if _held(r):
+                continue
+            blockers = g.osp_region_blockers(r, skip)
+            if all(b in _pending_regions and not _held(b) for b in blockers):
+                _pending_regions.discard(r)
+                total += _close_now(r)
+                progress = True
+    return total
+
+
+def region_close(rgn: int) -> int:
+    """Retire every row touching the region's nodes and free their handles
+    (nodes and edges), as soon as no row from another live region points into
+    it; until then the region stays pending and closes when its referrers do
+    (a cycle of pending regions closes together). Returns rows retired now."""
+    if rgn == 0:
+        return 0
+    _kernel()
+    _pending_regions.add(rgn)
+    import os
+
+    if os.environ.get("JAC_OSP_NO_REGION_CLOSE"):
+        return 0
+    return _sweep_regions()
+
+
+def pending_regions() -> list[int]:
+    return sorted(_pending_regions)
 
 
 def _mint(anchor: Any) -> int:
@@ -163,12 +270,95 @@ def _handle(anchor: Any) -> int:
     return _SV._handle_of(_ST, anchor)
 
 
+_ROW = object()
+_INFRA_FIELDS = frozenset(
+    ("_jac_entry_funcs_", "_jac_exit_funcs_", "_subclass_hooks", "in_kid", "in_kids")
+)
+_objless_cache: dict[type, bool] = {}
+
+
+def _objectless(cls: type) -> bool:
+    """An edge class with no fields beyond the row flags needs no object per edge."""
+    v = _objless_cache.get(cls)
+    if v is None:
+        names = getattr(cls, "__dataclass_fields__", None)
+        v = names is not None and all(n in _INFRA_FIELDS for n in names)
+        _objless_cache[cls] = v
+    return v
+
+
+def _alloc_row_handle() -> int:
+    objs = _SV._obj_of_h
+    free = _SV._h_free
+    if free:
+        h = free.pop()
+        objs[h] = _ROW
+        return h
+    objs.append(_ROW)
+    return len(objs) - 1
+
+
+class _RowAnchor:
+    """Anchor view over a row-only edge: enough for the readers of
+    `e.__jac__` (source, target, persistent) and for `del e`."""
+
+    __slots__ = ("__dict__",)
+
+    def __init__(self, h: int) -> None:
+        self.__dict__["_osp_h"] = h
+
+    persistent = False
+    id = None
+    is_undirected = False
+
+    @property
+    def source(self) -> Any:
+        objs = _SV._obj_of_h
+        sh = _G.osp_edge_src(self.__dict__["_osp_h"])
+        return objs[sh] if 0 < sh < len(objs) else None
+
+    @property
+    def target(self) -> Any:
+        objs = _SV._obj_of_h
+        th = _G.osp_edge_tgt(self.__dict__["_osp_h"])
+        return objs[th] if 0 < th < len(objs) else None
+
+    @property
+    def archetype(self) -> Any:
+        return _materialize(self.__dict__["_osp_h"])
+
+    def is_populated(self) -> bool:
+        return True
+
+
+def _materialize(h: int) -> Any:
+    g = _G
+    cls = _SV.cls_of_tag(g.osp_edge_tag(h))
+    if cls is None:
+        return None
+    e = cls.__new__(cls)
+    d = e.__dict__
+    flags = g.osp_row_flags(h)
+    names = cls.__dataclass_fields__
+    if "in_kid" in names:
+        d["in_kid"] = (flags & 2) != 0
+    if "in_kids" in names:
+        d["in_kids"] = (flags & 2) != 0
+    d["_osp_h"] = h
+    d["__jac__"] = _RowAnchor(h)
+    return e
+
+
 def _arch_of(h: int) -> Any:
     objs = _SV._obj_of_h
     if h <= 0 or h >= len(objs):
         return None
     a = objs[h]
-    return None if a is None else a.archetype
+    if a is None:
+        return None
+    if a is _ROW:
+        return _materialize(h)
+    return a.archetype
 
 
 def _link(l_arch: Any, r_arch: Any, e: Any, one_sided: bool, before: Any) -> Any:
@@ -177,22 +367,44 @@ def _link(l_arch: Any, r_arch: Any, e: Any, one_sided: bool, before: Any) -> Any
     g = _kernel()
     src = l_arch.__jac__
     tgt = r_arch.__jac__
-    ea = EdgeAnchor(archetype=e, source=src, target=tgt, is_undirected=False)
-    e.__jac__ = ea
-    flags = _SV.flags_for_edge(ea)
-    if one_sided:
-        flags |= g.FLAG_ONE_SIDED
+    cls = type(e)
     before_h = 0
     if before is not None:
         bj = getattr(before, "__jac__", None)
         if bj is not None:
             before_h = _handle(bj)
+    if _objectless(cls):
+        d = e.__dict__
+        v = d.get("in_kid")
+        if v is None:
+            v = d.get("in_kids")
+        flags = 2 if v else 0
+        if one_sided:
+            flags |= g.FLAG_ONE_SIDED
+        eh = _alloc_row_handle()
+        g.osp_conn2(
+            _mint(src),
+            _mint(tgt),
+            eh,
+            0,
+            _SV.tags_for_cls(cls),
+            flags,
+            _region_for(l_arch),
+            0 if one_sided else _region_for(r_arch),
+            before_h,
+        )
+        return eh
+    ea = EdgeAnchor(archetype=e, source=src, target=tgt, is_undirected=False)
+    e.__jac__ = ea
+    flags = _SV.flags_for_edge(ea)
+    if one_sided:
+        flags |= g.FLAG_ONE_SIDED
     g.osp_conn2(
         _mint(src),
         _mint(tgt),
         _mint(ea),
         0,
-        _SV.tags_for_cls(type(e)),
+        _SV.tags_for_cls(cls),
         flags,
         _region_for(l_arch),
         0 if one_sided else _region_for(r_arch),
@@ -479,7 +691,7 @@ def clone_subtree(
                 continue
             e2 = type(earch)()
             for fld, val in earch.__dict__.items():
-                if fld != "__jac__":
+                if fld != "__jac__" and fld != "_osp_h":
                     setattr(e2, fld, val)
             one_sided = (g.osp_row_flags(eh) & g.FLAG_ONE_SIDED) != 0
             _link(dup, _clone(child), e2, one_sided, None)

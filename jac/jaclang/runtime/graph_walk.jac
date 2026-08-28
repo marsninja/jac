@@ -6,6 +6,7 @@ import from jaclang.runtime.archetype {
     same_anchor
 }
 import from jaclang.runtime.graph_query { GraphQuery, QHop, QPred }
+import from jaclang.runtime.osp_graph_sv { sv_live_edges, sv_register_hydrated }
 
 glob __all__ = [
          'access_gated',
@@ -163,8 +164,11 @@ def walk(
             if not isinstance(cur, NodeAnchor) or not cur.is_populated() {
                 continue;
             }
-            for e in list(cur.edges) {
-                if not e.is_populated() {
+            if cur.__dict__.get('_edge_stubs') {
+                sv_register_hydrated(cur, fetch_stubs=True);
+            }
+            for e in sv_live_edges(cur, hop.dir, hop.`edge, True) {
+                if not isinstance(e, EdgeAnchor) or not e.is_populated() {
                     continue;
                 }
                 ekey = anchor_key(e);

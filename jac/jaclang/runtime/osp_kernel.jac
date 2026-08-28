@@ -116,6 +116,9 @@ glob _match_slots: dict[int, list[Slot]] = {},
      _match_by_tag: dict[int, dict[int, list[Slot]]] = {};
 
 def run_typed(rt: OspRuntime, slots: list[Slot], a: any, b: any) -> None {
+    if not slots {
+        return;
+    }
     btag: int = rt.tag_of(b);
     key: int = id(slots);
     if _match_slots.get(key) is not slots {

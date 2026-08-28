@@ -11,6 +11,7 @@ super root); single-tenant flows keep the lazy ungated hop path.
 import from pathlib { Path }
 import from tempfile { TemporaryDirectory }
 import from jaclang.runtime.archetype { EdgeAnchor, GenericEdge }
+import from jaclang.runtime.osp_graph_sv { sv_conn }
 import from jaclang.runtime.runtime { JacRuntime }
 import from jaclang.runtime.context { ExecutionContext }
 import from jaclang.runtime.graph_query { GraphQuery, QHop }
@@ -85,8 +86,7 @@ test "bare refs, planner queries, and walker visits filter identically" {
                 archetype=GenericEdge(), source=rb, target=s, is_undirected=False
             );
             e.persistent = True;
-            rb.edges.append(e);
-            s.edges.append(e);
+            sv_conn(rb, s, e, False, ctx.mem);
             ctx.mem.put(e);
             ctx.mem.commit();
 

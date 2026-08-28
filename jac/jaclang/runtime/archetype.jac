@@ -94,13 +94,10 @@ obj Anchor {
 
 obj NodeAnchor(Anchor) {
     has archetype: NodeArchetype,
-        edges: list[EdgeAnchor],
         version: int = field(`init=False, `default=0);
 
     def __getstate__ -> dict[(str, object)];
     def is_populated -> bool;
-    def edge_delta -> (tuple[(set[UUID], set[UUID])] | None);
-    def remove_edge(`edge: EdgeAnchor) -> None;
 }
 
 obj EdgeAnchor(Anchor) {
@@ -169,7 +166,7 @@ class NodeArchetype(Archetype) {
 
     @cached_property
     def __jac__(self: NodeArchetype) -> NodeAnchor {
-        return NodeAnchor(archetype=self, edges=[]);
+        return NodeAnchor(archetype=self);
     }
 }
 

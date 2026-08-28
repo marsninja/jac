@@ -327,10 +327,10 @@ test "a never-persisted anchor is exactly its archetype and its topology" {
             "a transient node anchor allocated a Permission; an anchor nobody "
             "has granted anything has nothing to say about access"
         );
-        assert set(a.__dict__.keys()) == {"archetype", "edges"} , (
+        assert set(a.__dict__.keys()) == {"archetype"} , (
             f"a transient node anchor carries {sorted(a.__dict__.keys())}; "
-            "everything but the archetype and its edges is persistence "
-            "machinery and must stay unallocated until persistence needs it"
+            "everything but the archetype is persistence machinery (its edges "
+            "are kernel rows) and must stay unallocated until persistence needs it"
         );
     }
     edges = _edge_anchors(nodes);

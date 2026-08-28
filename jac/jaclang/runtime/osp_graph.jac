@@ -1257,7 +1257,8 @@ def _refs_typed(
                 if _r_undir[r] != 0 {
                     eff = 3;
                 }
-                if (eff == 2 or eff == 3) and (_r_flags[r] & need_flags) == need_flags {
+                if (eff == 2 or eff == 3)
+                    and (_r_flags[r] & need_flags) == need_flags {
                     o = _r_handle[r] if edges_only != 0 else _r_tgt[r];
                     if _dd_add(o) != 0 {
                         out.append(o);
@@ -1277,7 +1278,8 @@ def _refs_typed(
                 if _r_undir[r] != 0 {
                     eff = 3;
                 }
-                if (eff == 1 or eff == 3) and (_r_flags[r] & need_flags) == need_flags {
+                if (eff == 1 or eff == 3)
+                    and (_r_flags[r] & need_flags) == need_flags {
                     o = _r_handle[r] if edges_only != 0 else _r_src[r];
                     if _dd_add(o) != 0 {
                         out.append(o);
@@ -1546,6 +1548,44 @@ def osp_region_edges(rgn: int) -> list[int] {
             while r >= 0 {
                 if _dd_add(_r_handle[r]) != 0 {
                     out.append(_r_handle[r]);
+                }
+                r = _r_ntgt[r];
+            }
+        }
+        e = _rk_next[e];
+    }
+    return out;
+}
+
+def osp_region_blockers(rgn: int, skip_tags: list[int]) -> list[int] {
+    out: list[int] = [];
+    s = _rt_find(rgn);
+    if s < 0 {
+        return out;
+    }
+    _dd_begin();
+    e = _rt_head[s];
+    while e >= 0 {
+        ns = _nt_find(_rk_addr[e]);
+        if ns >= 0 {
+            r = _nt_hi[ns];
+            while r >= 0 {
+                src_s = _nt_find(_r_src[r]);
+                if src_s >= 0 {
+                    src_rgn = _nt_rgn[src_s];
+                    if src_rgn != 0 and src_rgn != rgn {
+                        skipped = False;
+                        i = 0;
+                        while i < len(skip_tags) {
+                            if _r_tag[r] == skip_tags[i] {
+                                skipped = True;
+                            }
+                            i += 1;
+                        }
+                        if (not skipped) and _dd_add(src_rgn) != 0 {
+                            out.append(src_rgn);
+                        }
+                    }
                 }
                 r = _r_ntgt[r];
             }

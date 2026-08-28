@@ -155,7 +155,12 @@ impl Serializer._serialize_value(
                 );
         }
         if isinstance(val, NodeAnchor) {
-            result['edges'] = [str(e.ensure_id()) for e in val.edges];
+            import from jaclang.runtime.osp_graph_sv { sv_live_edges }
+            pending = val.__dict__.get('_edge_stubs');
+            live = pending
+                if pending is not None
+                else (sv_live_edges(val, 3, None, True) if val.is_populated() else []);
+            result['edges'] = [str(e.ensure_id()) for e in live];
 
             result['version'] = val.version;
         }
@@ -931,18 +936,14 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) 
                     edge_ids.append(raw_eid);
                 }
             }
-            if not edge_ids {
-                anchor.edges = [];
-            } else {
-                edges: list[EdgeAnchor] = [];
-                for eid in edge_ids {
-                    stub = Serializer._id_to_stub(EdgeAnchor, eid);
-                    if isinstance(stub, EdgeAnchor) {
-                        edges.append(stub);
-                    }
+            edges: list[EdgeAnchor] = [];
+            for eid in edge_ids {
+                stub = Serializer._id_to_stub(EdgeAnchor, eid);
+                if isinstance(stub, EdgeAnchor) {
+                    edges.append(stub);
                 }
-                anchor.edges = edges;
             }
+            anchor.__dict__['_edge_stubs'] = edges;
 
             setattr(
                 anchor,

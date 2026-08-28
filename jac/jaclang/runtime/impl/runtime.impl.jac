@@ -498,11 +498,6 @@ impl JacContext.reset_graph(root_node: (Root | None) = None) -> int {
         sv_forget_by_id(aid, mem);
         deleted_count += 1;
     }
-    ranchor.edges = [
-        e
-        for e in ranchor.edges
-        if (e.id not in deleted_ids)
-    ];
     mem.commit(ranchor);
     return deleted_count;
 }
@@ -1111,12 +1106,7 @@ impl JacGraph.disconnect(
     right = [right] if isinstance(right, NodeArchetype) else right;
     for i in left {
         nd = i.__jac__;
-        for stub in `set(nd.edges) {
-            if not stub.is_populated() {
-                stub.populate();
-            }
-        }
-        sv_register_hydrated(nd);
+        sv_register_hydrated(nd, fetch_stubs=True);
         handled: set = set();
         for j in right {
             for anchor in sv_candidate_edges_between(nd, j.__jac__, dir.value) {
@@ -1189,9 +1179,6 @@ impl JacGraph.build_edge(
         eanch = `edge.__jac__=EdgeAnchor(
             archetype=`edge, source=source, target=target, is_undirected=is_undirected
         );
-        source.edges.append(eanch);
-        target.edges.append(eanch);
-        sv_conn(source, target, eanch, is_undirected);
         if conn_assign {
             for (fld, val) in zip(conn_assign[0], conn_assign[1], strict=False) {
                 if hasattr(`edge, fld) {
@@ -1201,6 +1188,7 @@ impl JacGraph.build_edge(
                 }
             }
         }
+        sv_conn(source, target, eanch, is_undirected);
         if (source.persistent or target.persistent) {
             JacRuntimeInterface.save(eanch);
         }
@@ -1220,7 +1208,12 @@ impl JacPersistence.save(`obj: (Archetype | Anchor)) -> None {
     jctx.mem.put(anchor);
     match anchor {
         case NodeAnchor():
-            for ed in anchor.edges {
+            import from jaclang.runtime.osp_graph_sv {
+                sv_live_edges,
+                sv_register_hydrated
+            }
+            sv_register_hydrated(anchor);
+            for ed in sv_live_edges(anchor, 3, None, True) {
                 if (ed.is_populated() and not ed.persistent) {
                     JacRuntimeInterface.save(ed);
                 }
@@ -1252,7 +1245,12 @@ impl JacPersistence.destroy(
         if JacRuntimeInterface.check_write_access(anchor, op_hint="delete") {
             match anchor {
                 case NodeAnchor():
-                    for `edge in anchor.edges[:] {
+                    import from jaclang.runtime.osp_graph_sv {
+                        sv_live_edges,
+                        sv_register_hydrated
+                    }
+                    sv_register_hydrated(anchor, fetch_stubs=True);
+                    for `edge in sv_live_edges(anchor, 3, None, True) {
                         eid = `edge.id;
                         `edge.detach();
                         if eid is not None {
