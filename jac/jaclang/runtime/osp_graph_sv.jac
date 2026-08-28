@@ -112,6 +112,66 @@ def tag_for(edge_a: EdgeAnchor) -> int {
     return tag_of_cls(`type(edge_a.archetype));
 }
 
+glob _tags_of_cls: dict[(type, list[int])] = {},
+     _key_of_str: dict[str, int] = {},
+     _str_of_key: list[str] = [""];
+
+def tags_for_cls(cls: type) -> list[int] {
+    got = _tags_of_cls.get(cls);
+    if got is not None {
+        return got;
+    }
+    import from jaclang.runtime.archetype { EdgeArchetype }
+    out: list[int] = [];
+    for c in cls.__mro__ {
+        if c is EdgeArchetype {
+            break;
+        }
+        if isinstance(c, `type) and issubclass(c, EdgeArchetype) {
+            out.append(tag_of_cls(c));
+        }
+    }
+    if not out {
+        out.append(tag_of_cls(cls));
+    }
+    _tags_of_cls[cls] = out;
+    return out;
+}
+
+def flags_for_edge(edge_a: EdgeAnchor) -> int {
+    arch = edge_a.archetype;
+    d = arch.__dict__;
+    flags = 0;
+    v = d.get('in_kid');
+    if v is None {
+        v = d.get('in_kids');
+    }
+    if v {
+        flags = flags | _graph.FLAG_IN_KID;
+    }
+    if d.get('__jac_one_sided__') {
+        flags = flags | _graph.FLAG_ONE_SIDED;
+    }
+    return flags;
+}
+
+def key_of_str(s: str) -> int {
+    k = _key_of_str.get(s, 0);
+    if k == 0 {
+        _str_of_key.append(s);
+        k = len(_str_of_key) - 1;
+        _key_of_str[s] = k;
+    }
+    return k;
+}
+
+def str_of_key(k: int) -> str {
+    if k <= 0 or k >= len(_str_of_key) {
+        return "";
+    }
+    return _str_of_key[k];
+}
+
 def _resolve(cand: (Anchor | None), m: any) -> (Anchor | None) {
     if cand is None or m is None or cand.id is None {
         return cand;
@@ -128,7 +188,9 @@ def sv_conn(
     tgt_a: NodeAnchor,
     edge_a: EdgeAnchor,
     is_undirected: bool,
-    mem: any = None
+    mem: any = None,
+    before_a: (EdgeAnchor | None) = None,
+    flags: int = -1
 ) -> None {
     m = _mem_or_ctx(mem);
     st = _store_for(m);
@@ -139,15 +201,80 @@ def sv_conn(
     if st.forgotten {
         st.forgotten.discard(eh);
     }
-    _graph.osp_conn(
+    if flags < 0 {
+        flags = flags_for_edge(edge_a);
+    }
+    before_h = 0;
+    if before_a is not None {
+        before_h = _handle_of(st, before_a);
+    }
+    _graph.osp_conn2(
         _mint(st, src_a),
         _mint(st, tgt_a),
         eh,
         1 if is_undirected else 0,
-        tag_for(edge_a),
+        tags_for_cls(`type(edge_a.archetype)),
+        flags,
         st.region,
-        st.region
+        st.region,
+        before_h
     );
+}
+
+def sv_set_flags(edge_a: EdgeAnchor, flags: int, mem: any = None) -> None {
+    st = _store_for(_mem_or_ctx(mem));
+    eh = _handle_of(st, edge_a);
+    if eh > 0 {
+        _graph.osp_set_row_flags(eh, flags);
+    }
+}
+
+def sv_key_put(edge_a: EdgeAnchor, key: str, mem: any = None) -> None {
+    st = _store_for(_mem_or_ctx(mem));
+    eh = _handle_of(st, edge_a);
+    if eh > 0 {
+        _graph.osp_key_put(eh, key_of_str(key) if key else 0);
+    }
+}
+
+def sv_key_edges(
+    origin_a: NodeAnchor, edge_type: type, key: str, mem: any = None
+) -> list[EdgeAnchor] {
+    m = _mem_or_ctx(mem);
+    st = _store_for(m);
+    oh = _handle_of(st, origin_a);
+    out: list[EdgeAnchor] = [];
+    if oh <= 0 {
+        return out;
+    }
+    k = _key_of_str.get(key, 0);
+    if k == 0 {
+        return out;
+    }
+    for h in _graph.osp_key_rows(oh, tag_of_cls(edge_type), k) {
+        e = _resolve(obj_of(h), m);
+        if isinstance(e, EdgeAnchor) {
+            out.append(e);
+        }
+    }
+    return out;
+}
+
+def sv_refs_handles(
+    origin_a: NodeAnchor,
+    dir_int: int,
+    edge_type: (type | None),
+    edges_only: bool,
+    need_flags: int = 0,
+    mem: any = None
+) -> list[int] {
+    st = _store_for(_mem_or_ctx(mem));
+    oh = _handle_of(st, origin_a);
+    if oh <= 0 {
+        return [];
+    }
+    tag = -1 if edge_type is None else tag_of_cls(edge_type);
+    return _graph.osp_refs_flag(oh, dir_int, tag, 1 if edges_only else 0, need_flags);
 }
 
 def sv_live_edges(
@@ -160,44 +287,15 @@ def sv_live_edges(
     m = _mem_or_ctx(mem);
     st = _store_for(m);
     oh = _mint(st, origin_a);
-    if edge_type is None {
-        out: list[Anchor] = [];
-        for h in _graph.osp_refs(oh, dir_int, -1, 1 if edges_only else 0) {
-            a = _resolve(obj_of(h), m);
-            if a is not None {
-                out.append(a);
-            }
-        }
-        return out;
-    }
-    hits: list[EdgeAnchor] = [];
-    for h in _graph.osp_refs(oh, dir_int, -1, 1) {
-        e = _resolve(obj_of(h), m);
-        if not isinstance(e, EdgeAnchor) or not e.is_populated() {
-            continue;
-        }
-        if isinstance(e.archetype, edge_type) {
-            hits.append(e);
+    tag = -1 if edge_type is None else tag_of_cls(edge_type);
+    out: list[Anchor] = [];
+    for h in _graph.osp_refs(oh, dir_int, tag, 1 if edges_only else 0) {
+        a = _resolve(obj_of(h), m);
+        if a is not None {
+            out.append(a);
         }
     }
-    if edges_only {
-        return hits;
-    }
-    ends: list[Anchor] = [];
-    seen: set[any] = set();
-    for e in hits {
-        o_a = e.target if same_anchor(e.source, origin_a) else e.source;
-        ra = _resolve(o_a, m);
-        if ra is None {
-            continue;
-        }
-        rk = anchor_key(ra);
-        if rk not in seen {
-            seen.add(rk);
-            ends.append(ra);
-        }
-    }
-    return ends;
+    return out;
 }
 
 def sv_candidate_edges_between(

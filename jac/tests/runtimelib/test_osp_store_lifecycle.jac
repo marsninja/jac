@@ -52,6 +52,9 @@ test "closing a context retracts its rows and recycles its handles" {
     with TemporaryDirectory() as proj {
         orig_ctx = JacRuntime.exec_ctx;
         try {
+            warm = _mk_ctx(proj, "leak_warm");
+            _connect_pair(warm.mem, "leak_warm");
+            warm.close();
             cap_rows = -1;
             cap_handles = -1;
             for i in range(5) {
