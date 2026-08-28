@@ -62,7 +62,13 @@ impl JacProgram.release_module(self: JacProgram, resolved_path: str) -> None {
         prog_root.main_mod = None;
     }
     if released is not None {
-        released.sever_external_edges();
+        import from jaclang.jac0core.osp0 { region_close }
+        if released._osp_region != 0 {
+            region_close(released._osp_region);
+            released._osp_region = 0;
+        } else {
+            released.sever_external_edges();
+        }
         if prog_root.kid {
             (first_tok, last_tok) = prog_root.resolve_tok_range();
             prog_root.loc.update_token_range(first_tok, last_tok);

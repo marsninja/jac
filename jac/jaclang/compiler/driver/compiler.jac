@@ -130,6 +130,13 @@ obj JacCompiler {
         cancel_token: (Event | None) = None
     ) -> uni.Module;
 
+    def _parse_str_body(
+        source_str: str,
+        file_path: str,
+        target_program: JacProgram,
+        cancel_token: (Event | None) = None
+    ) -> uni.Module;
+
     def resolve_absorb_imports(mod: uni.Module, target_program: JacProgram) -> None;
     def stamp_boundary_facts(mod: uni.Module, target_program: JacProgram) -> None;
     def stamp_client_kind_facts(mod: uni.Module, target_program: JacProgram) -> None;

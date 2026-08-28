@@ -118,6 +118,18 @@ def run_pass(
     if getattr(pass_cls, 'HOST_PASS', False) {
         kwargs['prog'] = prog;
     }
+    import from jaclang.jac0core.osp0 { push_region, pop_region, current_region }
+    import from jaclang.compiler.frontend.unitree { PythonModuleAst as _PyRoot }
+    _fresh_root = isinstance(ir_in, _PyRoot);
+    _rgn: int = 0 if _fresh_root else getattr(ir_in, '_osp_region', 0);
+    _pushed = False;
+    if _fresh_root {
+        _rgn = push_region();
+        _pushed = True;
+    } elif _rgn != 0 and current_region() != _rgn {
+        push_region(_rgn);
+        _pushed = True;
+    }
     try {
         inst = pass_cls(
             ir_in=ir_in,
@@ -128,7 +140,16 @@ def run_pass(
             warnings_had=warnings,
             **kwargs
         );
+        if _fresh_root and inst is not None {
+            _built = inst.ir_out;
+            if getattr(_built, '_osp_region', 1) == 0 {
+                _built._osp_region = _rgn;
+            }
+        }
     } finally {
+        if _pushed {
+            pop_region();
+        }
         eff = inst.policy if (inst is not None and inst.policy is not None) else pol;
         deliver_alerts(errors, warnings, prog, eff);
     }

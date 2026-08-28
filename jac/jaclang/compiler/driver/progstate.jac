@@ -47,6 +47,7 @@ obj ModuleHub {
     }
 
     def reset(keep_stubs: bool = False) {
+        import from jaclang.jac0core.osp0 { region_close }
         retained_mods: dict[str, uni.Module] = {};
         retained_stamps: dict[str, float] = {};
         if keep_stubs {
@@ -57,6 +58,17 @@ obj ModuleHub {
                         retained_stamps[path] = self.stamps[path];
                     }
                 }
+            }
+        }
+        for (path, dropped) in self.mod.hub.items() {
+            if (
+                path not in retained_mods
+                and not path.endswith(".pyi")
+                and not dropped.stub_only
+                and dropped._osp_region != 0
+            ) {
+                region_close(dropped._osp_region);
+                dropped._osp_region = 0;
             }
         }
         self.mod = uni.ProgramModule();

@@ -159,6 +159,8 @@ node UniNode {
         __sub_node_tab: (dict[(type, list[UniNode])] | None) postinit,
         ct_pruned: bool postinit;
 
+    static has _osp_region_scoped: bool = True;
+
     def postinit -> None;
 
     has kid: list[UniNode] { getter; }
@@ -167,6 +169,7 @@ node UniNode {
     has _sub_node_tab: dict[(type, list[UniNode])] { getter; }
 
     def _link(kid: Sequence[UniNode], roles: dict[type, any]) -> None;
+    def _after_clone -> None;
     def detached_copy -> UniNode;
     def sever_external_edges -> None;
     def _conn_light(tgt: any, e: any) -> None;
@@ -256,6 +259,7 @@ node UniNode {
 }
 
 node Symbol {
+    static has _osp_region_scoped: bool = True;
     has name: str postinit,
         access: SymbolAccess postinit,
         imported: bool postinit,
@@ -628,6 +632,7 @@ node Module(AstDocNode, UniScopeNode) {
     has name: str,
         source: Source,
         terminals: list[Token],
+        _osp_region: int = 0,
         stub_only: bool = False,
         src_terminals: list[Token] = [],
         is_raised_from_py: bool = False,

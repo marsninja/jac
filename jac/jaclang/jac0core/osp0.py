@@ -2,11 +2,16 @@
 
 jac0 rewrites `node`/`edge`/`walker` declarations, `+>:T:+>`, `[x ->:T:->]`,
 `spawn`, `visit`, `disengage`, `del` and `can f with T entry|exit` into calls
-on this module. Every helper reaches the same `JacRuntimeInterface` statics
-the full compiler's codegen targets, so a seed module and a full-compiler
-module share one kernel and one semantics. The runtime is imported lazily:
-the seed tier's own modules (the unitree, the parser) define archetypes at
-import time, before the runtime package is importable without cycles.
+on this module. Structure lives in the kernel's rows (`jaclang.runtime.osp_graph`):
+`connect0` mints handles for both endpoints in the seed store and links one
+row per edge, indexed by (node, direction, edge type) with the edge class's
+MRO tags so a hop on a base edge type sees every subclass row; `refs0` reads
+those chains by handle and never touches an anchor's edge list.
+
+Lifetime is regions. `push_region` / `pop_region` bracket one module's build;
+a node registered in a region (region-scoped classes only, see
+`mark_region_scoped`) dies with it in `region_close`, which retires every row
+touching the region's nodes and frees their handles.
 """
 
 from __future__ import annotations
@@ -33,9 +38,24 @@ __all__ = [
     "on_entry",
     "on_exit",
     "set_trigger",
+    "push_region",
+    "pop_region",
+    "current_region",
+    "region_close",
+    "mark_region_scoped",
+    "clone_subtree",
+    "edge_key_put",
+    "edge_key_refs",
 ]
 
 _ARCH = (Node, Edge, Walker)
+
+_G: Any = None
+_SV: Any = None
+_ST: Any = None
+_regions: list[int] = []
+_scoped: list[type] = []
+_scoped_tuple: tuple = ()
 
 
 def _rt() -> Any:
@@ -44,34 +64,159 @@ def _rt() -> Any:
     return JacRuntimeInterface
 
 
+def _kernel() -> Any:
+    global _G, _SV, _ST
+    if _G is None:
+        import jaclang.runtime.osp_graph as g
+        import jaclang.runtime.osp_graph_sv as sv
+
+        _G = g
+        _SV = sv
+        _ST = sv._SvStore(region=0)
+    return _G
+
+
+def mark_region_scoped(cls: type) -> type:
+    """Nodes of `cls` (and subclasses) belong to the region current at their
+    first connect and die with it. Everything else is region-free."""
+    global _scoped_tuple
+    _scoped.append(cls)
+    _scoped_tuple = tuple(_scoped)
+    return cls
+
+
+def push_region(rgn: int = 0) -> int:
+    """Enter a region: a fresh one when `rgn` is 0, else re-enter `rgn`."""
+    _kernel()
+    if rgn == 0:
+        rgn = _SV._next_region[0]
+        _SV._next_region[0] = rgn + 1
+    _regions.append(rgn)
+    return rgn
+
+
+def pop_region() -> int:
+    if _regions:
+        return _regions.pop()
+    return 0
+
+
+def current_region() -> int:
+    return _regions[-1] if _regions else 0
+
+
+def _region_for(arch: Any) -> int:
+    if getattr(arch, "_osp_region_scoped", False) or (
+        _scoped_tuple and isinstance(arch, _scoped_tuple)
+    ):
+        return current_region()
+    return 0
+
+
+def _free_handle(h: int) -> None:
+    objs = _SV._obj_of_h
+    if h <= 0 or h >= len(objs):
+        return
+    a = objs[h]
+    if a is None:
+        return
+    _ST.h_of_key.pop(id(a), None)
+    aid = a.id
+    if aid is not None:
+        _ST.h_of_key.pop(aid, None)
+    objs[h] = None
+    _SV._h_free.append(h)
+
+
+def region_close(rgn: int) -> int:
+    """Retire every row touching the region's nodes and free their handles
+    (nodes and edges). Returns the number of rows retired."""
+    if rgn == 0:
+        return 0
+    g = _kernel()
+    nodes = g.osp_region_handles(rgn)
+    edges = g.osp_region_edges(rgn)
+    n = g.osp_region_died(rgn)
+    for h in edges:
+        _free_handle(h)
+    for h in nodes:
+        _free_handle(h)
+    return n
+
+
+def _mint(anchor: Any) -> int:
+    return _SV._mint(_ST, anchor)
+
+
+def _handle(anchor: Any) -> int:
+    return _SV._handle_of(_ST, anchor)
+
+
+def _arch_of(h: int) -> Any:
+    objs = _SV._obj_of_h
+    if h <= 0 or h >= len(objs):
+        return None
+    a = objs[h]
+    return None if a is None else a.archetype
+
+
+def _link(l_arch: Any, r_arch: Any, e: Any, one_sided: bool, before: Any) -> Any:
+    from jaclang.runtime.archetype import EdgeAnchor
+
+    g = _kernel()
+    src = l_arch.__jac__
+    tgt = r_arch.__jac__
+    ea = EdgeAnchor(archetype=e, source=src, target=tgt, is_undirected=False)
+    e.__jac__ = ea
+    flags = _SV.flags_for_edge(ea)
+    if one_sided:
+        flags |= g.FLAG_ONE_SIDED
+    before_h = 0
+    if before is not None:
+        bj = getattr(before, "__jac__", None)
+        if bj is not None:
+            before_h = _handle(bj)
+    g.osp_conn2(
+        _mint(src),
+        _mint(tgt),
+        _mint(ea),
+        0,
+        _SV.tags_for_cls(type(e)),
+        flags,
+        _region_for(l_arch),
+        0 if one_sided else _region_for(r_arch),
+        before_h,
+    )
+    return ea
+
+
 def connect0(
     left: Any,
     right: Any,
     edge: Any = None,
     conn_assign: tuple[tuple, tuple] | None = None,
+    one_sided: bool = False,
+    before: Any = None,
 ) -> Any:
-    """Connect in the anchor adjacency: no kernel row, no handle, no context.
+    """Connect as kernel rows: no anchor list, no context, no persistence.
 
-    Seed-tier graphs are transient compiler graphs; their edges live only in
-    the two anchors' edge lists, which is what `refs0` reads. Nothing here
-    pins an anchor in a registry, so a released module is collectable.
+    `one_sided` rows are reachable from the source only and never register or
+    pin the target (fan-in to shared nodes such as interned types). `before`
+    names an existing child whose position the new row takes in the source's
+    chains (ordered insert).
     """
-    from jaclang.runtime.archetype import EdgeAnchor, GenericEdge
+    from jaclang.runtime.archetype import GenericEdge
 
     lefts = left if isinstance(left, list) else [left]
     rights = right if isinstance(right, list) else [right]
     ct = edge or GenericEdge
     for l_arch in lefts:
-        src = l_arch.__jac__
         for r_arch in rights:
-            tgt = r_arch.__jac__
             e = ct() if isinstance(ct, type) else ct
-            e.__jac__ = EdgeAnchor(archetype=e, source=src, target=tgt, is_undirected=False)
-            src.edges.append(e.__jac__)
-            tgt.edges.append(e.__jac__)
             if conn_assign:
                 for fld, val in zip(conn_assign[0], conn_assign[1], strict=False):
                     setattr(e, fld, val)
+            _link(l_arch, r_arch, e, one_sided, before)
     return right
 
 
@@ -109,6 +254,21 @@ def _pred_ok(arch: Any, preds: tuple | None) -> bool:
     return True
 
 
+def _split_preds(preds: tuple | None) -> tuple[int, tuple | None]:
+    """Fold `in_kid == True` / `in_kids == True` into the row flag filter."""
+    if not preds:
+        return 0, None
+    flags = 0
+    rest = []
+    for p in preds:
+        name, op, value = p
+        if name in ("in_kid", "in_kids") and op == "==" and value is True:
+            flags |= _kernel().FLAG_IN_KID
+        else:
+            rest.append(p)
+    return flags, (tuple(rest) if rest else None)
+
+
 def refs0(
     origin: Any,
     dir: int,
@@ -117,41 +277,93 @@ def refs0(
     preds: tuple | None = None,
     target: Any = None,
 ) -> list:
-    """One hop over the kernel's adjacency, without the persistence planner.
+    """One hop over the kernel's typed chains.
 
-    dir: 1 = in, 2 = out, 3 = any. `edge` filters by edge class (subclasses
-    included), `preds` are (attr, op, value) edge-attribute predicates and
-    `target` restricts the far end to one node. Results keep the order the
-    edges were connected in, deduplicated. Origins may be a node or a list.
+    dir: 1 = in, 2 = out, 3 = any. `edge` selects the (node, direction, type)
+    chain (subclass rows included through MRO tags), `preds` are (attr, op,
+    value) edge-attribute predicates and `target` restricts the far end to one
+    node. Results keep chain order, deduplicated. Origins may be a node or a
+    list.
     """
+    g = _kernel()
     origins = origin if isinstance(origin, list) else [origin]
+    tag = -1 if edge is None else _SV.tag_of_cls(edge)
+    need_flags, rest = _split_preds(preds)
+    want_edges = edges_only or rest is not None or target is not None
     out: list = []
     seen: set = set()
-    tgt_anchor = target.__jac__ if target is not None else None
     for o in origins:
-        me = o.__jac__
-        for ea in me.edges:
-            arch = ea.archetype
-            if edge is not None and not isinstance(arch, edge):
+        oj = getattr(o, "__jac__", None)
+        if oj is None:
+            continue
+        oh = _handle(oj)
+        if oh <= 0:
+            continue
+        hs = g.osp_refs_flag(oh, dir, tag, 1 if want_edges else 0, need_flags)
+        if not want_edges:
+            for h in hs:
+                item = _arch_of(h)
+                if item is None:
+                    continue
+                k = id(item)
+                if k in seen:
+                    continue
+                seen.add(k)
+                out.append(item)
+            continue
+        for eh in hs:
+            earch = _arch_of(eh)
+            if earch is None:
                 continue
-            if ea.source is me:
-                if dir == 1 and not ea.is_undirected:
-                    continue
-                other = ea.target
-            elif ea.target is me:
-                if dir == 2 and not ea.is_undirected:
-                    continue
-                other = ea.source
+            if rest is not None and not _pred_ok(earch, rest):
+                continue
+            if edges_only:
+                item = earch
             else:
+                item = _arch_of(g.osp_edge_peer(eh, oh))
+                if item is None:
+                    continue
+            if target is not None and (edges_only or item is not target):
+                if edges_only:
+                    peer = _arch_of(g.osp_edge_peer(eh, oh))
+                    if peer is not target:
+                        continue
+                else:
+                    continue
+            k = id(item)
+            if k in seen:
                 continue
-            if tgt_anchor is not None and other is not tgt_anchor:
-                continue
-            if not _pred_ok(arch, preds):
-                continue
-            item = arch if edges_only else other.archetype
-            if id(item) in seen:
-                continue
-            seen.add(id(item))
+            seen.add(k)
+            out.append(item)
+    return out
+
+
+def edge_key_put(e: Any, key: str) -> None:
+    """Index an edge under (source, edge type, key) for keyed lookups."""
+    ea = getattr(e, "__jac__", None)
+    if ea is None:
+        return
+    h = _handle(ea)
+    if h > 0:
+        _kernel().osp_key_put(h, _SV.key_of_str(key) if key else 0)
+
+
+def edge_key_refs(origin: Any, edge: Any, key: str, edges_only: bool = False) -> list:
+    """Rows of `origin` of type `edge` indexed under `key`, in insertion order."""
+    g = _kernel()
+    oj = getattr(origin, "__jac__", None)
+    if oj is None:
+        return []
+    oh = _handle(oj)
+    if oh <= 0:
+        return []
+    k = _SV._key_of_str.get(key, 0)
+    if k == 0:
+        return []
+    out: list = []
+    for eh in g.osp_key_rows(oh, _SV.tag_of_cls(edge), k):
+        item = _arch_of(eh) if edges_only else _arch_of(g.osp_edge_peer(eh, oh))
+        if item is not None:
             out.append(item)
     return out
 
@@ -168,15 +380,77 @@ def disengage0(walker: Any) -> bool:
     return _rt().disengage(walker)
 
 
+def _drop_edge(anchor: Any) -> bool:
+    g = _kernel()
+    h = _handle(anchor)
+    if h <= 0:
+        return False
+    g.osp_disconnect(h)
+    _free_handle(h)
+    return True
+
+
 def destroy0(obj: Any) -> None:
     if isinstance(obj, Edge):
         anchor = obj.__jac__
         if not anchor.persistent:
-            anchor.source.remove_edge(anchor)
-            anchor.target.remove_edge(anchor)
+            _drop_edge(anchor)
             return
     if isinstance(obj, _ARCH):
         _rt().destroy(obj)
+
+
+def _default_scalar_copy(src: Any) -> Any:
+    import copy
+
+    dup = copy.copy(src)
+    dup.__dict__.pop("__jac__", None)
+    after = getattr(dup, "_after_clone", None)
+    if after is not None:
+        after()
+    return dup
+
+
+def clone_subtree(
+    nd: Any, role_base: type, copy_scalars: Callable[[Any], Any] | None = None
+) -> Any:
+    """Deep-copy a node and its outgoing `role_base` structure as fresh rows.
+
+    `copy_scalars(node)` returns a scalar-only copy of one node (no anchor);
+    by default that is a shallow copy without its anchor, followed by the
+    node's own `_after_clone` hook. The clone re-links each out edge of the
+    role family, in chain order, with an edge of the same class and
+    attributes."""
+    g = _kernel()
+    memo: dict[int, Any] = {}
+    scalars = copy_scalars if copy_scalars is not None else _default_scalar_copy
+
+    def _clone(src: Any) -> Any:
+        k = id(src)
+        if k in memo:
+            return memo[k]
+        dup = scalars(src)
+        memo[k] = dup
+        sj = getattr(src, "__jac__", None)
+        if sj is None:
+            return dup
+        sh = _handle(sj)
+        if sh <= 0:
+            return dup
+        for eh in g.osp_refs_flag(sh, 2, _SV.tag_of_cls(role_base), 1, 0):
+            earch = _arch_of(eh)
+            child = _arch_of(g.osp_edge_peer(eh, sh))
+            if earch is None or child is None:
+                continue
+            e2 = type(earch)()
+            for fld, val in earch.__dict__.items():
+                if fld != "__jac__":
+                    setattr(e2, fld, val)
+            one_sided = (g.osp_row_flags(eh) & g.FLAG_ONE_SIDED) != 0
+            _link(dup, _clone(child), e2, one_sided, None)
+        return dup
+
+    return _clone(nd)
 
 
 def on_entry(func: Callable) -> Callable:

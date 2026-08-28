@@ -352,53 +352,37 @@ impl UniNode.sever_external_edges -> None {
             }
         }
     }
-    anchors: set[int] = set();
+    import from jaclang.jac0core.osp0 { refs0, destroy0 }
+    inside: set[int] = set();
     for nd in nodes {
-        anchors.add(id(getattr(nd, "__jac__")));
+        inside.add(id(nd));
     }
     for nd in nodes {
-        me = getattr(nd, "__jac__");
-        for ea in `list(me.edges) {
-            far = ea.target if ea.source is me else ea.source;
-            if id(far) not in anchors {
-                if ea in far.edges {
-                    far.edges.remove(ea);
-                }
-                if ea in me.edges {
-                    me.edges.remove(ea);
-                }
-                far_arch = far.archetype;
-                if isinstance(far_arch, UniNode) {
-                    far_arch._invalidate_sub_node_tab();
+        for e in refs0(nd, 3, None, True) {
+            ea = getattr(e, "__jac__");
+            src_arch = ea.source.archetype;
+            far = ea.target.archetype if src_arch is nd else src_arch;
+            if id(far) not in inside {
+                destroy0(e);
+                if isinstance(far, UniNode) {
+                    far._invalidate_sub_node_tab();
                 }
             }
         }
     }
 }
 
+impl UniNode._after_clone -> None {
+    self.__sub_node_tab = None;
+    self._ctx_parent = None;
+    self._struct_frozen = False;
+    self._role_shapes = dict(self._role_shapes) if self._role_shapes else {};
+    self.loc = CodeLocInfo(self.loc.first_tok, self.loc.last_tok);
+}
+
 impl UniNode.detached_copy -> UniNode {
-    import copy;
-    me = getattr(self, "__jac__");
-    saved: list = [];
-    for ea in `list(me.edges) {
-        if ea.target is me and isinstance(ea.archetype, Role) {
-            src = ea.source;
-            saved.append((ea, src, src.edges.index(ea), me.edges.index(ea)));
-        }
-    }
-    for (ea, src, si, ti) in reversed(saved) {
-        src.edges.remove(ea);
-        me.edges.remove(ea);
-    }
-    try {
-        dup = copy.deepcopy(self);
-    } finally {
-        for (ea, src, si, ti) in saved {
-            src.edges.insert(si, ea);
-            me.edges.insert(ti, ea);
-        }
-    }
-    return dup;
+    import from jaclang.jac0core.osp0 { clone_subtree }
+    return clone_subtree(self, Role, None);
 }
 
 impl UniNode.set_parent(parent: UniNode) -> UniNode {
@@ -1034,12 +1018,8 @@ impl AstAccessNode.public_access.getter -> bool {
 impl ContextAwareNode.postinit -> None { }
 
 impl UniNode._conn_light(tgt: any, e: any) -> None {
-    import from jaclang.runtime.archetype { EdgeAnchor }
-    sa = getattr(self, "__jac__");
-    ta = getattr(tgt, "__jac__");
-    ea = EdgeAnchor(archetype=e, source=sa, target=ta, is_undirected=False);
-    e.__jac__ = ea;
-    sa.edges.append(ea);
+    import from jaclang.jac0core.osp0 { connect0 }
+    connect0(self, tgt, e, None, True);
 }
 
 impl ContextAwareNode.code_context.getter -> CodeContext {

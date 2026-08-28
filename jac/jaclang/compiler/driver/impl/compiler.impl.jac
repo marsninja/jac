@@ -611,6 +611,27 @@ impl JacCompiler.parse_str(
     target_program: JacProgram,
     cancel_token: (Event | None) = None
 ) -> uni.Module {
+    import from jaclang.jac0core.osp0 { push_region, pop_region }
+    _rgn = push_region();
+    try {
+        mod = self._parse_str_body(
+            source_str, file_path, target_program, cancel_token=cancel_token
+        );
+        if mod._osp_region == 0 {
+            mod._osp_region = _rgn;
+        }
+        return mod;
+    } finally {
+        pop_region();
+    }
+}
+
+impl JacCompiler._parse_str_body(
+    source_str: str,
+    file_path: str,
+    target_program: JacProgram,
+    cancel_token: (Event | None) = None
+) -> uni.Module {
     had_error = False;
     run_codespace_infer = False;
     if (file_path.endswith('.py') or file_path.endswith('.pyi')) {
