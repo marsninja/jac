@@ -62,6 +62,8 @@ glob _dd_gen: list[int] = [0],
 glob FLAG_ONE_SIDED: int = 1,
      FLAG_IN_KID: int = 2;
 
+glob _has_undir: list[int] = [0];
+
 def _hslot(k: int, m: int) -> int {
     return (((k ^ (k >> 4)) & 4294967295) * 40503) & m;
 }
@@ -1133,6 +1135,9 @@ def osp_conn2(
         _rk_reg(tgt, rgn_tgt);
     }
     edge_tag = tags[0] if len(tags) > 0 else -1;
+    if undirected != 0 {
+        _has_undir[0] = 1;
+    }
     r = _row_alloc(src, tgt, undirected, edge_tag, eobj, flags);
     before_row = -1;
     if before_eobj > 0 {
@@ -1198,33 +1203,38 @@ def _refs_untyped(
     if s < 0 {
         return;
     }
-    r = _nt_ho[s];
-    while r >= 0 {
-        eff = dir;
-        if _r_undir[r] != 0 {
-            eff = 3;
-        }
-        if (eff == 2 or eff == 3) and (_r_flags[r] & need_flags) == need_flags {
-            o = _r_handle[r] if edges_only != 0 else _r_tgt[r];
-            if _dd_add(o) != 0 {
-                out.append(o);
+    undir = _has_undir[0];
+    if dir != 1 or undir != 0 {
+        r = _nt_ho[s];
+        while r >= 0 {
+            eff = dir;
+            if _r_undir[r] != 0 {
+                eff = 3;
             }
+            if (eff == 2 or eff == 3) and (_r_flags[r] & need_flags) == need_flags {
+                o = _r_handle[r] if edges_only != 0 else _r_tgt[r];
+                if _dd_add(o) != 0 {
+                    out.append(o);
+                }
+            }
+            r = _r_nsrc[r];
         }
-        r = _r_nsrc[r];
     }
-    r = _nt_hi[s];
-    while r >= 0 {
-        eff = dir;
-        if _r_undir[r] != 0 {
-            eff = 3;
-        }
-        if (eff == 1 or eff == 3) and (_r_flags[r] & need_flags) == need_flags {
-            o = _r_handle[r] if edges_only != 0 else _r_src[r];
-            if _dd_add(o) != 0 {
-                out.append(o);
+    if dir != 2 or undir != 0 {
+        r = _nt_hi[s];
+        while r >= 0 {
+            eff = dir;
+            if _r_undir[r] != 0 {
+                eff = 3;
             }
+            if (eff == 1 or eff == 3) and (_r_flags[r] & need_flags) == need_flags {
+                o = _r_handle[r] if edges_only != 0 else _r_src[r];
+                if _dd_add(o) != 0 {
+                    out.append(o);
+                }
+            }
+            r = _r_ntgt[r];
         }
-        r = _r_ntgt[r];
     }
 }
 
@@ -1236,40 +1246,45 @@ def _refs_typed(
     need_flags: int,
     out: list[int]
 ) {
-    s = _ct_find(origin * 2, edge_tag);
-    if s >= 0 {
-        l = _ct_head[s];
-        while l >= 0 {
-            r = _cl_row[l];
-            eff = dir;
-            if _r_undir[r] != 0 {
-                eff = 3;
-            }
-            if (eff == 2 or eff == 3) and (_r_flags[r] & need_flags) == need_flags {
-                o = _r_handle[r] if edges_only != 0 else _r_tgt[r];
-                if _dd_add(o) != 0 {
-                    out.append(o);
+    undir = _has_undir[0];
+    if dir != 1 or undir != 0 {
+        s = _ct_find(origin * 2, edge_tag);
+        if s >= 0 {
+            l = _ct_head[s];
+            while l >= 0 {
+                r = _cl_row[l];
+                eff = dir;
+                if _r_undir[r] != 0 {
+                    eff = 3;
                 }
+                if (eff == 2 or eff == 3) and (_r_flags[r] & need_flags) == need_flags {
+                    o = _r_handle[r] if edges_only != 0 else _r_tgt[r];
+                    if _dd_add(o) != 0 {
+                        out.append(o);
+                    }
+                }
+                l = _cl_next[l];
             }
-            l = _cl_next[l];
         }
     }
-    s = _ct_find(origin * 2 + 1, edge_tag);
-    if s >= 0 {
-        l = _ct_head[s];
-        while l >= 0 {
-            r = _cl_row[l];
-            eff = dir;
-            if _r_undir[r] != 0 {
-                eff = 3;
-            }
-            if (eff == 1 or eff == 3) and (_r_flags[r] & need_flags) == need_flags {
-                o = _r_handle[r] if edges_only != 0 else _r_src[r];
-                if _dd_add(o) != 0 {
-                    out.append(o);
+    if dir != 2 or undir != 0 {
+        s = _ct_find(origin * 2 + 1, edge_tag);
+        if s >= 0 {
+            l = _ct_head[s];
+            while l >= 0 {
+                r = _cl_row[l];
+                eff = dir;
+                if _r_undir[r] != 0 {
+                    eff = 3;
                 }
+                if (eff == 1 or eff == 3) and (_r_flags[r] & need_flags) == need_flags {
+                    o = _r_handle[r] if edges_only != 0 else _r_src[r];
+                    if _dd_add(o) != 0 {
+                        out.append(o);
+                    }
+                }
+                l = _cl_next[l];
             }
-            l = _cl_next[l];
         }
     }
 }

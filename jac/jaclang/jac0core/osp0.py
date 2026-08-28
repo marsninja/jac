@@ -56,6 +56,7 @@ _ST: Any = None
 _regions: list[int] = []
 _scoped: list[type] = []
 _scoped_tuple: tuple = ()
+_TAG: dict = {}
 
 
 def _rt() -> Any:
@@ -124,6 +125,7 @@ def _free_handle(h: int) -> None:
     aid = a.id
     if aid is not None:
         _ST.h_of_key.pop(aid, None)
+    a.__dict__.pop("_osp_h", None)
     objs[h] = None
     _SV._h_free.append(h)
 
@@ -145,10 +147,19 @@ def region_close(rgn: int) -> int:
 
 
 def _mint(anchor: Any) -> int:
-    return _SV._mint(_ST, anchor)
+    d = anchor.__dict__
+    h = d.get("_osp_h", 0)
+    if h:
+        return h
+    h = _SV._mint(_ST, anchor)
+    d["_osp_h"] = h
+    return h
 
 
 def _handle(anchor: Any) -> int:
+    h = anchor.__dict__.get("_osp_h", 0)
+    if h:
+        return h
     return _SV._handle_of(_ST, anchor)
 
 
@@ -285,11 +296,35 @@ def refs0(
     node. Results keep chain order, deduplicated. Origins may be a node or a
     list.
     """
-    g = _kernel()
-    origins = origin if isinstance(origin, list) else [origin]
-    tag = -1 if edge is None else _SV.tag_of_cls(edge)
-    need_flags, rest = _split_preds(preds)
+    g = _G if _G is not None else _kernel()
+    if edge is None:
+        tag = -1
+    else:
+        tag = _TAG.get(edge)
+        if tag is None:
+            tag = _SV.tag_of_cls(edge)
+            _TAG[edge] = tag
+    if preds is None:
+        need_flags = 0
+        rest = None
+    else:
+        need_flags, rest = _split_preds(preds)
     want_edges = edges_only or rest is not None or target is not None
+    if not want_edges and not isinstance(origin, list):
+        oj = origin.__dict__.get("__jac__")
+        if oj is None:
+            return []
+        oh = oj.__dict__.get("_osp_h", 0)
+        if not oh:
+            oh = _SV._handle_of(_ST, oj)
+            if oh <= 0:
+                return []
+        hs = g.osp_refs_flag(oh, dir, tag, 0, need_flags)
+        if not hs:
+            return []
+        objs = _SV._obj_of_h
+        return [a.archetype for a in [objs[h] for h in hs] if a is not None]
+    origins = origin if isinstance(origin, list) else [origin]
     out: list = []
     seen: set = set()
     for o in origins:
