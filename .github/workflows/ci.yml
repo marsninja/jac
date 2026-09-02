@@ -351,8 +351,18 @@ jobs:
       - name: Run jac check (using .jacignore)
         run: |
           set -euo pipefail
+          free -m; nproc
           IGNORE_ARGS="tests checker_*.jac *_err.jac $(grep -v '^#' .jacignore | grep -v '^[[:space:]]*$' | tr '\n' ' ')"
-          jac check . --ignore $IGNORE_ARGS --nowarn
+          # The whole-repo sweep runs close to the box's memory (parent plus
+          # workers), and a thrashing sweep starves the runner agent, which
+          # loses the job log entirely. Bound the step so exhaustion surfaces
+          # as a failed step with its telemetry intact, log per-worker RSS,
+          # and retire workers at the pool's own per-worker sizing budget.
+          ( while sleep 20; do free -m | awk '/^Mem:/{print "[mem] used="$3"MB avail="$7"MB"}'; done ) &
+          MEMMON=$!
+          trap 'kill "$MEMMON" 2>/dev/null || true' EXIT
+          timeout -k 30 720 env JAC_CHECK_RSS_LOG=1 JAC_CHECK_RECYCLE_MB=2048 \
+            jac check . --ignore $IGNORE_ARGS --nowarn
 
       - name: Save JIR analysis cache
         if: always()
