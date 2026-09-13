@@ -50,23 +50,23 @@ import from jaclang.runtime.python.capi {
 }
 import from c { def jacpy_csv_limit(module: u64) -> i64;  }
 
-def fail(kind: str, message: str) {
+def:priv fail(kind: str, message: str) {
     object_error(kind, message);
     raise boundary_failure();
 }
 
-def csv_error(error: u64, message: str) {
+def:priv csv_error(error: u64, message: str) {
     jacpy_set_exception(error, message, i64(len(message.encode("utf-8"))));
     raise boundary_failure();
 }
 
-def pending {
+def:priv pending {
     if jacpy_error_pending() != 0 {
         raise boundary_failure();
     }
 }
 
-def dialect_char(name: str, value: u64, fallback: int, optional: bool) -> int {
+def:priv dialect_char(name: str, value: u64, fallback: int, optional: bool) -> int {
     if value == 0 {
         return fallback;
     }
@@ -88,7 +88,7 @@ def dialect_char(name: str, value: u64, fallback: int, optional: bool) -> int {
     return int(jacpy_unicode_char(value, 0));
 }
 
-def dialect_bool(value: u64, fallback: bool) -> bool {
+def:priv dialect_bool(value: u64, fallback: bool) -> bool {
     if value == 0 {
         return fallback;
     }
@@ -97,7 +97,7 @@ def dialect_bool(value: u64, fallback: bool) -> bool {
     return result != 0;
 }
 
-def valid_character(name: str, character: int, space: bool, terminator: u64) {
+def:priv valid_character(name: str, character: int, space: bool, terminator: u64) {
     if character == 10 or character == 13 or (character == 32 and not space) {
         fail("ValueError", "bad " + name + " value");
     }
@@ -245,7 +245,7 @@ obj csv_dialect {
         strict: bool;
 }
 
-def setting(options: u64, index: int) -> int {
+def:priv setting(options: u64, index: int) -> int {
     value = required(jacpy_tuple_item(options, i64(index)));
     try {
         return int(jacpy_integer_value(value));
@@ -254,7 +254,7 @@ def setting(options: u64, index: int) -> int {
     }
 }
 
-def settings(options: u64) -> csv_dialect {
+def:priv settings(options: u64) -> csv_dialect {
     # The caller retains options throughout this borrowed Unicode reference.
     terminator = required(jacpy_tuple_item(options, 3));
     jacpy_release(terminator);
@@ -270,7 +270,7 @@ def settings(options: u64) -> csv_dialect {
     );
 }
 
-def unicode_field(characters: list[int]) -> u64 {
+def:priv unicode_field(characters: list[int]) -> u64 {
     writer = required(jacpy_writer_new());
     try {
         for character in characters {

@@ -70,7 +70,7 @@ glob e: float = 2.718281828459045,
 
 # special_type(d): ST_NINF, ST_NEG, ST_NZERO, ST_PZERO, ST_POS, ST_PINF,
 # ST_NAN -- indexed 0..6, matching the C enum order.
-def _special_type(d: float) -> int {
+def:priv _special_type(d: float) -> int {
     if isfinite(d) {
         if d != 0.0 {
             return 4 if copysign(1.0, d) == 1.0 else 1;
@@ -85,7 +85,7 @@ def _special_type(d: float) -> int {
 
 # Finite-only cells are unreachable; special tables are consulted only
 # when at least one component is non-finite.
-def _sv_entry(
+def:priv _sv_entry(
     table: list[list[tuple[float, float]]], z: complex_parts
 ) -> tuple[float, float] {
     cell: tuple[float, float] = table[_special_type(z.real)][_special_type(z.imag)];
@@ -848,7 +848,7 @@ glob _INF: float = float("inf"),
 # rect_special_values
 # ---------------- errno glue (math_error) ----------------
 
-def _check_errno(err: int) {
+def:priv _check_errno(err: int) {
     if err == _EDOM {
         object_error("ValueError", "math domain error");
         raise boundary_failure();
@@ -861,7 +861,7 @@ def _check_errno(err: int) {
 
 # ---------------- core algorithms (c_* functions) ----------------
 
-def _c_sqrt(z: complex_parts) -> tuple[float, float, int] {
+def:priv _c_sqrt(z: complex_parts) -> tuple[float, float, int] {
     if not (isfinite(z.real) and isfinite(z.imag)) {
         (re, im) = _sv_entry(_SQRT_SV, z);
         return (re, im, 0);
@@ -887,7 +887,7 @@ def _c_sqrt(z: complex_parts) -> tuple[float, float, int] {
     return (d, copysign(s, z.imag), 0);
 }
 
-def _c_log(z: complex_parts) -> tuple[float, float, int] {
+def:priv _c_log(z: complex_parts) -> tuple[float, float, int] {
     if not (isfinite(z.real) and isfinite(z.imag)) {
         (re, im) = _sv_entry(_LOG_SV, z);
         return (re, im, 0);
@@ -920,7 +920,7 @@ def _c_log(z: complex_parts) -> tuple[float, float, int] {
     return (re, atan2(z.imag, z.real), 0);
 }
 
-def _c_acos(z: complex_parts) -> tuple[float, float, int] {
+def:priv _c_acos(z: complex_parts) -> tuple[float, float, int] {
     if not (isfinite(z.real) and isfinite(z.imag)) {
         (re, im) = _sv_entry(_ACOS_SV, z);
         return (re, im, 0);
@@ -938,7 +938,7 @@ def _c_acos(z: complex_parts) -> tuple[float, float, int] {
     return (re, im, 0);
 }
 
-def _c_acosh(z: complex_parts) -> tuple[float, float, int] {
+def:priv _c_acosh(z: complex_parts) -> tuple[float, float, int] {
     if not (isfinite(z.real) and isfinite(z.imag)) {
         (re, im) = _sv_entry(_ACOSH_SV, z);
         return (re, im, 0);
@@ -956,7 +956,7 @@ def _c_acosh(z: complex_parts) -> tuple[float, float, int] {
     return (re, im, 0);
 }
 
-def _c_asinh(z: complex_parts) -> tuple[float, float, int] {
+def:priv _c_asinh(z: complex_parts) -> tuple[float, float, int] {
     if not (isfinite(z.real) and isfinite(z.imag)) {
         (re, im) = _sv_entry(_ASINH_SV, z);
         return (re, im, 0);
@@ -981,7 +981,7 @@ def _c_asinh(z: complex_parts) -> tuple[float, float, int] {
     return (re, im, 0);
 }
 
-def _c_atanh(z: complex_parts) -> tuple[float, float, int] {
+def:priv _c_atanh(z: complex_parts) -> tuple[float, float, int] {
     if not (isfinite(z.real) and isfinite(z.imag)) {
         (re, im) = _sv_entry(_ATANH_SV, z);
         return (re, im, 0);
@@ -1018,7 +1018,7 @@ def _c_atanh(z: complex_parts) -> tuple[float, float, int] {
     return (re, im, err);
 }
 
-def _c_cosh(z: complex_parts) -> tuple[float, float, int] {
+def:priv _c_cosh(z: complex_parts) -> tuple[float, float, int] {
     # special treatment for cosh(+/-inf + iy) if y is not a NaN
     if not (isfinite(z.real) and isfinite(z.imag)) {
         if (isinf(z.real) and isfinite(z.imag) and z.imag != 0.0) {
@@ -1054,7 +1054,7 @@ def _c_cosh(z: complex_parts) -> tuple[float, float, int] {
     return (re, im, 0);
 }
 
-def _c_sinh(z: complex_parts) -> tuple[float, float, int] {
+def:priv _c_sinh(z: complex_parts) -> tuple[float, float, int] {
     # special treatment for sinh(+/-inf + iy) if y is finite and nonzero
     if not (isfinite(z.real) and isfinite(z.imag)) {
         if (isinf(z.real) and isfinite(z.imag) and z.imag != 0.0) {
@@ -1088,7 +1088,7 @@ def _c_sinh(z: complex_parts) -> tuple[float, float, int] {
     return (re, im, 0);
 }
 
-def _c_exp(z: complex_parts) -> tuple[float, float, int] {
+def:priv _c_exp(z: complex_parts) -> tuple[float, float, int] {
     if not (isfinite(z.real) and isfinite(z.imag)) {
         if (isinf(z.real) and isfinite(z.imag) and z.imag != 0.0) {
             if z.real > 0 {
@@ -1122,7 +1122,7 @@ def _c_exp(z: complex_parts) -> tuple[float, float, int] {
     return (re, im, 0);
 }
 
-def _c_tanh(z: complex_parts) -> tuple[float, float, int] {
+def:priv _c_tanh(z: complex_parts) -> tuple[float, float, int] {
     # tanh(x+iy) = (tanh(x)(1+tan(y)^2) + i tan(y)(1-tanh(x))^2) /
     #              (1+tan(y)^2 tanh(x)^2)
     # special treatment for tanh(+/-inf + iy) if y is finite and nonzero
@@ -1160,7 +1160,7 @@ def _c_tanh(z: complex_parts) -> tuple[float, float, int] {
 }
 
 # _Py_c_abs; ERANGE on overflow of finite operands.
-def _c_abs(re: float, im: float) -> tuple[float, int] {
+def:priv _c_abs(re: float, im: float) -> tuple[float, int] {
     r = hypot(re, im);
     if isinf(r) and isfinite(re) and isfinite(im) {
         return (r, _ERANGE);
@@ -1168,7 +1168,7 @@ def _c_abs(re: float, im: float) -> tuple[float, int] {
     return (r, 0);
 }
 
-def close(
+def:priv close(
     a: complex_parts, b: complex_parts, rel_tol: float = 1e-09, abs_tol: float = 0.0
 ) -> bool {
     if rel_tol < 0.0 or abs_tol < 0.0 {
@@ -1191,7 +1191,7 @@ def close(
     return (diff <= rel_tol * abs_b or diff <= rel_tol * abs_a or diff <= abs_tol);
 }
 
-def rectangular(r: float, phi: float) -> complex_parts {
+def:priv rectangular(r: float, phi: float) -> complex_parts {
     if not (isfinite(r) and isfinite(phi)) {
         if isinf(r) and isfinite(phi) and phi != 0.0 {
             # (+-INF +-INF i): signs come from cos(phi)/sin(phi)
@@ -1222,7 +1222,7 @@ def rectangular(r: float, phi: float) -> complex_parts {
 }
 
 
-def input_complex(value: u64) -> complex_parts {
+def:priv input_complex(value: u64) -> complex_parts {
     handle = required(jacpy_complex_value(value));
     try {
         return complex_parts(jacpy_complex_real(handle), jacpy_complex_imag(handle));
@@ -1231,7 +1231,7 @@ def input_complex(value: u64) -> complex_parts {
     }
 }
 
-def input_float(value: u64) -> float {
+def:priv input_float(value: u64) -> float {
     result = jacpy_number_as_double(value);
     if jacpy_error_pending() != 0 {
         raise boundary_failure();
@@ -1239,7 +1239,7 @@ def input_float(value: u64) -> float {
     return result;
 }
 
-def unary(operation: int, z: complex_parts) -> tuple[float, float, int] {
+def:priv unary(operation: int, z: complex_parts) -> tuple[float, float, int] {
     if operation == 0 {
         return _c_acos(z);
     }

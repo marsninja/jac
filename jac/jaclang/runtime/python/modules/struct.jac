@@ -72,19 +72,19 @@ obj struct_plan {
         little: bool = True;
 }
 
-def struct_error(error: u64, message: str) {
+def:priv struct_error(error: u64, message: str) {
     jacpy_set_exception(error, message, i64(len(message.encode("utf-8"))));
     raise boundary_failure();
 }
 
-def pending {
+def:priv pending {
     if jacpy_error_pending() != 0 {
         raise boundary_failure();
     }
 }
 
 # Kinds refer to platform ABI facts, not a second format-code table in C.
-def native_kind(code: int) -> int {
+def:priv native_kind(code: int) -> int {
     if code == 104 or code == 72 or code == 101 {
         return 1;
     }
@@ -115,7 +115,7 @@ def native_kind(code: int) -> int {
     return 0;
 }
 
-def standard_size(code: int) -> int {
+def:priv standard_size(code: int) -> int {
     if code == 104 or code == 72 or code == 101 {
         return 2;
     }
@@ -235,7 +235,7 @@ def:pub jacpy_struct_items(plan: struct_plan) -> i64 {
 }
 
 
-def integer_bits(value: u64, code: int, size: int, error: u64) -> u64 {
+def:priv integer_bits(value: u64, code: int, size: int, error: u64) -> u64 {
     if jacpy_index_check(value) == 0 and jacpy_is_long(value) == 0 {
         struct_error(error, "required argument is not an integer");
     }
@@ -295,7 +295,7 @@ def integer_bits(value: u64, code: int, size: int, error: u64) -> u64 {
     }
 }
 
-def pack_field(
+def:priv pack_field(
     plan: struct_plan, field: format_field, address: u64, value: u64, error: u64
 ) {
     code = field.code;
@@ -411,7 +411,7 @@ def:pub jacpy_struct_pack(
     }
 }
 
-def unpack_field(plan: struct_plan, field: format_field, address: u64) -> u64 {
+def:priv unpack_field(plan: struct_plan, field: format_field, address: u64) -> u64 {
     code = field.code;
     size = field.size;
     if code == 115 or code == 99 {
