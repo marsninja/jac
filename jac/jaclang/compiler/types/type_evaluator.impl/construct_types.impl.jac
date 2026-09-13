@@ -818,6 +818,18 @@ impl TypeEvaluator._extern_scalar_type(type_expr: Expr | None) -> TypeBase {
             return AnyType(is_foreign=True, foreign_scalar=name);
         }
     }
+    if type_expr is not None {
+        declared = self.get_type_of_expression(type_expr);
+        if isinstance(declared, ClassType) and not declared.is_builtin() {
+            scope = declared.shared.symbol_table;
+            if isinstance(scope, Archetype)
+                and scope.find_parent_of_type(Import) is None {
+                # A Jac object crossing a C boundary keeps its declared type.
+                # Only foreign layouts and unspecified values are opaque.
+                return self._convert_to_instance(declared);
+            }
+        }
+    }
     return AnyType(is_foreign=True);
 }
 

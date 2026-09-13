@@ -131,6 +131,7 @@ impl NaIRGenPass._run_impl(ir_in: uni.Module) -> uni.Module {
     self._forward_declare_archetype_names(self.ir_in);
 
     self._register_imported_struct_types();
+    self._declare_pending_clib_abilities();
     self._register_globals(self.ir_in);
     self._register_entry_globals(self.ir_in);
 
@@ -724,6 +725,8 @@ impl NaIRGenPass._register_imported_struct_types -> None {
     for (_, imported_mod) in imported_mods {
         self._walk_imported_module_type_names(imported_mod);
     }
+
+    self._declare_pending_clib_abilities();
 
     for (_, imported_mod) in imported_mods {
         self._register_imported_hierarchy(imported_mod);
@@ -1456,7 +1459,7 @@ impl NaIRGenPass._process_clib_imports(module: uni.Module) -> None {
                     self.emit(E5060, name=fn_name);
                     continue;
                 }
-                self._declare_clib_ability(decl);
+                self._pending_clib_abilities.append(decl);
                 if fn_name {
                     self.clib_extern_names.add(fn_name);
                     if _cur_lib is not None {
@@ -1471,6 +1474,14 @@ impl NaIRGenPass._process_clib_imports(module: uni.Module) -> None {
             module.gen._clib_symbol_lib = self._clib_symbol_lib;
             self.has_native_code = True;
         }
+    }
+}
+
+impl NaIRGenPass._declare_pending_clib_abilities -> None {
+    pending = self._pending_clib_abilities;
+    self._pending_clib_abilities = [];
+    for ability in pending {
+        self._declare_clib_ability(ability);
     }
 }
 

@@ -176,6 +176,7 @@ walker NaIRGenPass(Transform) {
         _interned_strs: dict[str, ir.GlobalVariable] = {},
         extern_funcs: dict[str, ir.Function] = {},
         clib_extern_names: set[str] = set(),
+        _pending_clib_abilities: list[uni.Ability] = [],
         clib_struct_names: set[str] = set(),
         clib_struct_abi_types: dict[str, ir.Type] = {},
         _foreign_modules: list = [],
@@ -924,6 +925,7 @@ walker NaIRGenPass(Transform) {
 
     def _rename_demoted_symbol(name: str, func: ir.Function) -> None;
     def _process_clib_imports(module: uni.Module) -> None;
+    def _declare_pending_clib_abilities -> None;
     def _resolve_clib_lib_name(components: list[str], level: int) -> str;
     def _llvm_type_str(ty: ir.Type) -> str;
     def _export_native_layout -> None;
@@ -2081,7 +2083,9 @@ walker NaIRGenPass(Transform) {
     def _ptr_box_kind(rt: any) -> int;
     def _struct_ptr_pointee_name(val: ir.Value) -> (str | None);
     def _struct_array_elem_ptr(ptr: ir.Value, idx_val: ir.Value) -> ir.Value;
-    def _restore_list_read(value: (ir.Value | None), collection: uni.UniNode) -> (ir.Value | None);
+    def _restore_list_read(
+        value: (ir.Value | None), collection: uni.UniNode
+    ) -> (ir.Value | None);
     def _list_elem_llvm_of(expr: (uni.UniNode | None)) -> (ir.Type | None);
     def _iter_elem_llvm_of(expr: (uni.UniNode | None)) -> (ir.Type | None);
     def _typed_elem_llvm_of(

@@ -2338,7 +2338,11 @@ impl NaIRGenPass._codegen_call(nd: uni.FuncCall) -> (ir.Value | None) {
             }
             _clib_ret_name = declared_type_name(_clib_sig.return_type) or "";
             _clib_str_ret = _clib_ret_name == "str";
-            _clib_managed_ret = _clib_ret_name.split("[")[0] in ("list", "dict", "set");
+            _clib_managed_ret = _clib_ret_name.split("[")[0] in ("list", "dict", "set")
+                or (
+                    _clib_ret_name in self.struct_types
+                    and _clib_ret_name not in self.clib_struct_names
+                );
         }
     }
     release_args: list[ir.Value] = [];
