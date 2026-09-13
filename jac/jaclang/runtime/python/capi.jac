@@ -25,6 +25,30 @@ import from c {
     ) -> i64;  def jacpy_slot_less(slot: u64, left: u64, right: u64) -> i64;  def jacpy_insert(
         handle: u64, index: i64, value: u64
     ) -> i64;  def jacpy_recursion_enter(context: str) -> i64;  def jacpy_recursion_leave;
+    def jacpy_is_long(handle: u64) -> i64;
+    def jacpy_long_absolute(handle: u64) -> u64;
+    def jacpy_hash_unsigned(handle: u64) -> u64;
+    def jacpy_long_bits(handle: u64) -> i64;
+    def jacpy_long_bytes(handle: u64, size: i64) -> u64;
+    def jacpy_long_from_bytes(handle: u64) -> u64;
+    def jacpy_unsigned_long(handle: u64) -> u64;
+    def jacpy_integer_value(handle: u64) -> i64;
+    def jacpy_entropy(size: i64) -> u64;
+    def jacpy_clear_error;
+    def jacpy_error_pending -> i64;
+    def jacpy_wall_time -> i64;
+    def jacpy_monotonic_time -> i64;
+    def jacpy_process_id -> i64;
+    def jacpy_is_tuple(handle: u64) -> i64;
+    def jacpy_tuple_size(handle: u64) -> i64;
+    def jacpy_tuple_new(size: i64) -> u64;
+    def jacpy_tuple_item(handle: u64, index: i64) -> u64;
+    def jacpy_tuple_set_owned(handle: u64, index: i64, value: u64) -> i64;
+    def jacpy_buffer_size(handle: u64) -> i64;
+    def jacpy_buffer_byte(handle: u64, index: i64) -> i64;
+    def jacpy_buffer_new(size: i64) -> u64;
+    def jacpy_buffer_set(handle: u64, index: i64, value: i64);
+
 }
 
 def object_error(kind: str, message: str) {

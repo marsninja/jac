@@ -9,7 +9,7 @@ shipped compiler.
 | --- | --- |
 | `jac/jaclang/compiler/frontend/python/` | Python scanning, parsing, AST validation, source decoding, and symbol analysis |
 | `jac/jaclang/compiler/backends/py/jacpython/` | Native request handling, bytecode generation, assembly, and code-object serialization |
-| `jac/jaclang/runtime/python/` | Compiler values, opcode metadata, streaming-tokenizer and symbol-table interfaces |
+| `jac/jaclang/runtime/python/` | Compiler values, tokenizer/symbol-table interfaces, shared object API, and native standard-library modules |
 | `jac/bootstrap/python/` | Pinned source build and C adapters for retained CPython values and APIs |
 
 `native_api.jac` connects source/AST requests to `product_compile.jac` and the
@@ -45,3 +45,10 @@ may use Python; replacement algorithms execute natively.
 The AST, token model, PEG parser and opcode metadata derive from CPython 3.14.6
 and are maintained directly in Jac. [`LICENSE.cpython`](LICENSE.cpython) applies
 to the CPython-derived code across these packages.
+
+`modules/bisect.jac`, `modules/heapq.jac`, and `modules/random.jac` implement
+Python's bisection, heap, and MT19937 operations. `capi.jac` declares their
+shared retained-object operations; `bootstrap/python/object_api.c` implements
+those C API calls. `bootstrap/python/modules/` contains Python method/type
+registration and argument adapters. The module algorithms are native Jac.
+Their C sources and Clinic headers are excluded from shipped runtimes.

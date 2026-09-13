@@ -83,3 +83,61 @@ int64_t jacpy_slot_less(uint64_t slot, uint64_t left, uint64_t right) {
     Py_DECREF(result);
     return comparison;
 }
+
+#include "internal/pycore_long.h"
+#include "internal/pycore_pylifecycle.h"
+#include <unistd.h>
+
+int64_t jacpy_is_long(uint64_t handle) { return PyLong_Check(OBJECT(handle)); }
+uint64_t jacpy_long_absolute(uint64_t handle) {
+    return HANDLE(PyLong_Type.tp_as_number->nb_absolute(OBJECT(handle)));
+}
+uint64_t jacpy_hash_unsigned(uint64_t handle) {
+    Py_hash_t value = PyObject_Hash(OBJECT(handle));
+    return value == -1 ? 0 : HANDLE(PyLong_FromSize_t((size_t)value));
+}
+int64_t jacpy_long_bits(uint64_t handle) { return _PyLong_NumBits(OBJECT(handle)); }
+uint64_t jacpy_long_bytes(uint64_t handle, int64_t size) {
+    PyObject *result = PyBytes_FromStringAndSize(NULL, size);
+    if (!result) return 0;
+    if (_PyLong_AsByteArray((PyLongObject *)OBJECT(handle),
+            (unsigned char *)PyBytes_AS_STRING(result), size, 1, 0, 1) < 0) {
+        Py_DECREF(result);
+        return 0;
+    }
+    return HANDLE(result);
+}
+uint64_t jacpy_long_from_bytes(uint64_t handle) {
+    return HANDLE(_PyLong_FromByteArray((const unsigned char *)PyBytes_AS_STRING(OBJECT(handle)),
+                                      PyBytes_GET_SIZE(OBJECT(handle)), 1, 0));
+}
+uint64_t jacpy_unsigned_long(uint64_t handle) { return PyLong_AsUnsignedLong(OBJECT(handle)); }
+uint64_t jacpy_entropy(int64_t size) {
+    PyObject *result = PyBytes_FromStringAndSize(NULL, size);
+    if (!result) return 0;
+    if (_PyOS_URandomNonblock(PyBytes_AS_STRING(result), size) < 0) {
+        Py_DECREF(result);
+        return 0;
+    }
+    return HANDLE(result);
+}
+void jacpy_clear_error(void) { PyErr_Clear(); }
+int64_t jacpy_wall_time(void) {
+    PyTime_t value;
+    return PyTime_Time(&value) < 0 ? -1 : value;
+}
+int64_t jacpy_monotonic_time(void) {
+    PyTime_t value;
+    return PyTime_Monotonic(&value) < 0 ? -1 : value;
+}
+int64_t jacpy_process_id(void) { return getpid(); }
+int64_t jacpy_is_tuple(uint64_t handle) { return PyTuple_Check(OBJECT(handle)); }
+int64_t jacpy_tuple_size(uint64_t handle) { return PyTuple_Size(OBJECT(handle)); }
+uint64_t jacpy_tuple_new(int64_t size) { return HANDLE(PyTuple_New(size)); }
+uint64_t jacpy_tuple_item(uint64_t handle, int64_t index) {
+    return HANDLE(Py_XNewRef(PyTuple_GetItem(OBJECT(handle), index)));
+}
+int64_t jacpy_tuple_set_owned(uint64_t handle, int64_t index, uint64_t value) {
+    if (!value) return -1;
+    return PyTuple_SetItem(OBJECT(handle), index, OBJECT(value));
+}

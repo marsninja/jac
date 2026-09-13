@@ -60,10 +60,18 @@ elif mode == "host":
 if required_compiler is not None:
     import _bisect
     import _heapq
-    for replacement in (_bisect, _heapq):
+    import _random
+    for replacement in (_bisect, _heapq, _random):
         assert replacement.__name__ in sys.builtin_module_names
         assert replacement.__spec__.origin == "built-in"
     assert ctypes.pythonapi.jacpy_bisect
+    assert ctypes.pythonapi.jacpy_random_bits
+    generator = _random.Random(42)
+    assert generator.random() == 0.6394267984578837
+    state = generator.getstate()
+    bits = generator.getrandbits(130)
+    generator.setstate(state)
+    assert generator.getrandbits(130) == bits
     assert ctypes.pythonapi.jacpy_heapify
     assert _bisect.bisect_right([1, 2, 2, 4], 2) == 3
     import builtins

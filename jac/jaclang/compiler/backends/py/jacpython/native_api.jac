@@ -1,4 +1,12 @@
 """Native request orchestration; CPython value conversion stays at the ABI."""
+import from jaclang.runtime.python.modules.random {
+    jacpy_random_new,
+    jacpy_random_seed,
+    jacpy_random_float,
+    jacpy_random_getstate,
+    jacpy_random_setstate,
+    jacpy_random_bits
+}
 import from jaclang.runtime.python.modules.bisect { jacpy_bisect }
 import from jaclang.runtime.python.modules.heapq {
     jacpy_heap_push,
