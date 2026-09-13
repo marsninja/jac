@@ -24,7 +24,11 @@ import from jaclang.runtime.python.objects {
     PyCode,
     py_none
 }
-import from jaclang.runtime.python.opcode_meta { opcode_cache_count, OP_LOAD_CONST }
+import from jaclang.runtime.python.opcode_meta {
+    opcode_cache_count,
+    opcode_has_const,
+    OP_LOAD_CONST
+}
 import from jaclang.compiler.frontend.python.compiler_diagnostics {
     compiler_diagnostic
 }
@@ -510,6 +514,24 @@ obj unverified_cfg {
         self.const_indices[key] = idx;
         self.indexed_consts += 1;
         return idx;
+    }
+
+    # Late scope metadata may need a slot before the epilogue's None. Keep
+    # every existing operand and the constant interning index synchronized;
+    # deferred negative operands are resolved by flush_late_consts afterward.
+    def insert_const(c: PyObj, index: int, placeholder: cinstr | None = None) {
+        self.consts.insert(index, c);
+        self.const_indices.clear();
+        self.indexed_consts = 0;
+        for block in self.blocks {
+            for ins in block.instrs {
+                if ins is not placeholder
+                    and opcode_has_const(ins.opcode)
+                    and ins.oparg >= index {
+                    ins.oparg += 1;
+                }
+            }
+        }
     }
 
     def add_name(n: str) -> int {

@@ -268,6 +268,19 @@ def outer():
     namespace["set_global"]()
     assert namespace["declared"] == namespace["outer"]() == 42
     constants = {}
+    # Inserting deferred module annotations must reindex pooled constants,
+    # including a folded list which shares the call's keyword-name tuple.
+    calls = []
+    annotation_scope = {"record": lambda *args, **kwargs: calls.append((args, kwargs)), "flag": False}
+    exec(compile("""
+items: list[str] = ['first', 'second', 'third']
+record(None)
+record(first=None, second=None, third=None)
+if flag:
+    record('unreachable')
+""", "<annotation-constant-pool>", "exec"), annotation_scope)
+    assert annotation_scope["items"] == ["first", "second", "third"]
+    assert calls == [((None,), {}), ((), {"first": None, "second": None, "third": None})]
     exec(compile("nul = '\\x00tail'\nempty = ''\nprefix = '\\x00'\n", "<nul-constants>", "exec"), constants)
     assert (constants["nul"], constants["empty"], constants["prefix"]) == (chr(0) + "tail", "", chr(0))
     for optimize in (0, 1, 2):
