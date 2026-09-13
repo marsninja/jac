@@ -63,9 +63,32 @@ if required_compiler is not None:
     import _random
     import binascii
     import _operator
-    for replacement in (_bisect, _heapq, _random, binascii, _operator):
+    import _queue
+    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue):
         assert replacement.__name__ in sys.builtin_module_names
         assert replacement.__spec__.origin == "built-in"
+    assert ctypes.pythonapi.jacpy_queue_get
+    import threading
+    fifo = _queue.SimpleQueue()
+    consumed = []
+    def consume_native_queue():
+        while True:
+            item = fifo.get(timeout=5)
+            if item is None:
+                return
+            consumed.append(item)
+    consumers = [threading.Thread(target=consume_native_queue, daemon=True) for _ in range(8)]
+    for consumer in consumers:
+        consumer.start()
+    for item in range(1000):
+        fifo.put(item)
+    for consumer in consumers:
+        fifo.put(None)
+    for consumer in consumers:
+        consumer.join(10)
+        assert not consumer.is_alive(), "Native queue lost a notification"
+    assert sorted(consumed) == list(range(1000))
+    assert fifo.empty()
     assert ctypes.pythonapi.jacpy_operator_apply
     assert _operator.itemgetter(2, 0)(["a", "b", "c"]) == ("c", "a")
     assert _operator.methodcaller("replace", "a", "b")("native") == "nbtive"

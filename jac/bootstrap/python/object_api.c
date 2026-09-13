@@ -255,3 +255,37 @@ uint64_t jacpy_dict_entry(uint64_t a, int64_t position) {
 int64_t jacpy_crypto_compare(uint64_t a, uint64_t b, int64_t size) {
     return CRYPTO_memcmp((const void *)(uintptr_t)a, (const void *)(uintptr_t)b, size);
 }
+
+/* Portable CPython wait primitives. Queue policy stays in Jac; only the wait
+ * releases the GIL, and it restores it before touching any native state. */
+#include "internal/pycore_time.h"
+uint64_t jacpy_lock_new(void) {
+    PyThread_type_lock lock = PyThread_allocate_lock();
+    if (!lock) { PyErr_NoMemory(); return 0; }
+    PyThread_acquire_lock(lock, WAIT_LOCK);
+    return (uint64_t)(uintptr_t)lock;
+}
+void jacpy_lock_free(uint64_t handle) {
+    PyThread_type_lock lock = (PyThread_type_lock)(uintptr_t)handle;
+    PyThread_acquire_lock(lock, NOWAIT_LOCK);
+    PyThread_release_lock(lock);
+    PyThread_free_lock(lock);
+}
+void jacpy_lock_notify(uint64_t handle) { PyThread_release_lock((PyThread_type_lock)(uintptr_t)handle); }
+int64_t jacpy_lock_wait(uint64_t handle, int64_t timeout_ns) {
+    PyTime_t timeout_us = timeout_ns < 0 ? -1 : _PyTime_AsMicroseconds(timeout_ns, _PyTime_ROUND_CEILING);
+    PyLockStatus status;
+    Py_BEGIN_ALLOW_THREADS
+    status = PyThread_acquire_lock_timed((PyThread_type_lock)(uintptr_t)handle, timeout_us, 1);
+    Py_END_ALLOW_THREADS
+    return status == PY_LOCK_ACQUIRED ? 1 : (status == PY_LOCK_INTR ? -1 : 0);
+}
+int64_t jacpy_pending_calls(void) { return Py_MakePendingCalls(); }
+int64_t jacpy_timeout_ns(uint64_t value) {
+    PyTime_t timeout;
+    if (_PyTime_FromSecondsObject(&timeout, OBJECT(value), _PyTime_ROUND_CEILING) < 0) return -1;
+    return timeout;
+}
+int64_t jacpy_deadline(int64_t timeout) { return _PyDeadline_Init(timeout); }
+int64_t jacpy_deadline_remaining(int64_t deadline) { return _PyDeadline_Get(deadline); }
+void jacpy_set_none_exception(uint64_t kind) { PyErr_SetNone(OBJECT(kind)); }

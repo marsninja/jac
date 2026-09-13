@@ -1,4 +1,12 @@
 """Native request orchestration; CPython value conversion stays at the ABI."""
+import from jaclang.runtime.python.modules.queue {
+    jacpy_queue_new,
+    jacpy_queue_clear,
+    jacpy_queue_size,
+    jacpy_queue_borrow,
+    jacpy_queue_put,
+    jacpy_queue_get
+}
 import from jaclang.runtime.python.modules.operator {
     jacpy_operator_prepare,
     jacpy_operator_apply,

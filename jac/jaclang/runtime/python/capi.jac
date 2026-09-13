@@ -98,7 +98,15 @@ import from c {
         a: u64, position: i64
     ) -> u64;  def jacpy_import_attr(module: str, name: str) -> u64;  def jacpy_utf8(
         a: u64
-    ) -> u64;  def jacpy_crypto_compare(a: u64, b: u64, size: i64) -> i64;
+    ) -> u64;  def jacpy_crypto_compare(a: u64, b: u64, size: i64) -> i64;  def jacpy_lock_new -> u64;  def jacpy_lock_free(
+        handle: u64
+    );  def jacpy_lock_notify(handle: u64);  def jacpy_lock_wait(
+        handle: u64, timeout_ns: i64
+    ) -> i64;  def jacpy_pending_calls -> i64;  def jacpy_timeout_ns(
+        value: u64
+    ) -> i64;  def jacpy_deadline(timeout: i64) -> i64;  def jacpy_deadline_remaining(
+        deadline: i64
+    ) -> i64;  def jacpy_set_none_exception(kind: u64);
 }
 
 def object_error(kind: str, message: str) {
