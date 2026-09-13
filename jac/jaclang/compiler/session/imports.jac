@@ -816,6 +816,8 @@ obj IfaceRegistry(CatalogResolver) {
                     sorted(pol.lint_select),
                     sorted(pol.lint_ignore)
                 ]
+                    if not options.symtab_ir_only
+                    else None
             },
             sort_keys=True
         );

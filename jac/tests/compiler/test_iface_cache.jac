@@ -1377,3 +1377,31 @@ test "entry points reuse dependency artifacts without sharing mutable graphs" {
         assert first_module.mutation_permit is not second_module.mutation_permit;
     }
 }
+
+test "symbol interfaces ignore lint selection while full analysis retains it" {
+    import from tempfile { TemporaryDirectory }
+    import from unittest.mock { patch }
+    import from jaclang.project.config { JacConfig, CheckConfig, LintConfig }
+    strict = JacConfig(check=CheckConfig(lint=LintConfig(select=['all'])));
+    relaxed = JacConfig(check=CheckConfig(lint=LintConfig(select=[])));
+    with TemporaryDirectory() as td {
+        path = str(Path(td) / 'helper.jac');
+        Path(path).write_text('def answer -> int { return 42; }\n');
+        with patch('jaclang.project.config.get_config', return_value=strict) {
+            cold = _context(path);
+            registry = cold.iface_registry();
+            assert registry.ensure(path) is not None;
+            assert not cold.errors_had;
+            full_profile = registry.analysis_profile(_check_opts());
+        }
+        with patch('jaclang.project.config.get_config', return_value=relaxed) {
+            warm = _context(path);
+            registry = warm.iface_registry();
+            assert registry.analysis_profile(_check_opts()) != full_profile;
+            module = warm.load_dependency_module(path);
+            assert module.stub_only;
+            assert warm.analysis.cache_events.get('dep_hydrate', 0) == 1;
+            assert warm.analysis.pass_runs.get('SymTabBuildPass', 0) == 0;
+        }
+    }
+}

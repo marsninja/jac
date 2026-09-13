@@ -259,6 +259,9 @@ element indices describe the original source body.
 Lazy name lookup preserves the catalog's declaration order when the full
 namespace is materialized, so constructor parameters do not depend on which
 field a caller queried first.
+Symbol-only diagnostic profiles omit lint selection because their schedule
+does not run the lint pass. Full analysis retains lint policy in its profile,
+and both profiles retain diagnostic suppression settings.
 
 Per-unit release keeps parsed stub trees while a compilation uses them.
 The runtime graph driver indexes anchors with non-owning handles, including
