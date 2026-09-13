@@ -30,18 +30,26 @@ obj PlacementWork {
 
     def track(module: uni.Module) {
         if id(module) not in self.modules {
-            self.refresh(module);
+            if module.stub_only {
+                self.refresh(module);
+            } else {
+                self._index(module);
+            }
         }
     }
 
     def refresh(module: uni.Module) {
-        mid = id(module);
-        self.modules[mid] = module;
-        self.references.pop(mid, None);
         path = os.path.abspath(module.loc.mod_path)
             if module.loc.mod_path
             else f'@{id(module)}';
         self.program.analysis.discard(path, CompilationProduct.PLACEMENT_SUMMARY);
+        self._index(module);
+    }
+
+    def _index(module: uni.Module) {
+        mid = id(module);
+        self.modules[mid] = module;
+        self.references.pop(mid, None);
         old = self.owned.get(mid, []);
         owned: list[int] = [];
         for stmt in module.get_all_sub_nodes(uni.Import) {

@@ -245,7 +245,17 @@ without changing interface hashes or literal text. Identical staged packages
 therefore produce identical artifacts. Reused bytes
 keep their path mapping through local cache writes and subsequent packaging. Diagnostic
 profile and dependency checks still govern reuse. Dependencies outside the
-package retain their existing validation and source fallback.
+package retain their existing validation and source fallback. References into
+the running SDK use `<jaclang>/` paths, resolved against the installed SDK,
+so a temporary runtime extraction directory cannot change a bundle's digest.
+Packaging requests bytecode before its interface, allowing the interface pass
+to reuse the compiled graph instead of preparing a separate symbol graph first.
+
+A hydrated interface installs its contextual facts once per graph. Placement
+tracking preserves an existing summary when first indexing a source graph;
+refresh after a structural change invalidates the summary before reindexing.
+Catalog graphs rebuild summaries for placement walks because serialized
+element indices describe the original source body.
 
 Per-unit release keeps parsed stub trees while a compilation uses them.
 The runtime graph driver indexes anchors with non-owning handles, including

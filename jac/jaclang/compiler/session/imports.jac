@@ -565,6 +565,9 @@ obj IfaceRegistry(CatalogResolver) {
     }
 
     def _prepare(ent: IfaceEntry, mod: Module) {
+        if self.prog.analysis.provides(mod, AnalysisFact.IN_SCOPE) {
+            return;
+        }
         import from jaclang.compiler.pipeline.executor { run_utility }
         import from jaclang.compiler.pipeline.contracts { UtilityProduct }
         run_utility(UtilityProduct.INTERFACE_CONTEXT, mod, self.prog);

@@ -281,6 +281,34 @@ test "implicit projects still identify their entry" {
     }
 }
 
+test "repeated dependency imports reuse their prepared contextual facts" {
+    import from jaclang.compiler.pipeline.keys { PLACEMENT_SUMMARY }
+    with TemporaryDirectory() as td {
+        base = Path(td);
+        (base / 'jac.toml').write_text(
+            '[project]\nname="cached"\n[placement]\ndefault="server"\n'
+        );
+        path = str(base / 'helper.jac');
+        Path(path).write_text('def answer -> int { return 42; }\n');
+        options = CompileOptions(no_cgen=True, iface_ok=True, project_root=td);
+        cold = JacProgram();
+        cold = context_program(cold, bind_options(path, cold, options));
+        assert cold.iface_registry().ensure(path) is not None;
+        assert not cold.errors_had;
+        warm = JacProgram();
+        warm = context_program(warm, bind_options(path, warm, options));
+        module = warm.load_dependency_module(path);
+        context = warm.module_context(module);
+        assert module.stub_only;
+        summary = context.analysis.lookup(path, PLACEMENT_SUMMARY);
+        assert summary is not None;
+        runs = dict(context.analysis.pass_runs);
+        assert context.load_dependency_module(path) is module;
+        assert context.analysis.pass_runs == runs;
+        assert context.analysis.lookup(path, PLACEMENT_SUMMARY) is summary;
+    }
+}
+
 test "application traversal checks imported bodies on cold and warm requests" {
     import from jaclang.compiler.api { compile_application }
     with TemporaryDirectory() as td {
