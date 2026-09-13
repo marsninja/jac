@@ -221,6 +221,8 @@ _operator jac_modules/operator.c -lcrypto
 _queue jac_modules/queue.c
 _json jac_modules/json.c
 _csv jac_modules/csv.c
+_struct jac_modules/struct.c
+cmath jac_modules/cmath.c
 SETUP
     fi
     # CPython runs the compiler itself; dependency-oriented -O2 flags above

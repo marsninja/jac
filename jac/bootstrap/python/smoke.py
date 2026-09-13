@@ -66,9 +66,56 @@ if required_compiler is not None:
     import _queue
     import _json
     import _csv
-    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json, _csv):
+    import _struct
+    import cmath
+    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json, _csv, _struct, cmath):
         assert replacement.__name__ in sys.builtin_module_names
         assert replacement.__spec__.origin == "built-in"
+    assert ctypes.pythonapi.jacpy_struct_pack
+    assert ctypes.pythonapi.jacpy_cmath_unary
+    layout = _struct.Struct(">QifD")
+    values = (2 ** 64 - 1, -(2 ** 31), 1.25, complex(-2, 3))
+    assert layout.unpack(layout.pack(*values)) == values
+    assert _struct.pack("f", 2) == _struct.pack("f", 2.0)
+    callback_layout = _struct.Struct(">I")
+    class ReplaceLayout:
+        def __index__(self):
+            callback_layout.__init__("128s")
+            return 42
+    assert callback_layout.pack(ReplaceLayout()) == b"\0\0\0*"
+    callback_layout.__init__(">I")
+    callback_buffer = bytearray(4)
+    class RetainedOffset:
+        def __index__(self):
+            try:
+                callback_buffer.extend(b"x")
+            except BufferError:
+                pass
+            else:
+                raise AssertionError("Native struct released its exported buffer during a callback")
+            callback_layout.__init__("128s")
+            return 0
+    callback_layout.pack_into(callback_buffer, RetainedOffset(), 42)
+    assert callback_buffer == b"\0\0\0*"
+    assert _struct.Struct("I" * 1000).__sizeof__() > _struct.Struct("I").__sizeof__()
+    assert cmath.sqrt(-4) == 2j
+    assert cmath.rect(2, 0) == 2
+    assert cmath.isclose(a=1j, b=1j)
+    assert not cmath.isclose(1j, 2j)
+    assert cmath.log(1j, complex(float("inf"), float("nan"))) == 0j
+    for base, expected_error in ((0, ValueError), (None, TypeError)):
+        try:
+            cmath.log(1j, base)
+        except expected_error:
+            pass
+        else:
+            raise AssertionError("Native complex logarithm accepted an invalid base")
+    try:
+        cmath.isclose(1, 1, rel_tol=-1)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Native complex comparison accepted a negative tolerance")
     assert ctypes.pythonapi.jacpy_csv_read
     assert ctypes.pythonapi.jacpy_csv_write
     from io import StringIO

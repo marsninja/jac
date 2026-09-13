@@ -154,7 +154,38 @@ import from c {
         value: u64
     ) -> u64;  def jacpy_number_check(value: u64) -> i64;  def jacpy_object_str(
         value: u64
-    ) -> u64;  def jacpy_error_is(name: str) -> i64;
+    ) -> u64;  def jacpy_error_is(name: str) -> i64;  def jacpy_number_as_double(
+        value: u64
+    ) -> f64;  def jac_heap_size(address: u64) -> i64;  def jac_list_heap_size(
+        address: u64
+    ) -> i64;  def jacpy_dict_clear(value: u64);  def jacpy_native_size(
+        kind: i64, alignment: i64
+    ) -> i64;  def jacpy_native_little_endian -> i64;  def jacpy_memory_byte(
+        address: u64, offset: i64
+    ) -> i64;  def jacpy_memory_set(address: u64, offset: i64, value: i64);  def jacpy_memory_zero(
+        address: u64, size: i64
+    );  def jacpy_memory_copy(target: u64, source: u64, size: i64);  def jacpy_bytes_from_memory(
+        address: u64, size: i64
+    ) -> u64;  def jacpy_is_bytes(value: u64) -> i64;  def jacpy_is_bytearray(
+        value: u64
+    ) -> i64;  def jacpy_bytes_address(value: u64) -> u64;  def jacpy_bytes_length(
+        value: u64
+    ) -> i64;  def jacpy_index_check(value: u64) -> i64;  def jacpy_long_pointer(
+        value: u64
+    ) -> u64;  def jacpy_uint(value: u64) -> u64;  def jacpy_long_u64(
+        value: u64
+    ) -> u64;  def jacpy_float(value: f64) -> u64;  def jacpy_complex_value(
+        value: u64
+    ) -> u64;  def jacpy_complex_real(value: u64) -> f64;  def jacpy_complex_imag(
+        value: u64
+    ) -> f64;  def jacpy_complex(real: f64, imaginary: f64) -> u64;  def jacpy_float_pack(
+        value: f64, address: u64, size: i64, little: i64
+    ) -> i64;  def jacpy_float_unpack(address: u64, size: i64, little: i64) -> f64;  def jacpy_native_float_store(
+        value: f64, address: u64, size: i64
+    );
+    def jacpy_clear_errno;
+    def jacpy_math_errno -> i64;
+
 }
 
 def object_error(kind: str, message: str) {

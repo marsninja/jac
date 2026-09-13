@@ -1,3 +1,4 @@
+#include <errno.h>
 /* CPython value/slot operations shared by native Jac standard-library modules.
  * The calling native function holds the GIL. Handles are borrowed on input;
  * object results are new references. Algorithms belong in runtime/python/. */
@@ -354,3 +355,61 @@ uint64_t jacpy_iter_next(uint64_t value) { return HANDLE(PyIter_Next(OBJECT(valu
 uint64_t jacpy_number_float(uint64_t value) { return HANDLE(PyNumber_Float(OBJECT(value))); }
 int64_t jacpy_number_check(uint64_t value) { return PyNumber_Check(OBJECT(value)); }
 uint64_t jacpy_object_str(uint64_t value) { return HANDLE(PyObject_Str(OBJECT(value))); }
+
+/* Memory and numeric representation primitives, shared by binary layouts. */
+int64_t jacpy_native_size(int64_t kind, int64_t alignment) {
+#define SIZE_CASE(code, type) case code: return alignment ? _Alignof(type) : sizeof(type)
+    switch (kind) {
+        SIZE_CASE(0, char); SIZE_CASE(1, short); SIZE_CASE(2, int);
+        SIZE_CASE(3, long); SIZE_CASE(4, long long); SIZE_CASE(5, size_t);
+        SIZE_CASE(6, void *); SIZE_CASE(7, _Bool); SIZE_CASE(8, float); SIZE_CASE(9, double);
+        default: return 0;
+    }
+#undef SIZE_CASE
+}
+int64_t jacpy_native_little_endian(void) { uint16_t value = 1; return *(unsigned char *)&value; }
+int64_t jacpy_memory_byte(uint64_t address, int64_t offset) { return ((unsigned char *)(uintptr_t)address)[offset]; }
+void jacpy_memory_set(uint64_t address, int64_t offset, int64_t value) { ((unsigned char *)(uintptr_t)address)[offset] = (unsigned char)value; }
+void jacpy_memory_zero(uint64_t address, int64_t size) { memset((void *)(uintptr_t)address, 0, (size_t)size); }
+void jacpy_memory_copy(uint64_t target, uint64_t source, int64_t size) { memcpy((void *)(uintptr_t)target, (void *)(uintptr_t)source, (size_t)size); }
+uint64_t jacpy_bytes_from_memory(uint64_t address, int64_t size) { return HANDLE(PyBytes_FromStringAndSize((const char *)(uintptr_t)address, size)); }
+int64_t jacpy_is_bytes(uint64_t value) { return PyBytes_Check(OBJECT(value)); }
+int64_t jacpy_is_bytearray(uint64_t value) { return PyByteArray_Check(OBJECT(value)); }
+uint64_t jacpy_bytes_address(uint64_t value) { return (uint64_t)(uintptr_t)(PyBytes_Check(OBJECT(value)) ? PyBytes_AS_STRING(OBJECT(value)) : PyByteArray_AS_STRING(OBJECT(value))); }
+int64_t jacpy_bytes_length(uint64_t value) { return PyBytes_Check(OBJECT(value)) ? PyBytes_GET_SIZE(OBJECT(value)) : PyByteArray_GET_SIZE(OBJECT(value)); }
+int64_t jacpy_index_check(uint64_t value) { return PyIndex_Check(OBJECT(value)); }
+uint64_t jacpy_long_pointer(uint64_t value) { return (uint64_t)(uintptr_t)PyLong_AsVoidPtr(OBJECT(value)); }
+uint64_t jacpy_uint(uint64_t value) { return HANDLE(PyLong_FromUnsignedLongLong(value)); }
+uint64_t jacpy_long_u64(uint64_t value) { return PyLong_AsUnsignedLongLong(OBJECT(value)); }
+uint64_t jacpy_float(double value) { return HANDLE(PyFloat_FromDouble(value)); }
+uint64_t jacpy_complex_value(uint64_t value) {
+    Py_complex number = PyComplex_AsCComplex(OBJECT(value));
+    if (PyErr_Occurred()) return 0;
+    return HANDLE(PyComplex_FromCComplex(number));
+}
+double jacpy_complex_real(uint64_t value) { return PyComplex_RealAsDouble(OBJECT(value)); }
+double jacpy_complex_imag(uint64_t value) { return PyComplex_ImagAsDouble(OBJECT(value)); }
+uint64_t jacpy_complex(double real, double imaginary) { return HANDLE(PyComplex_FromDoubles(real, imaginary)); }
+int64_t jacpy_float_pack(double value, uint64_t address, int64_t size, int64_t little) {
+    char *target = (char *)(uintptr_t)address;
+    if (size == 2) return PyFloat_Pack2(value, target, (int)little);
+    if (size == 4) return PyFloat_Pack4(value, target, (int)little);
+    return PyFloat_Pack8(value, target, (int)little);
+}
+double jacpy_float_unpack(uint64_t address, int64_t size, int64_t little) {
+    const char *source = (const char *)(uintptr_t)address;
+    if (size == 2) return PyFloat_Unpack2(source, (int)little);
+    if (size == 4) return PyFloat_Unpack4(source, (int)little);
+    return PyFloat_Unpack8(source, (int)little);
+}
+void jacpy_native_float_store(double value, uint64_t address, int64_t size) {
+    if (size == 4) { float number = (float)value; memcpy((void *)(uintptr_t)address, &number, sizeof(number)); }
+    else memcpy((void *)(uintptr_t)address, &value, sizeof(value));
+}
+
+void jacpy_dict_clear(uint64_t value) { PyDict_Clear(OBJECT(value)); }
+
+double jacpy_number_as_double(uint64_t value) { return PyFloat_AsDouble(OBJECT(value)); }
+
+void jacpy_clear_errno(void) { errno = 0; }
+int64_t jacpy_math_errno(void) { return errno == EDOM ? 1 : errno == ERANGE ? 2 : 0; }

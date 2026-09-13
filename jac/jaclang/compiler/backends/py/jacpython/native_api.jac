@@ -1,8 +1,36 @@
 """Native request orchestration; CPython value conversion stays at the ABI."""
+import from jaclang.runtime.python.modules.struct {
+    jacpy_struct_new,
+    jacpy_struct_compile,
+    jacpy_struct_size,
+    jacpy_struct_items,
+    jacpy_struct_pack,
+    jacpy_struct_unpack,
+    jacpy_struct_offset,
+    jacpy_struct_cursor,
+    jacpy_struct_remaining,
+    jacpy_struct_next,
+    jacpy_struct_cached,
+    jacpy_struct_memory
+}
+import from jaclang.runtime.python.modules.cmath {
+    jacpy_cmath_unary,
+    jacpy_cmath_log,
+    jacpy_cmath_rect,
+    jacpy_cmath_isclose
+}
+
+
 import from jaclang.runtime.python.modules.csv {
-    jacpy_csv_dialect, jacpy_csv_reader_new, jacpy_csv_reader_clear,
-    jacpy_csv_reader_fields, jacpy_csv_reader_line, jacpy_csv_read,
-    jacpy_csv_writer_new, jacpy_csv_write, jacpy_csv_registry
+    jacpy_csv_dialect,
+    jacpy_csv_reader_new,
+    jacpy_csv_reader_clear,
+    jacpy_csv_reader_fields,
+    jacpy_csv_reader_line,
+    jacpy_csv_read,
+    jacpy_csv_writer_new,
+    jacpy_csv_write,
+    jacpy_csv_registry
 }
 import from jaclang.runtime.python.modules.json {
     jacpy_json_escape,

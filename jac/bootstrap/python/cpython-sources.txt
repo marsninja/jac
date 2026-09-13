@@ -8,8 +8,8 @@
 #
 # Commented source paths record exclusions for the JacPython replacement.
 # Counts use pinned CPython 3.14.6 source lines, including comments and blanks.
-# Excluded: 34 C files / 75,026 lines; 17 headers / 4,937 lines.
-# Total: 51 files / 79,963 source lines excluded from every shipped runtime.
+# Excluded: 36 C files / 79,166 lines; 19 headers / 6,388 lines.
+# Total: 55 files / 85,554 source lines excluded from every shipped runtime.
 # A separate build-only CPython host restores these marked entries to produce
 # the native object. The shipped JacPython runtime includes none of them.
 # Keep build dependencies and ABI adapters aligned with these exclusions.
@@ -448,7 +448,7 @@ Modules/_ssl/misc.c
 Modules/_ssl_data_35.h
 Modules/_stat.c
 Modules/_statisticsmodule.c
-Modules/_struct.c
+# Modules/_struct.c  # removed: 2,825 source lines
 Modules/_suggestions.c
 Modules/_sysconfig.c
 Modules/_threadmodule.c
@@ -516,7 +516,7 @@ Modules/clinic/_posixsubprocess.c.h
 Modules/clinic/_remote_debugging_module.c.h
 Modules/clinic/_ssl.c.h
 Modules/clinic/_statisticsmodule.c.h
-Modules/clinic/_struct.c.h
+# Modules/clinic/_struct.c.h  # removed: 461 source lines
 Modules/clinic/_suggestions.c.h
 Modules/clinic/_sysconfig.c.h
 Modules/clinic/_threadmodule.c.h
@@ -527,7 +527,7 @@ Modules/clinic/_zoneinfo.c.h
 Modules/clinic/arraymodule.c.h
 # Modules/clinic/binascii.c.h  # removed: 791 source lines
 Modules/clinic/blake2module.c.h
-Modules/clinic/cmathmodule.c.h
+# Modules/clinic/cmathmodule.c.h  # removed: 990 source lines
 Modules/clinic/fcntlmodule.c.h
 Modules/clinic/gcmodule.c.h
 Modules/clinic/grpmodule.c.h
@@ -552,7 +552,7 @@ Modules/clinic/termios.c.h
 Modules/clinic/timemodule.c.h
 Modules/clinic/unicodedata.c.h
 Modules/clinic/zlibmodule.c.h
-Modules/cmathmodule.c
+# Modules/cmathmodule.c  # removed: 1,315 source lines
 Modules/config.c.in
 Modules/errnomodule.c
 Modules/faulthandler.c
