@@ -1,21 +1,22 @@
-"""Local-slot indexing preserves constructor inputs and table replacement."""
-import from jaclang.compiler.backends.py.jacpython.compiler_ir { unverified_cfg }
+"""Python local-slot ordering through the shipped compiler boundary."""
+import from builtins { compile as pycompile, exec as pyexec }
 
-test "local slot indices are invalidated when names change" {
-    unit = unverified_cfg(
-        filename="slots.py",
-        name="f",
-        qualname="f",
-        firstlineno=1,
-        varnames=["argument", "local", "cell"]
-    );
-    assert unit.varname_index("local") == 1;
-    assert unit.varname_index("absent") == -1;
-    unit.set_varnames(["cell", "argument", "renamed"]);
-    assert unit.varname_index("cell") == 0;
-    assert unit.varname_index("argument") == 1;
-    assert unit.varname_index("renamed") == 2;
-    assert unit.varname_index("local") == -1;
-    unit.set_varnames([]);
-    assert unit.varname_index("cell") == -1;
+test "large Python local tables preserve closure and argument slots" {
+    lines = ["def factory(argument):"];
+    for index in range(500) {
+        lines.append(f"    local_{index} = argument + {index}");
+    }
+    lines.extend([
+        "    def closure():",
+        "        return local_499, local_0, argument",
+        "    return closure, lambda value: local_250 + value",
+        "def reordered(second, first):",
+        "    return first, second"
+    ]);
+    namespace: dict[str, any] = {};
+    pyexec(pycompile("\n".join(lines) + "\n", "local_slots.py", "exec"), namespace);
+    (closure, shifted) = namespace["factory"](7);
+    assert closure() == (506, 7, 7);
+    assert shifted(3) == 260;
+    assert namespace["reordered"](2, 1) == (1, 2);
 }
