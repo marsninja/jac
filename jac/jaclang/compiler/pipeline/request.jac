@@ -198,21 +198,14 @@ obj ModuleCompilation {
     }
 
     def interface {
-        import from jaclang.compiler.session.cache.artifact_codec {
-            is_compiler_tree_path
-        }
-        closure = self.compiler._closure_opts or self.options;
+        # Symbol discovery may still be inside an import cycle. Publishing an
+        # interface here would freeze partially resolved bases. The enclosing
+        # interface pass requests dependency interfaces after discovery returns.
         if not self.parse_failed
             and not self.blocked
             and self.source is None
-            and (
-                (self.options.no_cgen and not self.options.symtab_ir_only)
-                or (
-                    closure.no_cgen
-                    and not closure.symtab_ir_only
-                    and not is_compiler_tree_path(self.path)
-                )
-            ) {
+            and self.options.no_cgen
+            and not self.options.symtab_ir_only {
             import from jaclang.compiler.pipeline.products { require_product }
             import from jaclang.compiler.pipeline.contracts { CompilationProduct }
             require_product(self.program, self.module, CompilationProduct.INTERFACE);
