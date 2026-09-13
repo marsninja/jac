@@ -413,3 +413,15 @@ double jacpy_number_as_double(uint64_t value) { return PyFloat_AsDouble(OBJECT(v
 
 void jacpy_clear_errno(void) { errno = 0; }
 int64_t jacpy_math_errno(void) { return errno == EDOM ? 1 : errno == ERANGE ? 2 : 0; }
+
+int64_t jacpy_compare_bool(uint64_t a, uint64_t b, int64_t operation) {
+    return PyObject_RichCompareBool(OBJECT(a), OBJECT(b), (int)operation);
+}
+void jacpy_set_key_error(uint64_t key) {
+    PyObject *args = PyTuple_Pack(1, OBJECT(key));
+    if (args) { PyErr_SetObject(PyExc_KeyError, args); Py_DECREF(args); }
+}
+
+uint64_t jacpy_dict_repr(uint64_t value) { return HANDLE(PyDict_Type.tp_repr(OBJECT(value))); }
+
+uint64_t jacpy_sequence_list(uint64_t value) { return HANDLE(PySequence_List(OBJECT(value))); }

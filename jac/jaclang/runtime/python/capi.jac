@@ -6,7 +6,11 @@ All calls require the interpreter lock; exceptions remain in CPython's thread
 state. No Python implementation of a replaced module is invoked here.
 """
 import from c {
-    def jacpy_release(handle: u64);  def jacpy_retain(handle: u64) -> u64;  def jacpy_list_item(
+    def jacpy_sequence_list(value: u64) -> u64;  def jacpy_dict_repr(
+        value: u64
+    ) -> u64;  def jacpy_compare_bool(a: u64, b: u64, operation: i64) -> i64;  def jacpy_set_key_error(
+        key: u64
+    );  def jacpy_release(handle: u64);  def jacpy_retain(handle: u64) -> u64;  def jacpy_list_item(
         handle: u64, index: i64
     ) -> u64;  def jacpy_list_size(handle: u64) -> i64;  def jacpy_list_append(
         handle: u64, value: u64
@@ -182,10 +186,7 @@ import from c {
         value: f64, address: u64, size: i64, little: i64
     ) -> i64;  def jacpy_float_unpack(address: u64, size: i64, little: i64) -> f64;  def jacpy_native_float_store(
         value: f64, address: u64, size: i64
-    );
-    def jacpy_clear_errno;
-    def jacpy_math_errno -> i64;
-
+    );  def jacpy_clear_errno;  def jacpy_math_errno -> i64;
 }
 
 def object_error(kind: str, message: str) {

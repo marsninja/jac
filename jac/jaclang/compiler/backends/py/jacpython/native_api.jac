@@ -1,4 +1,32 @@
 """Native request orchestration; CPython value conversion stays at the ABI."""
+import from jaclang.runtime.python.modules.collections {
+    jacpy_deque_new,
+    jacpy_deque_size,
+    jacpy_deque_limit,
+    jacpy_deque_set_limit,
+    jacpy_deque_borrow,
+    jacpy_deque_memory,
+    jacpy_deque_clear,
+    jacpy_deque_append,
+    jacpy_deque_pop,
+    jacpy_deque_extend,
+    jacpy_deque_item,
+    jacpy_deque_assign,
+    jacpy_deque_rotate,
+    jacpy_deque_reverse,
+    jacpy_deque_insert,
+    jacpy_deque_search,
+    jacpy_deque_cursor,
+    jacpy_deque_next,
+    jacpy_deque_remaining,
+    jacpy_deque_consumed,
+    jacpy_deque_compare,
+    jacpy_deque_repeat,
+    jacpy_deque_repr,
+    jacpy_default_missing,
+    jacpy_count_elements,
+    jacpy_default_repr
+}
 import from jaclang.runtime.python.modules.struct {
     jacpy_struct_new,
     jacpy_struct_compile,
@@ -19,7 +47,6 @@ import from jaclang.runtime.python.modules.cmath {
     jacpy_cmath_rect,
     jacpy_cmath_isclose
 }
-
 
 import from jaclang.runtime.python.modules.csv {
     jacpy_csv_dialect,

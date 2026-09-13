@@ -223,6 +223,7 @@ _json jac_modules/json.c
 _csv jac_modules/csv.c
 _struct jac_modules/struct.c
 cmath jac_modules/cmath.c
+_collections jac_modules/collections.c
 SETUP
     fi
     # CPython runs the compiler itself; dependency-oriented -O2 flags above

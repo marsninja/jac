@@ -46,9 +46,16 @@ The AST, token model, PEG parser and opcode metadata derive from CPython 3.14.6
 and are maintained directly in Jac. [`LICENSE.cpython`](LICENSE.cpython) applies
 to the CPython-derived code across these packages.
 
-`modules/bisect.jac`, `modules/heapq.jac`, and `modules/random.jac` implement
-Python's bisection, heap, and MT19937 operations. `capi.jac` declares their
-shared retained-object operations; `bootstrap/python/object_api.c` implements
-those C API calls. `bootstrap/python/modules/` contains Python method/type
-registration and argument adapters. The module algorithms are native Jac.
-Their C sources and Clinic headers are excluded from shipped runtimes.
+`modules/` contains the native standard-library replacements. `capi.jac`
+declares their shared retained-object operations; `bootstrap/python/object_api.c`
+implements those C API calls. `bootstrap/python/modules/` contains Python
+method/type registration and argument adapters. The algorithms are native Jac,
+and their C sources and Clinic headers are excluded from shipped runtimes.
+
+Queues and deques share `modules/object_ring.jac`. Its circular storage transfers
+owned Python references without invoking callbacks; callers finish mutations
+before releasing references. The C adapters expose every retained Python value
+to CPython's cycle collector. Native objects report actual allocation sizes,
+including owned storage, rather than the layout sizes of the replaced C types.
+The compatibility runner excludes the upstream deque test that hard-codes that
+C layout; the runtime smoke checks allocation growth and reclamation instead.

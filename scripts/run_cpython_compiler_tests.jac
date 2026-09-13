@@ -247,6 +247,15 @@ def run_tests(args: any, calls: list[int]) -> int {
             super.stopTest(test_case);
         }
     }
+    if "_collections" in args.native_modules and args.module == "test.test_deque" {
+        # This assertion specifies CPython's C block layout, which Jac replaces.
+        # smoke.py verifies actual native allocation growth and reclamation.
+        test_module.TestBasic.test_sizeof = unittest.skip(
+            "CPython deque C layout replaced by native Jac circular storage"
+        )(
+            test_module.TestBasic.test_sizeof
+        );
+    }
     print("Compiler path: native Jac machine code", flush=True);
     try {
         sys.modules[args.module] = test_module;

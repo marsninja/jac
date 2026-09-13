@@ -68,9 +68,42 @@ if required_compiler is not None:
     import _csv
     import _struct
     import cmath
-    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json, _csv, _struct, cmath):
+    import _collections
+    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json, _csv, _struct, cmath, _collections):
         assert replacement.__name__ in sys.builtin_module_names
         assert replacement.__spec__.origin == "built-in"
+    assert ctypes.pythonapi.jacpy_deque_append
+    deque = _collections.deque
+    sequence = deque(range(1024))
+    full_size = sequence.__sizeof__()
+    sequence.rotate(17)
+    assert sequence.popleft() == 1007
+    sequence.clear()
+    assert full_size > sequence.__sizeof__() + 8000
+    assert list(deque(range(10), maxlen=3)) == [7, 8, 9]
+    match deque([1, 2]):
+        case [1, 2]:
+            pass
+        case _:
+            raise AssertionError("Deque is missing the sequence-pattern protocol")
+    iterator = iter(sequence)
+    sequence.append(1)
+    try:
+        next(iterator)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Deque iterator missed a mutation")
+    class ReentrantFactory:
+        def __call__(self):
+            defaults["key"] = "inserted during callback"
+            return "factory result"
+    defaults = _collections.defaultdict(ReentrantFactory())
+    assert defaults["key"] == "inserted during callback"
+    class CustomDeque(deque):
+        def __iter__(self):
+            return iter(("custom",))
+    assert repr(CustomDeque([1])) == "CustomDeque(['custom'])"
     assert ctypes.pythonapi.jacpy_struct_pack
     assert ctypes.pythonapi.jacpy_cmath_unary
     layout = _struct.Struct(">QifD")
