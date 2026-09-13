@@ -261,7 +261,22 @@ def run_tests(args: any, calls: list[int]) -> int {
         # smoke.py checks that native storage is included in reported sizes.
         test_module.SizeofTest = unittest.skip(
             "CPython iterator C layouts replaced by native Jac storage"
-        )(test_module.SizeofTest);
+        )(
+            test_module.SizeofTest
+        );
+    }
+    if "array" in args.native_modules and args.module == "test.test_array" {
+        # These two inherited tests fix the retired C header size. They run
+        # once per typecode; smoke.py checks actual native allocation instead.
+        for method in ("test_sizeof_with_buffer", "test_sizeof_without_buffer") {
+            setattr(
+                test_module.BaseTest,
+                method,
+                unittest.skip("CPython array C layout replaced by native Jac storage")(
+                    getattr(test_module.BaseTest, method)
+                )
+            );
+        }
     }
     print("Compiler path: native Jac machine code", flush=True);
     try {

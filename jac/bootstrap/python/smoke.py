@@ -73,9 +73,37 @@ if required_compiler is not None:
     import _functools
     import functools
     import itertools
-    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json, _csv, _struct, cmath, math, _collections, _functools, itertools):
+    import array
+    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json, _csv, _struct, cmath, math, _collections, _functools, itertools, array):
         assert replacement.__name__ in sys.builtin_module_names
         assert replacement.__spec__.origin == "built-in"
+    assert ctypes.pythonapi.jacpy_array_insert
+    numeric_array = array.array('q')
+    array_empty_size = numeric_array.__sizeof__()
+    numeric_array.extend(range(10000))
+    assert numeric_array.__sizeof__() > array_empty_size + 80000
+    with memoryview(numeric_array) as view:
+        numeric_array[0] = 99
+        assert view[0] == 99 and view.itemsize == 8
+        try:
+            numeric_array.clear()
+        except BufferError:
+            pass
+        else:
+            raise AssertionError("array resized while exporting a view")
+    numeric_array.clear()
+    assert numeric_array.__sizeof__() <= array_empty_size + 1
+    numeric_array.append(1)
+    class ArrayMutation:
+        def __index__(self):
+            numeric_array.clear()
+            numeric_array.append(4)
+            return 7
+    numeric_array[0] = ArrayMutation()
+    assert numeric_array.tolist() == [7]
+    numeric_array.append(ArrayMutation())
+    assert numeric_array.tolist() == [4, 7]
+    assert array.array('w', 'aΩ😀').tounicode() == 'aΩ😀'
     assert ctypes.pythonapi.jacpy_tee_next
     assert list(itertools.batched(range(5), 2)) == [(0, 1), (2, 3), (4,)]
     assert list(itertools.permutations("ab")) == [("a", "b"), ("b", "a")]

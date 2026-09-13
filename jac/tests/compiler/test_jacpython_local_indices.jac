@@ -6,13 +6,15 @@ test "large Python local tables preserve closure and argument slots" {
     for index in range(500) {
         lines.append(f"    local_{index} = argument + {index}");
     }
-    lines.extend([
-        "    def closure():",
-        "        return local_499, local_0, argument",
-        "    return closure, lambda value: local_250 + value",
-        "def reordered(second, first):",
-        "    return first, second"
-    ]);
+    lines.extend(
+        [
+            "    def closure():",
+            "        return local_499, local_0, argument",
+            "    return closure, lambda value: local_250 + value",
+            "def reordered(second, first):",
+            "    return first, second"
+        ]
+    );
     namespace: dict[str, any] = {};
     pyexec(pycompile("\n".join(lines) + "\n", "local_slots.py", "exec"), namespace);
     (closure, shifted) = namespace["factory"](7);

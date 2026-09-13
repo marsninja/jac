@@ -303,6 +303,8 @@ int64_t jacpy_writer_slice(uint64_t writer, uint64_t text, int64_t start, int64_
 int64_t jacpy_writer_ascii(uint64_t writer, const char *text, int64_t size) { return PyUnicodeWriter_WriteASCII((PyUnicodeWriter *)(uintptr_t)writer, text, size); }
 int64_t jacpy_unicode_size(uint64_t text) { return PyUnicode_GET_LENGTH(OBJECT(text)); }
 int64_t jacpy_unicode_char(uint64_t text, int64_t index) { return PyUnicode_ReadChar(OBJECT(text), index); }
+uint64_t jacpy_unicode_from_ordinal(int64_t point) { return HANDLE(PyUnicode_FromOrdinal((int)point)); }
+uint64_t jacpy_unicode_decode_bytes(uint64_t value, const char *encoding) { return HANDLE(PyUnicode_FromEncodedObject(OBJECT(value), encoding, "strict")); }
 uint64_t jacpy_unicode_slice(uint64_t text, int64_t start, int64_t end) { return HANDLE(PyUnicode_Substring(OBJECT(text), start, end)); }
 uint64_t jacpy_dict_default(uint64_t dictionary, uint64_t key, uint64_t value) {
     PyObject *result;
@@ -373,6 +375,11 @@ int64_t jacpy_memory_byte(uint64_t address, int64_t offset) { return ((unsigned 
 void jacpy_memory_set(uint64_t address, int64_t offset, int64_t value) { ((unsigned char *)(uintptr_t)address)[offset] = (unsigned char)value; }
 void jacpy_memory_zero(uint64_t address, int64_t size) { memset((void *)(uintptr_t)address, 0, (size_t)size); }
 void jacpy_memory_copy(uint64_t target, uint64_t source, int64_t size) { memcpy((void *)(uintptr_t)target, (void *)(uintptr_t)source, (size_t)size); }
+void jacpy_memory_move(uint64_t target, uint64_t source, int64_t size) { memmove((void *)(uintptr_t)target, (void *)(uintptr_t)source, (size_t)size); }
+uint64_t jacpy_bytearray_new(int64_t size) { return HANDLE(PyByteArray_FromStringAndSize(NULL, size)); }
+int64_t jacpy_bytearray_resize(uint64_t value, int64_t size) { return PyByteArray_Resize(OBJECT(value), size); }
+int64_t jacpy_bytearray_memory(uint64_t value) { return PyByteArray_Type.tp_basicsize + ((PyByteArrayObject *)OBJECT(value))->ob_alloc; }
+uint64_t jacpy_float32_bits(double value) { float number = (float)value; uint32_t bits; memcpy(&bits, &number, sizeof(bits)); return bits; }
 uint64_t jacpy_bytes_from_memory(uint64_t address, int64_t size) { return HANDLE(PyBytes_FromStringAndSize((const char *)(uintptr_t)address, size)); }
 int64_t jacpy_is_bytes(uint64_t value) { return PyBytes_Check(OBJECT(value)); }
 int64_t jacpy_is_bytearray(uint64_t value) { return PyByteArray_Check(OBJECT(value)); }

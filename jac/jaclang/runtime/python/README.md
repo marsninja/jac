@@ -76,3 +76,10 @@ per block, so multiple cursors do not report duplicate reference edges. Tuple
 reuse preserves callback safety. As with deque, the four upstream iterator
 size tests describe the retired C layout; smoke tests check native storage
 accounting instead.
+
+`modules/array.jac` shares endian-aware scalar operations with `struct` through
+`modules/binary_scalars.jac`. Its buffer uses retained CPython bytearray storage;
+Jac owns resizing, slicing, conversion, iteration, and pickle reconstruction.
+Exported memoryviews pin the logical size, and conversion finishes before an
+address is taken so user callbacks cannot invalidate a saved buffer pointer.
+Array size reporting includes the Jac state and actual retained buffer allocation.

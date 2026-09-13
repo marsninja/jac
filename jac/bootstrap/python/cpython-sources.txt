@@ -8,8 +8,8 @@
 #
 # Commented source paths record exclusions for the JacPython replacement.
 # Counts use pinned CPython 3.14.6 source lines, including comments and blanks.
-# Excluded: 40 C files / 92,326 lines; 23 headers / 9,300 lines.
-# Total: 63 files / 101,626 source lines excluded from every shipped runtime.
+# Excluded: 41 C files / 95,685 lines; 24 headers / 10,077 lines.
+# Total: 65 files / 105,762 source lines excluded from every shipped runtime.
 # A separate build-only CPython host restores these marked entries to produce
 # the native object. The shipped JacPython runtime includes none of them.
 # Keep build dependencies and ABI adapters aligned with these exclusions.
@@ -470,7 +470,7 @@ Modules/_zstd/decompressor.c
 Modules/_zstd/zstddict.c
 Modules/_zstd/zstddict.h
 Modules/addrinfo.h
-Modules/arraymodule.c
+# Modules/arraymodule.c  # removed: 3,359 source lines
 Modules/atexitmodule.c
 # Modules/binascii.c  # removed: 1,337 source lines
 Modules/blake2module.c
@@ -524,7 +524,7 @@ Modules/clinic/_tracemalloc.c.h
 Modules/clinic/_typingmodule.c.h
 Modules/clinic/_weakref.c.h
 Modules/clinic/_zoneinfo.c.h
-Modules/clinic/arraymodule.c.h
+# Modules/clinic/arraymodule.c.h  # removed: 777 source lines
 # Modules/clinic/binascii.c.h  # removed: 791 source lines
 Modules/clinic/blake2module.c.h
 # Modules/clinic/cmathmodule.c.h  # removed: 990 source lines

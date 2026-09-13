@@ -6,6 +6,13 @@ All calls require the interpreter lock; exceptions remain in CPython's thread
 state. No Python implementation of a replaced module is invoked here.
 """
 import from c {
+    def jacpy_unicode_decode_bytes(value: u64, encoding: str) -> u64;
+    def jacpy_unicode_from_ordinal(point: i64) -> u64;
+    def jacpy_memory_move(target: u64, source: u64, size: i64);
+    def jacpy_bytearray_new(size: i64) -> u64;
+    def jacpy_bytearray_resize(value: u64, size: i64) -> i64;
+    def jacpy_bytearray_memory(value: u64) -> i64;
+    def jacpy_float32_bits(value: f64) -> u64;
     def jacpy_tuple_unique(value: u64) -> i64;
     def jacpy_tuple_exchange(value: u64, index: i64, item: u64) -> u64;
     def jacpy_call_two(callable: u64, a: u64, b: u64) -> u64;  def jacpy_object_type(

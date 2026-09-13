@@ -3,7 +3,11 @@
 The format plan owns typed Jac fields; Python values and exported buffers stay
 at the shared object boundary. Derived from CPython 3.14.6; see ../LICENSE.cpython.
 """
-import from jaclang.runtime.python.modules.binary_scalars { read_bits, write_bits, integer_from_bits }
+import from jaclang.runtime.python.modules.binary_scalars {
+    read_bits,
+    write_bits,
+    integer_from_bits
+}
 import from jaclang.runtime.python.capi {
     boundary_failure,
     required,
@@ -231,6 +235,7 @@ def:pub jacpy_struct_compile(plan: struct_plan, format: u64, error: u64) -> i64 
 def:pub jacpy_struct_size(plan: struct_plan) -> i64 {
     return i64(plan.size);
 }
+
 def:pub jacpy_struct_items(plan: struct_plan) -> i64 {
     return i64(plan.items);
 }
@@ -442,7 +447,9 @@ def:priv unpack_field(plan: struct_plan, field: format_field, address: u64) -> u
         pending();
         return required(jacpy_complex(real, imaginary));
     }
-    return integer_from_bits(read_bits(address, size, plan.little), size, chr(code) in "bhilqn");
+    return integer_from_bits(
+        read_bits(address, size, plan.little), size, chr(code) in "bhilqn"
+    );
 }
 
 def:pub jacpy_struct_unpack(plan: struct_plan, address: u64) -> u64 {
