@@ -8,8 +8,8 @@
 #
 # Commented source paths record exclusions for the JacPython replacement.
 # Counts use pinned CPython 3.14.6 source lines, including comments and blanks.
-# Excluded: 32 C files / 71,188 lines; 16 headers / 4,727 lines.
-# Total: 48 files / 75,915 source lines excluded from every shipped runtime.
+# Excluded: 33 C files / 73,162 lines; 16 headers / 4,727 lines.
+# Total: 49 files / 77,889 source lines excluded from every shipped runtime.
 # A separate build-only CPython host restores these marked entries to produce
 # the native object. The shipped JacPython runtime includes none of them.
 # Keep build dependencies and ABI adapters aligned with these exclusions.
@@ -387,7 +387,7 @@ Modules/_io/fileio.c
 Modules/_io/iobase.c
 Modules/_io/stringio.c
 Modules/_io/textio.c
-Modules/_json.c
+# Modules/_json.c  # removed: 1,974 source lines
 Modules/_localemodule.c
 Modules/_lsprof.c
 Modules/_lzmamodule.c

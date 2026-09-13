@@ -106,7 +106,43 @@ import from c {
         value: u64
     ) -> i64;  def jacpy_deadline(timeout: i64) -> i64;  def jacpy_deadline_remaining(
         deadline: i64
-    ) -> i64;  def jacpy_set_none_exception(kind: u64);
+    ) -> i64;  def jacpy_set_none_exception(kind: u64);  def jacpy_writer_new -> u64;  def jacpy_writer_discard(
+        writer: u64
+    );  def jacpy_writer_finish(writer: u64) -> u64;  def jacpy_writer_char(
+        writer: u64, value: i64
+    ) -> i64;  def jacpy_writer_text(writer: u64, text: u64) -> i64;  def jacpy_writer_slice(
+        writer: u64, text: u64, start: i64, end: i64
+    ) -> i64;  def jacpy_writer_ascii(writer: u64, text: str, size: i64) -> i64;  def jacpy_unicode_size(
+        text: u64
+    ) -> i64;  def jacpy_unicode_char(text: u64, index: i64) -> i64;  def jacpy_unicode_slice(
+        text: u64, start: i64, end: i64
+    ) -> u64;  def jacpy_dict_default(dictionary: u64, key: u64, value: u64) -> u64;  def jacpy_dict_set(
+        dictionary: u64, key: u64, value: u64
+    ) -> i64;  def jacpy_raise_value(kind: str, value: u64);  def jacpy_set_object_exception(
+        kind: u64, value: u64
+    );  def jacpy_list_new -> u64;  def jacpy_dict_new -> u64;  def jacpy_is_bool(
+        value: u64
+    ) -> i64;  def jacpy_is_float(value: u64) -> i64;  def jacpy_is_list(
+        value: u64
+    ) -> i64;  def jacpy_is_dict(value: u64) -> i64;  def jacpy_is_exact_dict(
+        value: u64
+    ) -> i64;  def jacpy_long_repr(value: u64) -> u64;  def jacpy_float_repr(
+        value: u64
+    ) -> u64;  def jacpy_float_value(value: u64) -> f64;  def jacpy_identity(
+        value: u64
+    ) -> u64;  def jacpy_type_name(value: u64) -> u64;  def jacpy_qualified_type_name(
+        value: u64
+    ) -> u64;  def jacpy_error_take -> u64;  def jacpy_error_restore(value: u64);  def jacpy_exception_note(
+        error: u64, note: u64
+    ) -> i64;  def jacpy_sequence_fast(value: u64, message: str) -> u64;  def jacpy_fast_size(
+        value: u64
+    ) -> i64;  def jacpy_fast_item(value: u64, index: i64) -> u64;  def jacpy_mapping_items(
+        value: u64
+    ) -> u64;  def jacpy_list_sort(value: u64) -> i64;  def jacpy_dict_remove(
+        dictionary: u64, key: u64
+    ) -> i64;  def jacpy_unicode_concat(left: u64, right: u64) -> u64;  def jacpy_sequence_repeat(
+        value: u64, count: i64
+    ) -> u64;
 }
 
 def object_error(kind: str, message: str) {
@@ -175,4 +211,31 @@ def pair(first: u64, second: u64) -> u64 {
     jacpy_tuple_set_owned(result, 0, jacpy_retain(first));
     jacpy_tuple_set_owned(result, 1, jacpy_retain(second));
     return result;
+}
+
+
+def checked(status: i64) {
+    if status < 0 {
+        raise boundary_failure();
+    }
+}
+
+# Entries are borrowed; each successful result owns all its element references.
+def object_tuple(values: list[u64]) -> u64 {
+    result = required(jacpy_tuple_new(i64(len(values))));
+    for i in range(len(values)) {
+        jacpy_tuple_set_owned(result, i64(i), jacpy_retain(values[i]));
+    }
+    return result;
+}
+
+def type_name(value: u64, qualified: bool = False) -> str {
+    name = required(
+        jacpy_qualified_type_name(value) if qualified else jacpy_type_name(value)
+    );
+    try {
+        return text_value(name);
+    } finally {
+        jacpy_release(name);
+    }
 }

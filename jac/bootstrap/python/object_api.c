@@ -39,7 +39,8 @@ int64_t jacpy_insert(uint64_t handle, int64_t index, uint64_t value) {
     return 0;
 }
 int64_t jacpy_recursion_enter(const char *context) {
-    return Py_EnterRecursiveCall(context);
+    /* Unlike most CPython status APIs this may return positive on failure. */
+    return Py_EnterRecursiveCall(context) ? -1 : 0;
 }
 void jacpy_recursion_leave(void) { Py_LeaveRecursiveCall(); }
 
@@ -289,3 +290,50 @@ int64_t jacpy_timeout_ns(uint64_t value) {
 int64_t jacpy_deadline(int64_t timeout) { return _PyDeadline_Init(timeout); }
 int64_t jacpy_deadline_remaining(int64_t deadline) { return _PyDeadline_Get(deadline); }
 void jacpy_set_none_exception(uint64_t kind) { PyErr_SetNone(OBJECT(kind)); }
+
+/* Unicode builders and exact container operations used by native serializers. */
+uint64_t jacpy_writer_new(void) { return (uint64_t)(uintptr_t)PyUnicodeWriter_Create(0); }
+void jacpy_writer_discard(uint64_t writer) { PyUnicodeWriter_Discard((PyUnicodeWriter *)(uintptr_t)writer); }
+uint64_t jacpy_writer_finish(uint64_t writer) { return HANDLE(PyUnicodeWriter_Finish((PyUnicodeWriter *)(uintptr_t)writer)); }
+int64_t jacpy_writer_char(uint64_t writer, int64_t value) { return PyUnicodeWriter_WriteChar((PyUnicodeWriter *)(uintptr_t)writer, (Py_UCS4)value); }
+int64_t jacpy_writer_text(uint64_t writer, uint64_t text) { return PyUnicodeWriter_WriteStr((PyUnicodeWriter *)(uintptr_t)writer, OBJECT(text)); }
+int64_t jacpy_writer_slice(uint64_t writer, uint64_t text, int64_t start, int64_t end) { return PyUnicodeWriter_WriteSubstring((PyUnicodeWriter *)(uintptr_t)writer, OBJECT(text), start, end); }
+int64_t jacpy_writer_ascii(uint64_t writer, const char *text, int64_t size) { return PyUnicodeWriter_WriteASCII((PyUnicodeWriter *)(uintptr_t)writer, text, size); }
+int64_t jacpy_unicode_size(uint64_t text) { return PyUnicode_GET_LENGTH(OBJECT(text)); }
+int64_t jacpy_unicode_char(uint64_t text, int64_t index) { return PyUnicode_ReadChar(OBJECT(text), index); }
+uint64_t jacpy_unicode_slice(uint64_t text, int64_t start, int64_t end) { return HANDLE(PyUnicode_Substring(OBJECT(text), start, end)); }
+uint64_t jacpy_dict_default(uint64_t dictionary, uint64_t key, uint64_t value) {
+    PyObject *result;
+    return PyDict_SetDefaultRef(OBJECT(dictionary), OBJECT(key), OBJECT(value), &result) < 0 ? 0 : HANDLE(result);
+}
+int64_t jacpy_dict_set(uint64_t dictionary, uint64_t key, uint64_t value) { return PyDict_SetItem(OBJECT(dictionary), OBJECT(key), OBJECT(value)); }
+extern PyObject *jacpy_exception_type(const char *);
+void jacpy_raise_value(const char *kind, uint64_t value) {
+    PyObject *type = jacpy_exception_type(kind);
+    if (type) PyErr_SetObject(type, OBJECT(value));
+}
+void jacpy_set_object_exception(uint64_t kind, uint64_t value) { PyErr_SetObject(OBJECT(kind), OBJECT(value)); }
+int64_t jacpy_is_bool(uint64_t value) { return PyBool_Check(OBJECT(value)); }
+int64_t jacpy_is_float(uint64_t value) { return PyFloat_Check(OBJECT(value)); }
+int64_t jacpy_is_dict(uint64_t value) { return PyDict_Check(OBJECT(value)); }
+int64_t jacpy_is_exact_dict(uint64_t value) { return PyDict_CheckExact(OBJECT(value)); }
+uint64_t jacpy_long_repr(uint64_t value) { return HANDLE(PyLong_Type.tp_repr(OBJECT(value))); }
+uint64_t jacpy_float_repr(uint64_t value) { return HANDLE(PyFloat_Type.tp_repr(OBJECT(value))); }
+uint64_t jacpy_identity(uint64_t value) { return HANDLE(PyLong_FromVoidPtr(OBJECT(value))); }
+uint64_t jacpy_type_name(uint64_t value) { return HANDLE(PyUnicode_FromString(Py_TYPE(OBJECT(value))->tp_name)); }
+uint64_t jacpy_qualified_type_name(uint64_t value) { return HANDLE(PyType_GetFullyQualifiedName(Py_TYPE(OBJECT(value)))); }
+uint64_t jacpy_error_take(void) { return HANDLE(PyErr_GetRaisedException()); }
+void jacpy_error_restore(uint64_t value) { PyErr_SetRaisedException(OBJECT(value)); }
+int64_t jacpy_exception_note(uint64_t error, uint64_t note) {
+    PyObject *result = PyObject_CallMethod(OBJECT(error), "add_note", "O", OBJECT(note));
+    if (!result) return -1;
+    Py_DECREF(result); return 0;
+}
+uint64_t jacpy_sequence_fast(uint64_t value, const char *message) { return HANDLE(PySequence_Fast(OBJECT(value), message)); }
+int64_t jacpy_fast_size(uint64_t value) { return PySequence_Fast_GET_SIZE(OBJECT(value)); }
+uint64_t jacpy_fast_item(uint64_t value, int64_t index) { return HANDLE(Py_NewRef(PySequence_Fast_GET_ITEM(OBJECT(value), index))); }
+uint64_t jacpy_mapping_items(uint64_t value) { return HANDLE(PyMapping_Items(OBJECT(value))); }
+int64_t jacpy_list_sort(uint64_t value) { return PyList_Sort(OBJECT(value)); }
+int64_t jacpy_dict_remove(uint64_t dictionary, uint64_t key) { return PyDict_DelItem(OBJECT(dictionary), OBJECT(key)); }
+uint64_t jacpy_unicode_concat(uint64_t left, uint64_t right) { return HANDLE(PyUnicode_Concat(OBJECT(left), OBJECT(right))); }
+uint64_t jacpy_sequence_repeat(uint64_t value, int64_t count) { return HANDLE(PySequence_Repeat(OBJECT(value), count)); }

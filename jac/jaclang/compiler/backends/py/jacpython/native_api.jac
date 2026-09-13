@@ -1,4 +1,10 @@
 """Native request orchestration; CPython value conversion stays at the ABI."""
+import from jaclang.runtime.python.modules.json {
+    jacpy_json_escape,
+    jacpy_json_scanstring,
+    jacpy_json_scan,
+    jacpy_json_encode
+}
 import from jaclang.runtime.python.modules.queue {
     jacpy_queue_new,
     jacpy_queue_clear,

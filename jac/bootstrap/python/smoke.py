@@ -64,9 +64,22 @@ if required_compiler is not None:
     import binascii
     import _operator
     import _queue
-    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue):
+    import _json
+    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json):
         assert replacement.__name__ in sys.builtin_module_names
         assert replacement.__spec__.origin == "built-in"
+    assert ctypes.pythonapi.jacpy_json_encode
+    assert ctypes.pythonapi.jacpy_json_scan
+    import json
+    document = {"unicode": "\U0001f642\ud800", "nested": [None, True, 2 ** 100, 1.25]}
+    assert json.loads(json.dumps(document, indent=2, sort_keys=True)) == document
+    assert json.loads('{"a":1,"a":2}', object_pairs_hook=tuple) == (("a", 1), ("a", 2))
+    try:
+        json.loads("[" * 100_000 + "0" + "]" * 100_000)
+    except RecursionError:
+        pass
+    else:
+        raise AssertionError("Native JSON did not guard recursive parsing")
     assert ctypes.pythonapi.jacpy_queue_get
     import threading
     fifo = _queue.SimpleQueue()
