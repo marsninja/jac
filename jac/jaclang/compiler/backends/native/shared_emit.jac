@@ -1,17 +1,15 @@
 import type from jaclang.compiler.backends.native.llvm.binding { ModuleRef }
+import type from jaclang.compiler.backends.native.llvm.binding.value { ValueRef }
 
 
-"""Limit a completed native artifact to its declared C ABI.
-
-Dependencies have already been linked into this module. Their Jac-visible
-helpers must not resolve unrelated C archive references or interpose on a
-dynamically loaded library. Explicitly hidden linker-support definitions
-(such as the atexit shim) remain linkable within the final artifact.
-"""
+# Dependencies are already linked. Only the declared C ABI may interpose on
+# other libraries; hidden linker support and LLVM metadata remain available.
 def internalize_native_implementation(module: ModuleRef, exports: list[str]) {
     import from jaclang.compiler.backends.native.llvm.binding.value { Visibility }
     public = set(exports);
-    for value in list(module.functions) + list(module.global_variables) {
+    values: list[ValueRef] = list(module.functions);
+    values.extend(module.global_variables);
+    for value in values {
         if value.is_declaration
             or value.name in public
             or value.name.startswith("llvm.") {
