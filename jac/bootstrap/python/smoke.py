@@ -163,6 +163,36 @@ if required_compiler is not None:
     import symtable
     import tokenize
     import ast
+    # A false comparison argument still evaluates later arguments and calls
+    # the function. Exercise eval, assignment, and statement contexts.
+    for comparison_value, expected in ((0, False), (2, True), (4, False)):
+        for expression in ("capture(1 < value < 3, later())",
+                           "capture(later(), 1 < value < 3, flag=later())",
+                           "capture(1 < value < 3, 0 < value < 5)"):
+            for template in ("{}", "result = {}", "{}\nresult = seen[-1]"):
+                events = []
+                seen = []
+                def later():
+                    events.append("later")
+                    return 42
+                def capture(*args, **kwargs):
+                    seen.append((args, kwargs))
+                    return seen[-1]
+                scope = dict(value=comparison_value, capture=capture, later=later, seen=seen)
+                source = template.format(expression)
+                if template == "{}":
+                    actual = eval(compile(source, "<compare-arguments>", "eval"), scope)
+                else:
+                    exec(compile(source, "<compare-arguments>", "exec"), scope)
+                    actual = scope["result"]
+                expected_args = ((expected, 42), {})
+                if "flag=" in expression:
+                    expected_args = ((42, expected), {"flag": 42})
+                elif "0 < value" in expression:
+                    expected_args = ((expected, 0 < comparison_value < 5), {})
+                assert actual == expected_args and len(seen) == 1
+                assert len(events) == expression.count("later()")
+        assert eval("(1 < value < 3) == expected", dict(value=comparison_value, expected=expected))
     match_source = "def match_alias(value):\n match value:\n  case str() as text: return text\n  case _: return None\n"
     match_tree = ast.parse(match_source)
     assert isinstance(match_tree.body[0].body[0].cases[0].pattern.pattern, ast.MatchClass)

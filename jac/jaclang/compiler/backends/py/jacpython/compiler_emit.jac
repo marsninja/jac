@@ -1481,7 +1481,7 @@ def visit_compare(
 ) -> basicblock | None {
     n = len(c.ops);
     cloc_cmp = nloc(c.lineno, c.end_lineno, c.col_offset, c.end_col_offset);
-    visit_expr(g, c.left, false_shortcircuit_returns=false_shortcircuit_returns);
+    visit_expr(g, c.left);
     cleanup: basicblock | None = None;
     if n > 1 {
         cleanup = g.new_block();
@@ -1988,7 +1988,6 @@ def visit_expr(
             visit_expr(g, ca.func);
             g.emit_op(OP_PUSH_NULL, 0, floc);
         }
-        cmp_cleanup: basicblock | None = None;
         call_args = call_effective_args(ca);
         cloc_call = nloc(ca.lineno, ca.end_lineno, ca.col_offset, ca.end_col_offset);
         kws = call_effective_keywords(ca);
@@ -2013,17 +2012,16 @@ def visit_expr(
         if call_has_unpacking(ca) {
             # CALL_FUNCTION_EX site: build the positional slot here; the kwargs
             # mapping and the call itself go through emit_call_keyword_values /
-            # emit_call_instruction below (and in the compare-cleanup paths).
+            # emit_call_instruction below.
             emit_call_ex_positional(g, ca, cloc_call, not g.u.nested_code_emitted);
         } else {
             ai = 0;
             while ai < len(call_args) {
-                arg_cleanup = visit_expr(
-                    g, call_args[ai], False, False, not g.u.nested_code_emitted
-                );
-                if arg_cleanup is not None {
-                    cmp_cleanup = arg_cleanup;
-                }
+                # Each argument must join its own short-circuit paths before
+                # evaluating the next argument or invoking the callee. Returning
+                # a cleanup block to the surrounding statement skipped later
+                # arguments (and lost the call entirely in nested expressions).
+                visit_expr(g, call_args[ai], False, True, not g.u.nested_code_emitted);
                 ai = ai + 1;
             }
         }
@@ -2032,11 +2030,11 @@ def visit_expr(
                 g, ca, cloc_call, False, not g.u.nested_code_emitted
             );
             if codegen_busy(g) {
-                return cmp_cleanup;
+                return None;
             }
         }
         emit_call_instruction(g, ca, cloc_call);
-        return cmp_cleanup;
+        return None;
     }
     if isinstance(e, Attribute) {
         a = e as Attribute;
