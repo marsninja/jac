@@ -590,6 +590,8 @@ jobs:
         if: matrix.chunk == 'passes-native'
         run: |
           jac install "hypothesis>=6,<7" --global
+          jac run scripts/run_cpython_compiler_tests.jac --module test.test_operator --native-modules _operator
+          jac run scripts/run_cpython_compiler_tests.jac --module test.test_hmac --native-modules _operator
           jac run scripts/run_cpython_compiler_tests.jac --module test.test_binascii --native-modules binascii
           jac run scripts/run_cpython_compiler_tests.jac --module test.test_bisect --native-modules _bisect
           jac run scripts/run_cpython_compiler_tests.jac --module test.test_heapq --native-modules _heapq

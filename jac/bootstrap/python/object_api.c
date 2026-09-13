@@ -176,3 +176,82 @@ void jacpy_set_exception(uint64_t type, const char *message, int64_t size) {
     PyObject *text = PyUnicode_DecodeUTF8(message, size, "surrogatepass");
     if (text) { PyErr_SetObject(OBJECT(type), text); Py_DECREF(text); }
 }
+
+/* Generic numeric and object protocol operations. */
+#define BINARY_OBJECT(name, api) \
+    uint64_t jacpy_##name(uint64_t a, uint64_t b) { return HANDLE(api(OBJECT(a), OBJECT(b))); }
+#define UNARY_OBJECT(name, api) \
+    uint64_t jacpy_##name(uint64_t a) { return HANDLE(api(OBJECT(a))); }
+BINARY_OBJECT(add, PyNumber_Add)
+BINARY_OBJECT(sub, PyNumber_Subtract)
+BINARY_OBJECT(mul, PyNumber_Multiply)
+BINARY_OBJECT(matmul, PyNumber_MatrixMultiply)
+BINARY_OBJECT(floordiv, PyNumber_FloorDivide)
+BINARY_OBJECT(truediv, PyNumber_TrueDivide)
+BINARY_OBJECT(mod, PyNumber_Remainder)
+BINARY_OBJECT(lshift, PyNumber_Lshift)
+BINARY_OBJECT(rshift, PyNumber_Rshift)
+BINARY_OBJECT(and_, PyNumber_And)
+BINARY_OBJECT(xor, PyNumber_Xor)
+BINARY_OBJECT(or_, PyNumber_Or)
+BINARY_OBJECT(iadd, PyNumber_InPlaceAdd)
+BINARY_OBJECT(isub, PyNumber_InPlaceSubtract)
+BINARY_OBJECT(imul, PyNumber_InPlaceMultiply)
+BINARY_OBJECT(imatmul, PyNumber_InPlaceMatrixMultiply)
+BINARY_OBJECT(ifloordiv, PyNumber_InPlaceFloorDivide)
+BINARY_OBJECT(itruediv, PyNumber_InPlaceTrueDivide)
+BINARY_OBJECT(imod, PyNumber_InPlaceRemainder)
+BINARY_OBJECT(ilshift, PyNumber_InPlaceLshift)
+BINARY_OBJECT(irshift, PyNumber_InPlaceRshift)
+BINARY_OBJECT(iand, PyNumber_InPlaceAnd)
+BINARY_OBJECT(ixor, PyNumber_InPlaceXor)
+BINARY_OBJECT(ior, PyNumber_InPlaceOr)
+BINARY_OBJECT(concat, PySequence_Concat)
+BINARY_OBJECT(iconcat, PySequence_InPlaceConcat)
+BINARY_OBJECT(getitem, PyObject_GetItem)
+UNARY_OBJECT(neg, PyNumber_Negative)
+UNARY_OBJECT(pos, PyNumber_Positive)
+UNARY_OBJECT(abs, PyNumber_Absolute)
+UNARY_OBJECT(invert, PyNumber_Invert)
+UNARY_OBJECT(index, PyNumber_Index)
+
+#undef BINARY_OBJECT
+#undef UNARY_OBJECT
+uint64_t jacpy_power(uint64_t a, uint64_t b, int64_t inplace) {
+    return HANDLE(inplace ? PyNumber_InPlacePower(OBJECT(a), OBJECT(b), Py_None)
+                          : PyNumber_Power(OBJECT(a), OBJECT(b), Py_None));
+}
+uint64_t jacpy_boolean(int64_t value) { return HANDLE(PyBool_FromLong(value)); }
+int64_t jacpy_is_none(uint64_t a) { return OBJECT(a) == Py_None; }
+uint64_t jacpy_compare(uint64_t a, uint64_t b, int64_t operation) {
+    return HANDLE(PyObject_RichCompare(OBJECT(a), OBJECT(b), (int)operation));
+}
+int64_t jacpy_contains(uint64_t a, uint64_t b) { return PySequence_Contains(OBJECT(a), OBJECT(b)); }
+int64_t jacpy_sequence_index(uint64_t a, uint64_t b) { return PySequence_Index(OBJECT(a), OBJECT(b)); }
+int64_t jacpy_sequence_count(uint64_t a, uint64_t b) { return PySequence_Count(OBJECT(a), OBJECT(b)); }
+int64_t jacpy_length_hint(uint64_t a, int64_t fallback) { return PyObject_LengthHint(OBJECT(a), fallback); }
+int64_t jacpy_setitem(uint64_t a, uint64_t b, uint64_t value) { return PyObject_SetItem(OBJECT(a), OBJECT(b), OBJECT(value)); }
+int64_t jacpy_delitem(uint64_t a, uint64_t b) { return PyObject_DelItem(OBJECT(a), OBJECT(b)); }
+uint64_t jacpy_getattr(uint64_t a, uint64_t name) { return HANDLE(PyObject_GetAttr(OBJECT(a), OBJECT(name))); }
+uint64_t jacpy_call(uint64_t callable, uint64_t args, uint64_t kwargs) {
+    return HANDLE(PyObject_Call(OBJECT(callable), OBJECT(args), OBJECT(kwargs)));
+}
+uint64_t jacpy_tuple_slice(uint64_t a, int64_t start, int64_t end) { return HANDLE(PyTuple_GetSlice(OBJECT(a), start, end)); }
+int64_t jacpy_is_unicode(uint64_t a) { return PyUnicode_Check(OBJECT(a)); }
+uint64_t jacpy_repr(uint64_t a) { return HANDLE(PyObject_Repr(OBJECT(a))); }
+int64_t jacpy_repr_enter(uint64_t a) { return Py_ReprEnter(OBJECT(a)); }
+void jacpy_repr_leave(uint64_t a) { Py_ReprLeave(OBJECT(a)); }
+uint64_t jacpy_unicode_split(uint64_t a, uint64_t sep) { return HANDLE(PyUnicode_Split(OBJECT(a), OBJECT(sep), -1)); }
+uint64_t jacpy_unicode_join(uint64_t sep, uint64_t items) { return HANDLE(PyUnicode_Join(OBJECT(sep), OBJECT(items))); }
+int64_t jacpy_dict_size(uint64_t a) { return a ? PyDict_Size(OBJECT(a)) : 0; }
+uint64_t jacpy_import_attr(const char *module, const char *name) { return HANDLE(PyImport_ImportModuleAttrString(module, name)); }
+uint64_t jacpy_dict_entry(uint64_t a, int64_t position) {
+    Py_ssize_t pos = position;
+    PyObject *key, *value;
+    if (!PyDict_Next(OBJECT(a), &pos, &key, &value)) return 0;
+    return HANDLE(Py_BuildValue("nOO", pos, key, value));
+}
+#include <openssl/crypto.h>
+int64_t jacpy_crypto_compare(uint64_t a, uint64_t b, int64_t size) {
+    return CRYPTO_memcmp((const void *)(uintptr_t)a, (const void *)(uintptr_t)b, size);
+}

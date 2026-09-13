@@ -44,7 +44,61 @@ import from c {
         handle: u64, index: i64
     ) -> i64;  def jacpy_buffer_new(size: i64) -> u64;  def jacpy_buffer_set(
         handle: u64, index: i64, value: i64
-    );  def jacpy_set_exception(kind: u64, message: str, size: i64);
+    );  def jacpy_set_exception(kind: u64, message: str, size: i64);  def jacpy_add(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_sub(a: u64, b: u64) -> u64;  def jacpy_mul(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_matmul(a: u64, b: u64) -> u64;  def jacpy_floordiv(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_truediv(a: u64, b: u64) -> u64;  def jacpy_mod(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_lshift(a: u64, b: u64) -> u64;  def jacpy_rshift(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_and_(a: u64, b: u64) -> u64;  def jacpy_xor(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_or_(a: u64, b: u64) -> u64;  def jacpy_iadd(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_isub(a: u64, b: u64) -> u64;  def jacpy_imul(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_imatmul(a: u64, b: u64) -> u64;  def jacpy_ifloordiv(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_itruediv(a: u64, b: u64) -> u64;  def jacpy_imod(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_ilshift(a: u64, b: u64) -> u64;  def jacpy_irshift(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_iand(a: u64, b: u64) -> u64;  def jacpy_ixor(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_ior(a: u64, b: u64) -> u64;  def jacpy_concat(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_iconcat(a: u64, b: u64) -> u64;  def jacpy_getitem(
+        a: u64, b: u64
+    ) -> u64;  def jacpy_neg(a: u64) -> u64;  def jacpy_pos(a: u64) -> u64;  def jacpy_abs(
+        a: u64
+    ) -> u64;  def jacpy_invert(a: u64) -> u64;  def jacpy_index(a: u64) -> u64;  def jacpy_power(
+        a: u64, b: u64, inplace: i64
+    ) -> u64;  def jacpy_truth(a: u64) -> i64;  def jacpy_boolean(value: i64) -> u64;  def jacpy_is_none(
+        a: u64
+    ) -> i64;  def jacpy_compare(a: u64, b: u64, operation: i64) -> u64;  def jacpy_contains(
+        a: u64, b: u64
+    ) -> i64;  def jacpy_sequence_index(a: u64, b: u64) -> i64;  def jacpy_sequence_count(
+        a: u64, b: u64
+    ) -> i64;  def jacpy_length_hint(a: u64, fallback: i64) -> i64;  def jacpy_setitem(
+        a: u64, b: u64, value: u64
+    ) -> i64;  def jacpy_delitem(a: u64, b: u64) -> i64;  def jacpy_getattr(
+        a: u64, name: u64
+    ) -> u64;  def jacpy_call(callable: u64, args: u64, kwargs: u64) -> u64;  def jacpy_tuple_slice(
+        a: u64, start: i64, end: i64
+    ) -> u64;  def jacpy_is_unicode(a: u64) -> i64;  def jacpy_text(
+        data: str, size: i64
+    ) -> u64;  def jacpy_repr(a: u64) -> u64;  def jacpy_repr_enter(a: u64) -> i64;  def jacpy_repr_leave(
+        a: u64
+    );  def jacpy_unicode_split(a: u64, sep: u64) -> u64;  def jacpy_unicode_join(
+        sep: u64, items: u64
+    ) -> u64;  def jacpy_dict_size(a: u64) -> i64;  def jacpy_dict_entry(
+        a: u64, position: i64
+    ) -> u64;  def jacpy_import_attr(module: str, name: str) -> u64;  def jacpy_utf8(
+        a: u64
+    ) -> u64;  def jacpy_crypto_compare(a: u64, b: u64, size: i64) -> i64;
 }
 
 def object_error(kind: str, message: str) {
@@ -72,4 +126,45 @@ def write_buffer(data: list[int]) -> u64 {
 
 obj module_failure(Exception) {
     has message: str;
+}
+
+obj boundary_failure(Exception) {}
+
+def required(handle: u64) -> u64 {
+    if handle == 0 {
+        raise boundary_failure();
+    }
+    return handle;
+}
+
+def text_object(value: str) -> u64 {
+    return required(
+        jacpy_text(value, i64(len(value.encode("utf-8", "surrogatepass"))))
+    );
+}
+
+def text_value(value: u64) -> str {
+    buffer = required(jacpy_utf8(value));
+    try {
+        return bytes(read_buffer(buffer)).decode("utf-8", "surrogatepass");
+    } finally {
+        jacpy_release(buffer);
+    }
+}
+
+def repr_value(value: u64) -> str {
+    result = required(jacpy_repr(value));
+    try {
+        return text_value(result);
+    } finally {
+        jacpy_release(result);
+    }
+}
+
+# Both inputs are borrowed; the returned tuple owns its references.
+def pair(first: u64, second: u64) -> u64 {
+    result = required(jacpy_tuple_new(2));
+    jacpy_tuple_set_owned(result, 0, jacpy_retain(first));
+    jacpy_tuple_set_owned(result, 1, jacpy_retain(second));
+    return result;
 }

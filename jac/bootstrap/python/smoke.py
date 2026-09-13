@@ -62,9 +62,30 @@ if required_compiler is not None:
     import _heapq
     import _random
     import binascii
-    for replacement in (_bisect, _heapq, _random, binascii):
+    import _operator
+    for replacement in (_bisect, _heapq, _random, binascii, _operator):
         assert replacement.__name__ in sys.builtin_module_names
         assert replacement.__spec__.origin == "built-in"
+    assert ctypes.pythonapi.jacpy_operator_apply
+    assert _operator.itemgetter(2, 0)(["a", "b", "c"]) == ("c", "a")
+    assert _operator.methodcaller("replace", "a", "b")("native") == "nbtive"
+    assert _operator._compare_digest(b"native", b"native") is True
+    assert _operator._compare_digest(b"native", b"Native") is False
+    repr_events = []
+    class MethodName(str):
+        def __repr__(self):
+            repr_events.append("name")
+            return super().__repr__()
+    class Argument:
+        def __repr__(self):
+            repr_events.append("argument")
+            return "argument"
+    repr(_operator.methodcaller(MethodName("method"), Argument(), key=Argument()))
+    assert repr_events == ["argument", "argument", "name"]
+    recursive_items = []
+    recursive_getter = _operator.itemgetter(recursive_items)
+    recursive_items.append(recursive_getter)
+    assert repr(recursive_getter) == "operator.itemgetter([operator.itemgetter(...)])"
     assert ctypes.pythonapi.jacpy_binascii_convert
     assert binascii.a2b_base64(binascii.b2a_base64(b"native codec")) == b"native codec"
     assert binascii.crc32(b"123456789") == 0xcbf43926
