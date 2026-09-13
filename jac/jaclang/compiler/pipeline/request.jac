@@ -198,9 +198,6 @@ obj ModuleCompilation {
     }
 
     def interface {
-        # Symbol discovery may still be inside an import cycle. Publishing an
-        # interface here would freeze partially resolved bases. The enclosing
-        # interface pass requests dependency interfaces after discovery returns.
         if not self.parse_failed
             and not self.blocked
             and self.source is None

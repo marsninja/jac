@@ -914,10 +914,10 @@ test "test_go_to_definition_nested_impl_symbols" {
         positions = [
             (2, 5, "compiler/ir/schema.jac"),
             (3, 8, "compiler/ir/schema.jac"),
-            (4, 18, "compiler/ir/schema.jac"),
+            (4, 18, "compiler/ir/syntax/nodes.jac"),
             (6, 11, "compiler/ir/schema.jac"),
             (7, 15, "compiler/ir/schema.jac"),
-            (9, 22, "compiler/ir/schema.jac"),
+            (9, 22, "compiler/ir/syntax/nodes.jac"),
             (10, 15, "compiler/ir/schema.jac"),
 
         ];
@@ -954,7 +954,7 @@ test "test_go_to_definition_stub_param_compound_types" {
         for (line, col, desc) in positions {
             result = lsp.get_definition(stub_file, lspt.Position(line - 1, col - 1));
             assert result is not None , f"go-to-def returned None for {desc}";
-            assert "compiler/ir/schema.jac" in str(result) , f"Expected compiler/ir/schema.jac for {desc}, got: {result}";
+            assert "compiler/ir/syntax/nodes.jac" in str(result) , f"Expected compiler/ir/syntax/nodes.jac for {desc}, got: {result}";
         }
     } finally {
         teardown_test();

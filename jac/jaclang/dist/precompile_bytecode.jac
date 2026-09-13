@@ -524,12 +524,12 @@ def _precompile_unit(
 
     compiler = program._get_compiler();
 
-    program.iface_registry().ensure(jac_path);
     code = compiler.get_bytecode(full_target=jac_path, target_program=program);
     if code is None {
         _emit_unit_diagnostics(jac_path, [program, compiler.selfhost.program]);
         return None;
     }
+    program.iface_registry().ensure(jac_path);
     patched = patch_co_filenames_bytes(
         marshal.dumps(code), pkg_root, PRECOMPILE_SENTINEL
     );

@@ -10,7 +10,7 @@ import from pathlib { Path }
 import from jaclang.bootstrap_manifest { SOURCE_ONLY_PATHS }
 
 glob MAGIC = b"JIR\x00",
-     FORMAT_VERSION: int = 26,
+     FORMAT_VERSION: int = 27,
      HEADER_SIZE: int = 32,
      HEADER_FMT: str = "<4sHHIIIIII",
      EXTERNAL_REF: int = 0xFFFFFF,
@@ -49,10 +49,19 @@ obj JirPaths {
                 + "/"
                 + os.path.relpath(path, self.base_dir).replace(os.sep, "/");
         }
+        sdk = _jaclang_pkg_dir;
+        if path == sdk or path.startswith(sdk + os.sep) {
+            return "<jaclang>/" + os.path.relpath(path, sdk).replace(os.sep, "/");
+        }
         return path;
     }
 
     def resolve(path: str) -> str {
+        if path.startswith("<jaclang>/") {
+            return os.path.normpath(
+                os.path.join(_jaclang_pkg_dir, *path[len("<jaclang>/"):].split("/"))
+            );
+        }
         if not self.base_dir or not path {
             return path;
         }

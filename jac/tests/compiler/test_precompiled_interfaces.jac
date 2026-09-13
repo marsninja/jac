@@ -190,6 +190,24 @@ test "relocation changes path fields without rewriting diagnostic messages" {
     }
 }
 
+test "SDK dependency paths survive a different runtime extraction directory" {
+    import from unittest.mock { patch }
+    import jaclang.compiler.session.cache.artifact_codec as codec;
+    paths = codec.JirPaths(base_dir="/app/library");
+    relative = "vendor/typeshed/stdlib/builtins.pyi";
+    with patch.object(codec, "_jaclang_pkg_dir", "/sdk/first") {
+        encoded = paths.encode("/sdk/first/" + relative, "/app");
+        assert encoded == "<jaclang>/" + relative;
+        assert paths.encode("/sdk/first_extra/external.py", "/app")
+            == "/sdk/first_extra/external.py";
+    }
+    with patch.object(codec, "_jaclang_pkg_dir", "/sdk/second") {
+        assert paths.encode("/sdk/second/" + relative, "/app") == encoded;
+        assert paths.resolve(encoded) == "/sdk/second/" + relative;
+        assert codec.JirPaths().resolve(encoded) == "/sdk/second/" + relative;
+    }
+}
+
 test "freezing bootstrap bytecode initializes and preserves its interface" {
     import os;
     import subprocess;
