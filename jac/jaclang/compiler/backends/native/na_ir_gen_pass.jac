@@ -2081,6 +2081,7 @@ walker NaIRGenPass(Transform) {
     def _ptr_box_kind(rt: any) -> int;
     def _struct_ptr_pointee_name(val: ir.Value) -> (str | None);
     def _struct_array_elem_ptr(ptr: ir.Value, idx_val: ir.Value) -> ir.Value;
+    def _restore_list_read(value: (ir.Value | None), collection: uni.UniNode) -> (ir.Value | None);
     def _list_elem_llvm_of(expr: (uni.UniNode | None)) -> (ir.Type | None);
     def _iter_elem_llvm_of(expr: (uni.UniNode | None)) -> (ir.Type | None);
     def _typed_elem_llvm_of(
