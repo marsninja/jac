@@ -135,18 +135,15 @@ impl JacCompiler.get_bytecode(
     import from jaclang.compiler.session.context {
         bind_options,
         context_program,
-        compilation_scope
+        compilation_scope,
+        program_cache_identity
     }
     actual = self.selfhost.resolve(full_target, target_program);
     if not self.selfhost.is_selfhost(actual) {
         options = bind_options(full_target, actual, actual.options);
         actual = context_program(actual, options);
     }
-    with compilation_scope(
-        '' if self.selfhost.is_selfhost(actual) else actual.context_key,
-        actual.options,
-        actual
-    ) {
+    with compilation_scope(program_cache_identity(actual), actual.options, actual) {
         return self._get_bytecode(full_target, actual);
     }
 }
@@ -727,10 +724,11 @@ impl JacCompiler.compile(
     }
     context_errors = len(target_program.errors_had);
     context_warnings = len(target_program.warnings_had);
-    import from jaclang.compiler.session.context { compilation_scope }
-    identity = ''
-        if self.selfhost.is_selfhost(target_program)
-        else target_program.context_key;
+    import from jaclang.compiler.session.context {
+        compilation_scope,
+        program_cache_identity
+    }
+    identity = program_cache_identity(target_program);
     with compilation_scope(identity, options, target_program) {
         import from jaclang.compiler.bootstrap.native_scope {
             activate_scope_lowering,
@@ -1454,18 +1452,15 @@ impl JacCompiler.get_client_artifact(
     import from jaclang.compiler.session.context {
         bind_options,
         context_program,
-        compilation_scope
+        compilation_scope,
+        program_cache_identity
     }
     actual = self.selfhost.resolve(full_target, target_program);
     if not self.selfhost.is_selfhost(actual) {
         options = bind_options(full_target, actual, actual.options);
         actual = context_program(actual, options);
     }
-    with compilation_scope(
-        '' if self.selfhost.is_selfhost(actual) else actual.context_key,
-        actual.options,
-        actual
-    ) {
+    with compilation_scope(program_cache_identity(actual), actual.options, actual) {
         return self._get_client_artifact(full_target, actual);
     }
 }

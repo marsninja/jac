@@ -41,9 +41,13 @@ def _write(path: Path, value: dict[str, object]) {
 }
 
 def _sections(path: str, program: JacProgram) -> dict[int, bytes] {
-    import from jaclang.compiler.session.context { cache_scope, program_for }
+    import from jaclang.compiler.session.context {
+        cache_scope,
+        program_for,
+        program_cache_identity
+    }
     actual = program_for(path, program);
-    with cache_scope(actual.context_key, actual.options, actual) {
+    with cache_scope(program_cache_identity(actual), actual.options, actual) {
         return _context_sections(path);
     }
 }

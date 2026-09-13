@@ -1,4 +1,5 @@
 """Entry declarations are boundaries; ordinary imports inherit compilation context."""
+import from jaclang.compiler.session.context { program_cache_identity }
 import os;
 import from pathlib { Path }
 import from tempfile { TemporaryDirectory }
@@ -231,7 +232,7 @@ test "contextual artifacts cannot overwrite another app cache slot" {
                 str(base / (name + '.jac')), program, CompileOptions()
             );
             selected = context_program(program, options);
-            with cache_scope(selected.context_key) {
+            with cache_scope(program_cache_identity(selected), selected.options) {
                 slots.append(get_module_cache_path(str(base / 'shared.jac')));
             }
         }

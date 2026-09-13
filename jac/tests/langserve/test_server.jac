@@ -1410,14 +1410,17 @@ test "test_jir_cache_invalidated_on_version_mismatch" {
         import from jaclang.compiler.session.compiler { JacCompiler }
         import from jaclang.compiler.session.session { JacProgram }
         dep_src = fixture_path("cross_module_func.jac");
-        import from jaclang.compiler.session.context { cache_scope }
+        import from jaclang.compiler.session.context {
+            cache_scope,
+            program_cache_identity
+        }
         program = JacProgram();
         JacCompiler().get_bytecode(dep_src, program);
         cache_path = artifact_cache_path(dep_src, program);
 
         # Sanity: cache should exist and be valid right now.
         assert cache_path.exists() , "module cache was not written";
-        with cache_scope(program.context_key, program.options) {
+        with cache_scope(program_cache_identity(program), program.options) {
             assert is_module_cache_valid(dep_src, cache_path) , "Fresh cache should be valid";
         }
 
@@ -1428,7 +1431,7 @@ test "test_jir_cache_invalidated_on_version_mismatch" {
         cache_path.write_bytes(bytes(data));
 
         # The cache should now be rejected.
-        with cache_scope(program.context_key, program.options) {
+        with cache_scope(program_cache_identity(program), program.options) {
             assert not is_module_cache_valid(dep_src, cache_path) , (
                 "Cache with mismatched jaclang_version_hash should be invalid"
             );

@@ -128,7 +128,7 @@ def bind_options(
     return bound;
 }
 
-def context_identity(options: CompileOptions) -> str {
+def _identity(options: CompileOptions, entry_point: str) -> str {
     import from jaclang.compiler.session.target_options { effective_default_codespace }
     return hashlib.sha256(
         repr(
@@ -140,10 +140,22 @@ def context_identity(options: CompileOptions) -> str {
                 options.default_codespace or effective_default_codespace(),
                 options.ui,
                 options.project_root,
-                options.entry_point
+                entry_point
             )
         ).encode()
     ).hexdigest()[:20];
+}
+
+def context_identity(options: CompileOptions) -> str {
+    return _identity(options, options.entry_point);
+}
+
+def artifact_identity(options: CompileOptions) -> str {
+    return _identity(options, '');
+}
+
+def program_cache_identity(program: AnalysisServices) -> str {
+    return '' if program.is_bootstrap() else artifact_identity(program.options);
 }
 
 def context_program(program: JacProgram, options: CompileOptions) -> JacProgram {
@@ -204,9 +216,7 @@ def context_app(path: str) -> AppSpec | None {
 def artifact_cache_path(path: str, program: JacProgram) -> Path {
     import from jaclang.compiler.session.cache.artifact_codec { get_module_cache_path }
     selected = program_for(path, program);
-    identity = ''
-        if selected._get_compiler().selfhost.is_selfhost(selected)
-        else selected.context_key;
+    identity = program_cache_identity(selected);
     with cache_scope(identity, selected.options, selected) {
         return get_module_cache_path(path);
     }

@@ -236,9 +236,9 @@ test "JAC_REBUILD recomputes, rewrites, and matches the cold results" {
 test "bytecode and analysis sections share one merged cache JIR" {
     (main, _dep) = _project();
     _check(main);
-    import from jaclang.compiler.session.context { cache_scope }
+    import from jaclang.compiler.session.context { cache_scope, program_cache_identity }
     context = _context(main);
-    with cache_scope(context.context_key, context.options) {
+    with cache_scope(program_cache_identity(context), context.options) {
         wrote = write_module_cache(main, b"fake-bytecode");
     }
     assert wrote , "the merge write was refused";
@@ -1344,5 +1344,36 @@ test "prepared interface references survive full-tree provider replacement" {
         assert detail_scope is not None;
         assert detail_scope.lookup("text") is not None , "the transitive Detail reference lost its fields";
         assert not warm.errors_had , [e.pretty_print() for e in warm.errors_had];
+    }
+}
+
+
+test "entry points reuse dependency artifacts without sharing mutable graphs" {
+    import from jaclang.compiler.session.context { artifact_cache_path }
+    with tempfile.TemporaryDirectory() as tmp {
+        base = Path(tmp);
+        dependency = str(base / 'dependency.jac');
+        Path(dependency).write_text('obj Shared { has value: int = 42; }');
+        first_path = str(base / 'first.jac');
+        second_path = str(base / 'second.jac');
+        for path in [first_path, second_path] {
+            Path(path).write_text(
+                'import from dependency { Shared }\n'
+                'with entry { print(Shared().value); }'
+            );
+        }
+        (first, first_diags) = _check(first_path);
+        assert not first.errors_had , first_diags;
+        (second, second_diags) = _check(second_path);
+        assert not second.errors_had , second_diags;
+        assert first.context_key != second.context_key;
+        assert artifact_cache_path(dependency, first)
+            == artifact_cache_path(dependency, second);
+        assert second.analysis.cache_events.get('dep_hydrate', 0) > 0;
+        first_module = first.iface_registry().resolve_module(dependency);
+        second_module = second.iface_registry().resolve_module(dependency);
+        assert first_module is not None and second_module is not None;
+        assert first_module is not second_module;
+        assert first_module.mutation_permit is not second_module.mutation_permit;
     }
 }

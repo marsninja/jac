@@ -1,4 +1,5 @@
 """Tests for Jac Loader."""
+import from jaclang.compiler.session.context { program_cache_identity }
 import from jaclang.compiler.session.context { artifact_cache_path }
 
 import io;
@@ -493,7 +494,7 @@ test "fresh mtime does not admit a cache written under a different environment" 
         cache_path = artifact_cache_path(jac_file, JacProgram());
         def cache_valid -> bool {
             context = program_for(jac_file, JacProgram());
-            with cache_scope(context.context_key, context.options) {
+            with cache_scope(program_cache_identity(context), context.options) {
                 return is_module_cache_valid(jac_file, cache_path);
             }
         }
@@ -596,7 +597,9 @@ test "editing placement pins in jac.toml invalidates the module cache" {
         cache_path = artifact_cache_path(jac_file, JacProgram());
         cache_program = program_for(jac_file, JacProgram());
         try {
-            with cache_scope(cache_program.context_key, cache_program.options) {
+            with cache_scope(
+                program_cache_identity(cache_program), cache_program.options
+            ) {
                 assert cache_path.exists() , "JIR cache was not written";
                 assert os.path.getmtime(cache_path) > os.path.getmtime(jac_file) , (
                     "cache must be newer than source for the mtime fast path to apply"

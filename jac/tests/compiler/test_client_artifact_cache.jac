@@ -147,8 +147,8 @@ test "an artifact built for another framework is not served" {
     held = other.get_client_artifact(widget);
     assert held is not None;
     held.framework = "solid";
-    import from jaclang.compiler.session.context { cache_scope }
-    with cache_scope(other.context_key, other.options) {
+    import from jaclang.compiler.session.context { cache_scope, program_cache_identity }
+    with cache_scope(program_cache_identity(other), other.options) {
         other._get_compiler()._persist_client_artifact(widget, held);
     }
     (again, compiled) = _compiled_for(JacProgram(), widget);

@@ -346,11 +346,9 @@ obj IfaceRegistry(CatalogResolver) {
     def _compilation_scope -> Iterator[None] {
         import from jaclang.compiler.session.context {
             compilation_scope,
-            context_identity
+            program_cache_identity
         }
-        identity = ''
-            if self.prog.is_bootstrap()
-            else self.prog.context_key or context_identity(self.prog.options);
+        identity = program_cache_identity(self.prog);
         with compilation_scope(identity, self.prog.options, self.prog) {
             yield ;
         }

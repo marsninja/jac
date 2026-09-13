@@ -63,6 +63,7 @@ test "the self-host program keeps its own native stdlib imports" {
 }
 
 test "lazy compiler bytecode does not inherit the caller's analysis request" {
+    import from jaclang.compiler.pipeline.contracts { PassIdentity }
     import from pathlib { Path }
     import from tempfile { TemporaryDirectory }
     import from unittest.mock { patch }
@@ -89,8 +90,10 @@ test "lazy compiler bytecode does not inherit the caller's analysis request" {
         program._compiler = compiler;
         loaded: list[any] = [];
         original: any = driver.run_pass;
-        def load_helper(pass_cls: any, ir_in: any, prog: any, **kwargs: any) -> any {
-            if pass_cls.__name__ == "SymTabBuildPass"
+        def load_helper(
+            pass_id: PassIdentity, ir_in: any, prog: any, **kwargs: any
+        ) -> any {
+            if pass_id == PassIdentity.SymTabBuildPass
                 and ir_in.loc.mod_path == str(app)
                 and not loaded {
                 assert compiler._reentrant_depth > 0;
@@ -98,7 +101,7 @@ test "lazy compiler bytecode does not inherit the caller's analysis request" {
                     compiler.get_bytecode(str(helper), target_program=program)
                 );
             }
-            return original(pass_cls, ir_in, prog, **kwargs);
+            return original(pass_id, ir_in, prog, **kwargs);
         }
         with patch.object(driver, "run_pass", load_helper) {
             program.compile(

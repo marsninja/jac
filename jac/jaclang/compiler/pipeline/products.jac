@@ -355,9 +355,9 @@ def _discard_client_artifact(program: AnalysisServices, module: Module) {
     artifact_for(module).es_ast = None;
     path = product_path(module);
     program.hub.client_artifacts.pop(path, None);
-    import from jaclang.compiler.session.context { cache_scope }
+    import from jaclang.compiler.session.context { cache_scope, program_cache_identity }
     import from jaclang.compiler.session.cache.artifact_codec { get_module_cache_path }
-    identity = '' if program.is_bootstrap() else program.context_key;
+    identity = program_cache_identity(program);
     with cache_scope(identity, program.options, program) {
         try {
             get_module_cache_path(path).unlink(missing_ok=True);

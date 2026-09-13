@@ -92,6 +92,12 @@ graphs. A graph cannot be silently adopted by an unrelated session. Releasing a
 context releases its products and artifacts without invalidating another
 context's graph.
 
+`session/context.jac` distinguishes graph identity from artifact identity.
+Entry points keep separate mutable graphs, while disk artifacts are reusable
+across entries with the same application, placement defaults, framework, and
+code-generation settings. Loading an interface creates a graph in the requesting
+context; it does not share another context's live objects.
+
 Application **context** selects the app's entry and boundary rules. **Placement**
 describes participating codespaces. **Ownership** is reserved for memory and
 borrowing analysis.
@@ -107,6 +113,8 @@ class references. The session resolver loads missing referenced modules through
 the compilation pipeline and requests the scheduled `TypeQueryPass` when a
 source class's type is missing. Catalog providers
 continue to decode their recorded types without running semantic analysis.
+Dependency interfaces are requested after symbol discovery returns, so an
+import cycle cannot publish a partially resolved inheritance chain.
 
 The native parser adapter consumes the central schema and registered early-pass
 bits. `jaclang/bootstrap_manifest.py` is the minimal Python seed boundary needed

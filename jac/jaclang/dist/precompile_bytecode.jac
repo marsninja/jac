@@ -455,7 +455,7 @@ def precompile_unit_context(
     import jaclang.compiler.analysis.types.type_evaluator;
     import jaclang.compiler.session.cache.interface_codec;
     import from jaclang.compiler.session.session { JacProgram }
-    import from jaclang.compiler.session.context { cache_scope }
+    import from jaclang.compiler.session.context { cache_scope, program_cache_identity }
     import from jaclang.cli.workpool { maybe_malloc_trim }
     if not _unit_program {
         _unit_program.append(JacProgram());
@@ -467,7 +467,7 @@ def precompile_unit_context(
         os.path.realpath(jac_path), app
     );
     selected = precompile_context(jac_path, pkg_root, program, source_app);
-    identity = '' if compiler.selfhost.is_selfhost(selected) else selected.context_key;
+    identity = program_cache_identity(selected);
     compiler.unit_collect = collect;
     with cache_scope(identity, selected.options, selected) {
         try {
