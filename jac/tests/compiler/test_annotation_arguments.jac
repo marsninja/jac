@@ -1,6 +1,31 @@
 """Annotation arguments preserve shape and reject mapping spreads."""
+import from jaclang.compiler.backends.common.artifact_store { artifact_for }
 import from jaclang.compiler.session.session { JacProgram }
 import from jaclang.compiler.session.options { CompileOptions }
+import ctypes;
+import from tests.support { get_func, native_force_opts }
+
+test "a field does not shadow its own annotated type in native construction" {
+    program = JacProgram();
+    module = program.compile(
+        file_path="field_annotation.jac",
+        use_str="""
+obj pattern { has value: int = 7; }
+obj MatchAs(pattern) { has pattern: pattern | None; }
+def:pub read_child() -> int {
+    child = pattern(value=42);
+    parent = MatchAs(pattern=child);
+    if parent.pattern is not None { return parent.pattern.value; }
+    return -1;
+}
+""",
+        options=native_force_opts()
+    );
+    assert not program.errors_had;
+    assert artifact_for(module).native_engine is not None;
+    assert get_func(artifact_for(module).native_engine, "read_child", ctypes.c_int64)()
+        == 42;
+}
 
 test "mapping spreads in generic annotations report a type diagnostic" {
     program = JacProgram();

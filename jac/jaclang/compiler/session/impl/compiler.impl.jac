@@ -46,22 +46,27 @@ impl JacCompiler.ensure_stub_catalog -> StubCatalog | None {
         return None;
     }
     found = self.stub_catalog();
-    if found is not None {
-        return found;
+    if found is None {
+        import from jaclang.jac0core.stubcat_hook { env_disabled }
+        if env_disabled() or self._stub_catalog_tried {
+            return None;
+        }
+        self._stub_catalog_tried = True;
+        import jaclang.compiler.session.cache.catalog_format;
+        import jaclang.compiler.session.cache.catalog_reader;
+        import from jaclang.compiler.bootstrap.catalog_loader { ensure_catalog }
+        found = ensure_catalog();
+        self._stub_catalog = found;
     }
-    import from jaclang.jac0core.stubcat_hook { env_disabled }
-    if env_disabled() {
-        return None;
+
+    internal = self._selfhost.peek_program() if self._selfhost is not None else None;
+    if found is not None
+        and internal is not None
+        and not self._reentrant_depth
+        and not internal.has_active_compilation()
+        and any(path.endswith('.pyi') for path in internal.mod.hub) {
+        self.release_compile_state(internal);
     }
-    if self._stub_catalog_tried {
-        return None;
-    }
-    self._stub_catalog_tried = True;
-    import jaclang.compiler.session.cache.catalog_format;
-    import jaclang.compiler.session.cache.catalog_reader;
-    import from jaclang.compiler.bootstrap.catalog_loader { ensure_catalog }
-    found = ensure_catalog();
-    self._stub_catalog = found;
     return found;
 }
 
@@ -188,7 +193,8 @@ impl JacCompiler._get_bytecode(
                     self._restore_sections(
                         full_target,
                         actual_program,
-                        read_sections(sealed_data, sp0 + len(magic0))
+                        read_sections(sealed_data, sp0 + len(magic0)),
+                        base_dir=sealed_root
                     );
                 }
                 return marshal.loads(
@@ -263,6 +269,8 @@ impl JacCompiler._get_bytecode(
     }
     options = CompileOptions();
     result: (uni.Module | None) = None;
+    enclosing_closure = self._closure_opts;
+    self._closure_opts = options;
     try {
         result = self.compile(
             file_path=full_target, target_program=actual_program, options=options
@@ -285,6 +293,7 @@ impl JacCompiler._get_bytecode(
         }
         return None;
     } finally {
+        self._closure_opts = enclosing_closure;
         if is_internal {
             if self.selfhost.at_outermost_bytecode() {
                 self.selfhost.evict_unit(
@@ -418,7 +427,10 @@ impl JacCompiler._load_native_from_bitcode(
 }
 
 impl JacCompiler._restore_sections(
-    full_target: str, actual_program: JacProgram, secs: dict[int, bytes]
+    full_target: str,
+    actual_program: JacProgram,
+    secs: dict[int, bytes],
+    base_dir: str = ""
 ) -> None {
     import pickle;
     client_bytes = secs.get(SEC_CLIENT);
@@ -444,7 +456,12 @@ impl JacCompiler._restore_sections(
                 summary_from_bytes
             }
             import from jaclang.compiler.pipeline.keys { PLACEMENT_SUMMARY }
-            restored = summary_from_bytes(placement_bytes);
+            import from jaclang.compiler.session.cache.artifact_codec {
+                JirPaths,
+                SEC_PATH_ROOT
+            }
+            paths = JirPaths.from_bytes(secs.get(SEC_PATH_ROOT), base_dir);
+            restored = summary_from_bytes(placement_bytes, path_mapper=paths.resolve);
             if restored is not None {
                 actual_program.analysis.publish(
                     full_target, PLACEMENT_SUMMARY, restored
@@ -1523,9 +1540,9 @@ impl JacCompiler.release_compile_state(target_program: JacProgram) -> None {
         or (internal is not None and internal.has_active_compilation()) {
         raise RuntimeError("Cannot release compiler state during compilation");
     }
-    owner.release_compile_closure(collect=False);
+    owner.release_compile_closure(collect=False, retain_stubs=False);
     if internal is not None and internal is not owner {
-        internal.release_compile_closure(collect=False);
+        internal.release_compile_closure(collect=False, retain_stubs=False);
     }
     self.source_cache.clear();
 

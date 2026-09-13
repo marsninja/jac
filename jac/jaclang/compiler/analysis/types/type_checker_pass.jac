@@ -22,6 +22,7 @@ import from jaclang.compiler.ir.schema {
     FString,
     FuncCall,
     FuncSignature,
+    GenCompr,
     HasVar,
     ImplDef,
     Import,
@@ -172,6 +173,7 @@ walker TypeCheckPass(UniPass) {
     can exit_compare_expr with CompareExpr exit;
     def _diag_erased_membership(nd: CompareExpr, hay: Expr, op_text: str) -> None;
     can exit_func_call with FuncCall exit;
+    can exit_gen_compr with GenCompr exit;
     def _check_intrinsic_call(nd: FuncCall) -> None;
     def _check_intrinsic_collision(nd: Ability) -> None;
     can exit_jsx_element with JsxElement exit;

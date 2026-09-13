@@ -184,6 +184,12 @@ def _chunks_receiver_type(nd: FuncCall) -> (str | None) {
     }
 }
 
+impl TypeCheckPass.exit_gen_compr with GenCompr exit {
+    if self._lambda_depth == 0 {
+        self.evaluator.get_type_of_expression(here);
+    }
+}
+
 impl TypeCheckPass.exit_func_call with FuncCall exit {
     import from jaclang.compiler.analysis.binding.symbol_utils {
         CallKind,

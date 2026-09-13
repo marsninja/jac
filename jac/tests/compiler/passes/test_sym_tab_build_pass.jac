@@ -1,6 +1,7 @@
 """Symbol table build pass tests – migrated from test_sym_tab_build_pass.py."""
 
 import from jaclang.compiler.pipeline.contracts { PassIdentity }
+import from jaclang.compiler.ir.identity { MutationScope }
 import os;
 import from tests.support { JAC_ROOT }
 import jaclang;
@@ -222,4 +223,99 @@ class C:
         assert not collect_member_syms(cls_scope, "dead_method") , "dead `else` must not resolve";
     }
     assert not collect_member_syms(cls_scope, "future_method") , "dead guard must not resolve";
+}
+
+test "absorbing a local declaration preserves its binding and overloads" {
+    import from jaclang.compiler.analysis.binding.sym_tab_build_pass { SymTabBuildPass }
+    prog = JacProgram();
+    scope = prog._get_compiler().parse_str(
+        "def answer() -> int { return 42; }", "local_include.jac", prog
+    );
+    builder = run_pass(PassIdentity.SymTabBuildPass, scope, prog);
+    assert isinstance(builder, SymTabBuildPass);
+    symbol = scope.lookup("answer");
+    assert symbol is not None;
+    declaration = symbol.decl;
+    builder._import_absorbed_symbol(scope, symbol);
+    assert scope.lookup("answer") is symbol;
+    assert symbol.defn == [declaration] , "self-absorption duplicated a local declaration";
+    assert scope.names_in_scope_overload.get("answer", []) == [];
+    assert declaration.sym is symbol;
+}
+
+test "self include preserves the existing overload set" {
+    import from jaclang.compiler.analysis.binding.sym_tab_build_pass { SymTabBuildPass }
+    prog = JacProgram();
+    scope = prog._get_compiler().parse_str(
+        "def choose(value: int) -> int { return value; }\n"
+            + "def choose(value: str) -> str { return value; }\n"
+            + "include self_include;\n",
+        "self_include.jac",
+        prog
+    );
+    with MutationScope(prog.analysis.mutations, 2) {
+        scope.get_all_sub_nodes(uni.Import)[0].absorbed_mod = scope;
+    }
+    run_pass(PassIdentity.SymTabBuildPass, scope, prog);
+    symbol = scope.lookup("choose");
+    assert symbol is not None;
+    assert len(symbol.defn) == 2;
+    assert len(scope.names_in_scope_overload.get("choose", [])) == 1;
+    assert symbol.parent_tab is scope;
+}
+
+test "include bindings preserve source declarations and lazy symbol providers" {
+    import from pathlib { Path }
+    import from tempfile { TemporaryDirectory }
+    import from jaclang.compiler.session.options { CompileOptions }
+    import from jaclang.compiler.analysis.binding.sym_tab_build_pass { SymTabBuildPass }
+    import from jaclang.compiler.bootstrap.catalog_loader { jaclang_pkg_dir }
+    import from jaclang.compiler.session.cache.interface_codec {
+        open_module_iface,
+        iface_module
+    }
+    import from jaclang.compiler.ir.types.nodes { FunctionType }
+    with TemporaryDirectory() as directory {
+        source_path = Path(directory) / "definitions.jac";
+        source_path.write_text("def answer() -> int { return 42; }\n");
+        prog = JacProgram();
+        source = prog.compile(
+            str(source_path),
+            options=CompileOptions(
+                no_cgen=True,
+                symtab_ir_only=True,
+                need_full_ast=True,
+                default_codespace="server"
+            )
+        );
+        evaluator = prog.get_type_evaluator();
+        import from jaclang.compiler.pipeline.products { require_product }
+        import from jaclang.compiler.pipeline.contracts { CompilationProduct }
+        assert require_product(prog, source, CompilationProduct.INTERFACE);
+        payload = prog.iface_registry().cached_interface(str(source_path));
+        assert payload is not None;
+        catalog = open_module_iface(payload, jaclang_pkg_dir());
+        assert catalog is not None;
+        hydrated = iface_module(catalog);
+        assert hydrated is not None;
+        for imported in (source, hydrated) {
+            original = imported.lookup("answer");
+            assert original is not None;
+            declaration = original.decl;
+            consumer = prog._get_compiler().parse_str(
+                "include definitions;", str(Path(directory) / "consumer.jac"), prog
+            );
+            with MutationScope(prog.analysis.mutations, 2) {
+                consumer.get_all_sub_nodes(uni.Import)[0].absorbed_mod = imported;
+            }
+            run_pass(PassIdentity.SymTabBuildPass, consumer, prog);
+            binding = consumer.lookup("answer");
+            assert binding is not None and binding is not original;
+            assert declaration.sym is original , "include rebound the source declaration";
+            assert binding.decl is not declaration;
+            assert binding.parent_tab is consumer;
+            assert binding.provider is original.provider;
+            assert isinstance(evaluator.get_type_of_symbol(binding), FunctionType);
+        }
+    }
 }

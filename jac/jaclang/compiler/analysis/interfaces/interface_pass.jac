@@ -9,6 +9,7 @@ walker InterfaceFactsPass(ProgramTransform) {
         }
         import from jaclang.compiler.analysis.interfaces.facts { InterfaceProduct }
         import from jaclang.compiler.session.cache.artifact_codec {
+            JirPaths,
             compute_stub_module_key,
             is_compiler_tree_path,
             is_stub_like_path
@@ -36,14 +37,22 @@ walker InterfaceFactsPass(ProgramTransform) {
             );
             return ir_in;
         }
+        paths = JirPaths(base_dir=os.path.dirname(path));
+        package_dir = os.path.realpath(
+            self.prog.options.project_root or paths.base_dir
+        );
+        def encode_path(source: str) -> str {
+            return paths.encode(source, package_dir);
+        }
         writer = CatalogBuilder(
             evaluator=self.prog.get_type_evaluator(),
             pkg_dir=registry.package_directory(),
-            boundary=ir_in
+            boundary=ir_in,
+            path_mapper=encode_path
         );
         writer.add_module(ir_in, ir_in.name or '');
         writer.force_all();
-        prepared = writer.prepare(path, {});
+        prepared = writer.prepare(writer.rel_of(path), {});
         if writer.orphans {
             registry.reject_interface(path);
             self.prog.analysis.publish(
@@ -91,7 +100,7 @@ walker InterfaceFactsPass(ProgramTransform) {
         self.prog.analysis.publish(
             path, INTERFACE, InterfaceProduct(encoded, read_iface_hash(encoded) or '')
         );
-        registry.publish_interface(path, encoded);
+        registry.publish_interface(path, encoded, paths);
         return ir_in;
     }
 }

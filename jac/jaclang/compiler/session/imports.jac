@@ -21,7 +21,7 @@ import from jaclang.compiler.session.cache.interface_codec {
 import type from jaclang.compiler.ir.schema { Module }
 import from jaclang.compiler.pipeline.keys { PLACEMENT_SUMMARY }
 import from contextlib { contextmanager }
-import from collections.abc { Iterator }
+import from collections.abc { Callable, Iterator }
 import from jaclang.compiler.pipeline.contracts { AnalysisFact }
 import os;
 import time;
@@ -31,6 +31,8 @@ import from jaclang.compiler.session.cache.artifact_codec {
     SEC_DIAG,
     SEC_IFACE,
     SEC_PLACEMENT,
+    SEC_PATH_ROOT,
+    JirPaths,
     cache_mode,
     ct_deps_section,
     deps_section,
@@ -41,6 +43,7 @@ import from jaclang.compiler.session.cache.artifact_codec {
     jir_cacheable_source_path,
     module_cache_key,
     read_dep_hashes,
+    read_jir_paths,
     read_section_bytes,
     write_module_cache
 }
@@ -51,6 +54,10 @@ glob DIAG_SCHEMA: int = 2,
 def iface_verify_enabled -> bool {
     truthy: set = {'1', 'true', 'True', 'TRUE', 'yes', 'YES', 'on', 'ON'};
     return os.environ.get('JAC_IFACE_VERIFY', '') in truthy;
+}
+
+def _interface_source_path(path: str) -> bool {
+    return jir_cacheable_source_path(path) and not is_stub_like_path(path);
 }
 
 def _symtab_provides -> set[AnalysisFact] {
@@ -138,6 +145,7 @@ obj IfaceEntry {
         section: (bytes | None) = None,
         placement: (bytes | None) = None,
         diags: (bytes | None) = None,
+        paths: JirPaths | None = None,
         catalog: StubCatalog | None = None,
         module: Module | None = None,
         revision: str = "",
@@ -148,7 +156,8 @@ obj InterfaceSnapshot {
     has cache_key: str,
         section: bytes,
         digest: str,
-        dependency_section: bytes;
+        dependency_section: bytes,
+        paths: JirPaths | None = None;
 }
 
 obj IfaceRegistry(CatalogResolver) {
@@ -295,7 +304,9 @@ obj IfaceRegistry(CatalogResolver) {
         section: (bytes | None),
         placement: (bytes | None),
         diags: (bytes | None) = None,
-        remember: bool = True
+        remember: bool = True,
+        paths: JirPaths | None = None,
+        dependency_section: bytes | None = None
     ) -> IfaceEntry {
         ent = IfaceEntry(
             path=resolved,
@@ -303,6 +314,7 @@ obj IfaceRegistry(CatalogResolver) {
             section=section,
             placement=placement,
             diags=diags,
+            paths=paths,
             revision=module_revision(resolved)
         );
         prev = self.entries.get(resolved);
@@ -313,6 +325,19 @@ obj IfaceRegistry(CatalogResolver) {
         }
         if remember {
             self.entries[resolved] = ent;
+            if section is not None {
+                try {
+                    self._interfaces[resolved] = InterfaceSnapshot(
+                        module_cache_key(resolved),
+                        section,
+                        digest,
+                        dependency_section
+                            if dependency_section is not None
+                            else deps_section(self.dep_rows(resolved)),
+                        paths
+                    );
+                } except OSError {}
+            }
         }
         return ent;
     }
@@ -397,7 +422,9 @@ obj IfaceRegistry(CatalogResolver) {
             section,
             read_section_bytes(data, SEC_PLACEMENT),
             diags=read_section_bytes(data, SEC_DIAG),
-            remember=check_deps
+            remember=check_deps,
+            paths=read_jir_paths(data, base_dir),
+            dependency_section=read_section_bytes(data, SEC_DEPS)
         );
     }
 
@@ -431,6 +458,9 @@ obj IfaceRegistry(CatalogResolver) {
         path: str, compile_on_miss: bool = True
     ) -> (IfaceEntry | None) {
         resolved = os.path.realpath(path);
+        if not _interface_source_path(resolved) {
+            return None;
+        }
         ent = self.entries.get(resolved);
         if ent is not None and self._entry_fresh(ent) {
             return ent;
@@ -453,11 +483,7 @@ obj IfaceRegistry(CatalogResolver) {
                 return found;
             }
         }
-        if (
-            not compile_on_miss
-            or not jir_cacheable_source_path(resolved)
-            or is_stub_like_path(resolved)
-        ) {
+        if not compile_on_miss {
             return None;
         }
         if not os.path.isfile(resolved) {
@@ -495,7 +521,10 @@ obj IfaceRegistry(CatalogResolver) {
         catalog = ent.catalog;
         if catalog is None {
             catalog = open_module_iface(
-                ent.section, self.package_directory(), resolver=self
+                ent.section,
+                self.package_directory(),
+                resolver=self,
+                path_mapper=ent.paths.resolve if ent.paths is not None else None
             );
         }
         if catalog is None {
@@ -527,8 +556,10 @@ obj IfaceRegistry(CatalogResolver) {
             import from jaclang.compiler.analysis.placement.summary {
                 summary_from_bytes
             }
-            import from jaclang.compiler.pipeline.keys { PLACEMENT_SUMMARY }
-            restored = summary_from_bytes(ent.placement);
+            restored = summary_from_bytes(
+                ent.placement,
+                path_mapper=ent.paths.resolve if ent.paths is not None else None
+            );
             if restored is not None {
                 self.prog.analysis.publish(ent.path, PLACEMENT_SUMMARY, restored);
             }
@@ -543,7 +574,9 @@ obj IfaceRegistry(CatalogResolver) {
         self.prog.analysis.mark(mod, _symtab_provides());
     }
 
-    def _profiles_of(diag_bytes: (bytes | None)) -> (dict | None) {
+    static def _profiles_of(
+        diag_bytes: (bytes | None), path_mapper: Callable[[str], str] | None = None
+    ) -> (dict | None) {
         import json;
         if diag_bytes is None {
             return None;
@@ -556,7 +589,23 @@ obj IfaceRegistry(CatalogResolver) {
         if payload.get("schema") != DIAG_SCHEMA {
             return None;
         }
-        return payload.get("profiles", {}) or {};
+        profiles = payload.get("profiles", {}) or {};
+        if path_mapper is not None {
+            for profile in profiles.values() {
+                for kind in ("errors", "warnings") {
+                    for record in profile.get(kind, []) {
+                        span = record.get("span");
+                        if span {
+                            span[0] = path_mapper(span[0]);
+                        }
+                        for related in record.get("related", []) {
+                            related[1][0] = path_mapper(related[1][0]);
+                        }
+                    }
+                }
+            }
+        }
+        return profiles;
     }
 
     def _replay_records(prof: dict) {
@@ -600,7 +649,7 @@ obj IfaceRegistry(CatalogResolver) {
             or bool(options.default_codespace) {
             return False;
         }
-        if not jir_cacheable_source_path(resolved) or is_stub_like_path(resolved) {
+        if not _interface_source_path(resolved) {
             return False;
         }
         if compiler.stub_catalog_disabled {
@@ -645,7 +694,9 @@ obj IfaceRegistry(CatalogResolver) {
         }
         prof: (dict | None) = None;
         if profile_key is not None {
-            profiles = self._profiles_of(ent.diags);
+            profiles = self._profiles_of(
+                ent.diags, ent.paths.resolve if ent.paths is not None else None
+            );
             prof = profiles.get(profile_key) if profiles is not None else None;
             if prof is None {
                 self._event("dep_profile_miss");
@@ -680,7 +731,8 @@ obj IfaceRegistry(CatalogResolver) {
             return None;
         }
         (data, base_dir) = found;
-        profiles = self._profiles_of(read_section_bytes(data, SEC_DIAG));
+        paths = read_jir_paths(data, base_dir);
+        profiles = self._profiles_of(read_section_bytes(data, SEC_DIAG), paths.resolve);
         if profiles is None {
             return None;
         }
@@ -714,7 +766,9 @@ obj IfaceRegistry(CatalogResolver) {
             digest,
             section,
             read_section_bytes(data, SEC_PLACEMENT),
-            diags=read_section_bytes(data, SEC_DIAG)
+            diags=read_section_bytes(data, SEC_DIAG),
+            paths=paths,
+            dependency_section=read_section_bytes(data, SEC_DEPS)
         );
         mod = self._materialize(ent);
         if mod is None {
@@ -776,7 +830,10 @@ obj IfaceRegistry(CatalogResolver) {
     ) -> None {
         import json;
 
-        if mod is None or mod.parse_failed or resolved in self._incoherent {
+        if mod is None
+            or mod.parse_failed
+            or not _interface_source_path(resolved)
+            or resolved in self._incoherent {
             return;
         }
         sections: dict[int, bytes] = {};
@@ -800,6 +857,10 @@ obj IfaceRegistry(CatalogResolver) {
         }
         if payload is not None {
             sections[SEC_IFACE] = payload;
+
+            sections[SEC_PATH_ROOT] = memo.paths.to_bytes()
+                if memo is not None and memo.paths is not None
+                else b"";
         }
         if not digest {
             sections[SEC_DEPS] = deps_section(self.dep_rows(resolved));
@@ -861,7 +922,9 @@ obj IfaceRegistry(CatalogResolver) {
                 digest,
                 sections.get(SEC_IFACE),
                 sections.get(SEC_PLACEMENT),
-                diags=sections.get(SEC_DIAG)
+                diags=sections.get(SEC_DIAG),
+                paths=memo.paths if memo is not None else None,
+                dependency_section=sections.get(SEC_DEPS)
             );
         }
         if digest {
@@ -883,21 +946,17 @@ obj IfaceRegistry(CatalogResolver) {
     }
 
     def _existing_profiles(resolved: str) -> dict {
-        import json;
         found = self._module_jir(resolved);
         if found is None {
             return {};
         }
         try {
-            diag_bytes = read_section_bytes(found[0], SEC_DIAG);
-            if diag_bytes is None {
-                return {};
-            }
-            payload = json.loads(diag_bytes.decode("utf-8"));
-            if payload.get("schema") != DIAG_SCHEMA {
-                return {};
-            }
-            return payload.get("profiles", {}) or {};
+            (data, base_dir) = found;
+            return self._profiles_of(
+                read_section_bytes(data, SEC_DIAG),
+                read_jir_paths(data, base_dir).resolve
+            )
+                or {};
         } except Exception {
             return {};
         }
@@ -1124,7 +1183,7 @@ obj IfaceRegistry(CatalogResolver) {
     def interface_cacheable(path: str, mod: Module) -> bool {
         return not mod.parse_failed
             and not mod.codespace_inferred
-            and jir_cacheable_source_path(path)
+            and _interface_source_path(path)
             and os.path.isfile(path);
     }
 
@@ -1147,7 +1206,7 @@ obj IfaceRegistry(CatalogResolver) {
         self._event("iface_incoherent");
     }
 
-    def publish_interface(path: str, encoded: bytes) {
+    def publish_interface(path: str, encoded: bytes, paths: JirPaths | None = None) {
         import from jaclang.compiler.session.cache.interface_codec { read_iface_hash }
         with self._compilation_scope() {
             self._incoherent.discard(path);
@@ -1155,7 +1214,8 @@ obj IfaceRegistry(CatalogResolver) {
                 cache_key=module_cache_key(path),
                 section=encoded,
                 digest=read_iface_hash(encoded) or '',
-                dependency_section=deps_section(self.dep_rows(path))
+                dependency_section=deps_section(self.dep_rows(path)),
+                paths=paths
             );
             self._event("iface_encode");
         }
