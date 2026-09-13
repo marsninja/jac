@@ -112,7 +112,9 @@ Loading a dependency-validated interface also seeds the registry's encoding
 memo. A consumer that needs the source tree can still run its requested
 passes without re-encoding that unchanged interface and its dependency closure.
 Include bindings own local declaration nodes and retain the original symbol's
-lazy provider. They never rebind a foreign declaration's symbol. Interface
+lazy provider. Already-local symbols keep their existing bindings: copying
+them during a self-include would append to the overload list being traversed.
+Foreign declarations are never rebound. Interface
 encoding takes an alias category from its resolved definition, keeping hashes
 stable when later imports refine that definition.
 

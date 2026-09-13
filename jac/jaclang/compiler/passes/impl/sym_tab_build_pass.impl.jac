@@ -126,7 +126,7 @@ impl SymTabBuildPass.exit_test with Test exit {
 impl SymTabBuildPass._import_absorbed_symbol(
     scope: UniScopeNode, symbol: Symbol
 ) -> None {
-    if symbol.access == SymbolAccess.PRIVATE {
+    if symbol.access == SymbolAccess.PRIVATE or symbol.parent_tab is scope {
         return;
     }
 

@@ -223,6 +223,42 @@ class C:
     assert not collect_member_syms(cls_scope, "future_method") , "dead guard must not resolve";
 }
 
+test "absorbing a local declaration preserves its binding and overloads" {
+    import from jaclang.compiler.passes.sym_tab_build_pass { SymTabBuildPass }
+    prog = JacProgram();
+    scope = prog._get_compiler().parse_str(
+        "def answer() -> int { return 42; }", "local_include.jac", prog
+    );
+    builder = run_pass(SymTabBuildPass, scope, prog);
+    symbol = scope.lookup("answer");
+    assert symbol is not None;
+    declaration = symbol.decl;
+    builder._import_absorbed_symbol(scope, symbol);
+    assert scope.lookup("answer") is symbol;
+    assert symbol.defn == [declaration] , "self-absorption duplicated a local declaration";
+    assert scope.names_in_scope_overload.get("answer", []) == [];
+    assert declaration.sym is symbol;
+}
+
+test "self include preserves the existing overload set" {
+    import from jaclang.compiler.passes.sym_tab_build_pass { SymTabBuildPass }
+    prog = JacProgram();
+    scope = prog._get_compiler().parse_str(
+        "def choose(value: int) -> int { return value; }\n"
+            + "def choose(value: str) -> str { return value; }\n"
+            + "include self_include;\n",
+        "self_include.jac",
+        prog
+    );
+    scope.get_all_sub_nodes(uni.Import)[0].absorbed_mod = scope;
+    run_pass(SymTabBuildPass, scope, prog);
+    symbol = scope.lookup("choose");
+    assert symbol is not None;
+    assert len(symbol.defn) == 2;
+    assert len(scope.names_in_scope_overload.get("choose", [])) == 1;
+    assert symbol.parent_tab is scope;
+}
+
 test "include bindings preserve source declarations and lazy symbol providers" {
     import from pathlib { Path }
     import from tempfile { TemporaryDirectory }
