@@ -5233,7 +5233,13 @@ impl NativeBuiltinEmitter.emit_str(
         "snprintf", ir.IntType(32), [i8p, ir.IntType(64), i8p], var_arg=True
     );
 
-    fmt = p._get_snprintf_fmt("%ld");
+    unsigned = bool(ctx.arg_nodes) and p._is_unsigned_node(ctx.arg_nodes[0]);
+    if isinstance(arg_val.type, ir.IntType) and arg_val.type.width < 64 {
+        arg_val = b.zext(arg_val, ir.IntType(64))
+            if unsigned
+            else b.sext(arg_val, ir.IntType(64));
+    }
+    fmt = p._get_snprintf_fmt("%llu" if unsigned else "%lld");
     fmt_ptr = b.bitcast(fmt, i8p, name="str.fmt.ptr");
     str_n32 = b.call(
         snprintf,
