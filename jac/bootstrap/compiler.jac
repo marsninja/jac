@@ -327,6 +327,7 @@ def compile_image(
                 and not any(source.startswith(nested_root) for nested_root in nested)
         ];
         modules: dict[str, dict[str, any]] = {};
+        results: list[dict[str, any]] = [];
         failures: list[str] = [];
         def job(request: dict[str, any]) -> dict[str, any] {
             source = Path(str(request["path"]));
@@ -344,6 +345,7 @@ def compile_image(
                 return;
             }
             relative_jir = Path(source).with_suffix(".jir").as_posix();
+            results.append(result);
             (_, fullname, is_package) = jir_to_module("jaclang", relative_jir);
             modules[source] = {
                 "module": fullname,
@@ -400,11 +402,21 @@ def compile_image(
         }
         shutil.move(str(site), str(output));
     }
-    sys.stdout.write(
+    sys.stderr.write(
         json.dumps(
             {
                 "image": str(output),
                 "modules": len(modules),
+                "reused": sum(
+                    1
+                    for result in results
+                    if result.get("cached", False)
+                ),
+                "compiled": sum(
+                    1
+                    for result in results
+                    if not result.get("cached", False)
+                ),
                 "seconds": time.monotonic() - started
             }
         )

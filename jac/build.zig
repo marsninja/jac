@@ -38,6 +38,7 @@ const Shim = struct { bin: std.Build.LazyPath };
 /// The build never adds the checkout to Python's import path.
 const JACBOOT_SRC =
     "import os, sys\n" ++
+    "sys.stdout = sys.stderr\n" ++
     "sys.dont_write_bytecode = True\n" ++
     "root, mode, argv = sys.argv[1], sys.argv[2], sys.argv[3:]\n" ++
     "sys.path.insert(0, root)\n" ++
@@ -69,6 +70,7 @@ const JacTool = struct {
         cmd.addArg(mode);
         const python_dir = std.fs.path.dirname(std.fs.path.dirname(std.fs.path.dirname(self.python).?).?).?;
         cmd.setEnvironmentVariable("SSL_CERT_FILE", self.b.fmt("{s}/build/cacert.pem", .{python_dir}));
+        cmd.setEnvironmentVariable("JAC_NATIVE_FLOOR_DIR", self.b.fmt("{s}/build/lib", .{python_dir}));
         cmd.addArgs(args);
         cmd.step.dependOn(self.build_python);
         cmd.step.dependOn(self.fetch_typeshed);
@@ -395,17 +397,18 @@ pub fn build(b: *std.Build) void {
         break :blk &fetch.step;
     };
 
-    // --- launcher stub: the in-checkout compiler compiles launcher/ natively --
+    // --- launcher stub: the staged compiler compiles launcher/ natively --
     // A native build treats any native-seam demotion in the stub's closure as
     // a hard error: a function demoted to Python-only cannot run before CPython
     // exists. (The whole-program type-check gate is not used here: it cannot
     // see the bundled per-OS native floors the launcher imports.) Needs the
-    // LLVMPY_* shim placed in-tree and the target's C floor archives.
+    // staged LLVMPY_* shim and the target's C floor archives.
     const build_stub = tool.run("jac", &.{ "build", "--native" });
     build_stub.addFileArg(b.path("launcher/launcher.jac"));
     build_stub.addArg("-o");
     const stub = build_stub.addOutputFileArg("jac-stub");
     build_stub.setCwd(b.path("launcher"));
+    build_stub.setEnvironmentVariable("JAC_NATIVE_FLOOR_DIR", b.fmt("{s}/build/lib", .{python_tree}));
     build_stub.step.dependOn(fetch_target);
     addTreeInputs(b, build_stub, "jaclang");
     build_stub.addFileInput(b.path("launcher/launcher.jac"));
@@ -413,8 +416,7 @@ pub fn build(b: *std.Build) void {
         .dependOn(&b.addInstallBinFile(stub, "jac").step);
 
     // --- runtime payload: -Dpayload override, else mkpayload ---------------
-    // The stub catalog (pre-resolved typeshed types) is a second mkpayload
-    // output that `pack` places as its own page-aligned region of the binary;
+    // The prebuilt stub catalog is also placed in a page-aligned binary region;
     // a prebuilt -Dpayload carries the same catalog as a file inside it.
     var stubcat_region: ?std.Build.LazyPath = null;
     const payload: std.Build.LazyPath = if (b.option([]const u8, "payload", "Path to a prebuilt runtime payload .tar.zst")) |p|
@@ -457,9 +459,7 @@ pub fn build(b: *std.Build) void {
             mk.addArg(b.fmt("--musl={s}", .{musl_lib}));
         }
 
-        // Wasm32 libc bitcode: runs for EVERY build, dev included (a -Ddev
-        // binary reads .pbs-build/wasm32/libc directly); only the bundling
-        // stays conditional -- a linked binary has no payload to carry it in.
+        // Build and bundle the wasm32 libc bitcode for native application builds.
         {
             const wasm_libc = b.pathFromRoot(".pbs-build/wasm32/libc");
             const vendor_wasm = tool.run("payload", &.{

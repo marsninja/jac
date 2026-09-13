@@ -538,21 +538,14 @@ def resolve_native_module(
         if local is not None {
             return (str(os.path.relpath(local, os.path.abspath(base_dir))), local);
         }
-        if path_name != clean {
-            search = os.path.abspath(base_dir);
-            while True {
-                cand = _inferred_native_path(
-                    _native_variant_path(os.path.join(search, path_name))
-                );
-                if cand is not None {
-                    rel = str(os.path.relpath(cand, os.path.abspath(base_dir)));
-                    return (rel, cand);
-                }
-                parent = os.path.dirname(search);
-                if parent == search {
-                    break;
-                }
-                search = parent;
+        import from jaclang.compiler.driver.modresolver { resolve_relative_path }
+        resolved = resolve_relative_path(
+            module_name, os.path.join(base_dir, "__native_import__.jac")
+        );
+        if resolved.endswith(".jac") {
+            cand = _inferred_native_path(_native_variant_path(resolved[:-4]));
+            if cand is not None {
+                return (str(os.path.relpath(cand, os.path.abspath(base_dir))), cand);
             }
         }
     }
