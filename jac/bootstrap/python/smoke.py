@@ -66,6 +66,18 @@ if required_compiler is not None:
     assert ctypes.pythonapi.jacpy_bisect
     assert ctypes.pythonapi.jacpy_heapify
     assert _bisect.bisect_right([1, 2, 2, 4], 2) == 3
+    import builtins
+    original_value_error = builtins.ValueError
+    try:
+        builtins.ValueError = RuntimeError
+        try:
+            _bisect.bisect_left([], 0, lo=-1)
+        except original_value_error:
+            pass
+        else:
+            raise AssertionError("Native exceptions must ignore rebound builtins")
+    finally:
+        builtins.ValueError = original_value_error
     heap = [4, 1, 3, 2]
     _heapq.heapify(heap)
     assert [_heapq.heappop(heap) for _ in range(4)] == [1, 2, 3, 4]
