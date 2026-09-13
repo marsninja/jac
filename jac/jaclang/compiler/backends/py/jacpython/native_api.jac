@@ -1,4 +1,22 @@
 """Native request orchestration; CPython value conversion stays at the ABI."""
+import from jaclang.runtime.python.modules.functools {
+    jacpy_reduce,
+    jacpy_cmp_key,
+    jacpy_partial_new,
+    jacpy_partial_field,
+    jacpy_partial_clear,
+    jacpy_partial_init,
+    jacpy_partial_call,
+    jacpy_partial_restore,
+    jacpy_partial_repr,
+    jacpy_lru_new,
+    jacpy_lru_field,
+    jacpy_lru_destroy,
+    jacpy_lru_init,
+    jacpy_lru_call,
+    jacpy_lru_clear,
+    jacpy_lru_info
+}
 import from jaclang.runtime.python.modules.math {
     jacpy_math_gcd,
     jacpy_math_factorial,

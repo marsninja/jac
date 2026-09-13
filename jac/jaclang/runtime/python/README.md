@@ -64,3 +64,8 @@ C layout; the runtime smoke checks allocation growth and reclamation instead.
 `modules/numeric.jac`. Integer algorithms use retained CPython integer operations;
 there is no second arbitrary-precision runtime for these modules. Accurate
 summation, vector norms, and dot products use native error-free transforms.
+
+`modules/functools.jac` implements partial argument binding, reductions,
+comparison keys, and cache policy. Bounded caches reuse the retained runtime's
+ordered dictionary; the C boundary stores cached hashes and visits references.
+There is no separate native hash table or Python cache-policy callback.

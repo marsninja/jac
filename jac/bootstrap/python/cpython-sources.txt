@@ -8,8 +8,8 @@
 #
 # Commented source paths record exclusions for the JacPython replacement.
 # Counts use pinned CPython 3.14.6 source lines, including comments and blanks.
-# Excluded: 36 C files / 79,166 lines; 19 headers / 6,388 lines.
-# Total: 55 files / 85,554 source lines excluded from every shipped runtime.
+# Excluded: 39 C files / 88,223 lines; 22 headers / 8,332 lines.
+# Total: 61 files / 96,555 source lines excluded from every shipped runtime.
 # A separate build-only CPython host restores these marked entries to produce
 # the native object. The shipped JacPython runtime includes none of them.
 # Keep build dependencies and ABI adapters aligned with these exclusions.
@@ -324,7 +324,7 @@ Modules/_datetimemodule.c
 Modules/_decimal/_decimal.c
 Modules/_decimal/docstrings.h
 Modules/_elementtree.c
-Modules/_functoolsmodule.c
+# Modules/_functoolsmodule.c  # removed: 1,953 source lines
 Modules/_hacl/Hacl_HMAC.c
 Modules/_hacl/Hacl_HMAC.h
 Modules/_hacl/Hacl_Hash_Blake2b.c
@@ -501,7 +501,7 @@ Modules/clinic/_codecsmodule.c.h
 # Modules/clinic/_csv.c.h  # removed: 210 source lines
 Modules/clinic/_datetimemodule.c.h
 Modules/clinic/_elementtree.c.h
-Modules/clinic/_functoolsmodule.c.h
+# Modules/clinic/_functoolsmodule.c.h  # removed: 195 source lines
 Modules/clinic/_hashopenssl.c.h
 # Modules/clinic/_heapqmodule.c.h  # removed: 361 source lines
 Modules/clinic/_localemodule.c.h

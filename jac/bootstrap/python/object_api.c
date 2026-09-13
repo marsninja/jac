@@ -461,3 +461,17 @@ uint64_t jacpy_sequence_tuple(uint64_t value) { return HANDLE(PySequence_Tuple(O
 int64_t jacpy_is_exact_float(uint64_t value) { return PyFloat_CheckExact(OBJECT(value)); }
 
 int64_t jacpy_long_fits_i64(uint64_t value) { int overflow; (void)PyLong_AsLongLongAndOverflow(OBJECT(value),&overflow); return overflow == 0; }
+
+/* Retained object primitives used by native callable and cache policies. */
+uint64_t jacpy_call_two(uint64_t callable, uint64_t a, uint64_t b) {
+    PyObject *args[] = {OBJECT(a), OBJECT(b)};
+    return HANDLE(PyObject_Vectorcall(OBJECT(callable), args, 2, NULL));
+}
+uint64_t jacpy_object_type(uint64_t value) { return HANDLE(Py_NewRef(Py_TYPE(OBJECT(value)))); }
+int64_t jacpy_callable(uint64_t value) { return PyCallable_Check(OBJECT(value)); }
+int64_t jacpy_is_exact_unicode(uint64_t value) { return PyUnicode_CheckExact(OBJECT(value)); }
+int64_t jacpy_is_exact_tuple(uint64_t value) { return PyTuple_CheckExact(OBJECT(value)); }
+int64_t jacpy_object_hash(uint64_t value) { return PyObject_Hash(OBJECT(value)); }
+uint64_t jacpy_dict_copy(uint64_t value) { return HANDLE(PyDict_Copy(OBJECT(value))); }
+int64_t jacpy_dict_update(uint64_t target, uint64_t source) { return PyDict_Update(OBJECT(target), OBJECT(source)); }
+uint64_t jacpy_ordered_dict_new(void) { return HANDLE(PyObject_CallNoArgs((PyObject *)&PyODict_Type)); }

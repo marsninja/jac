@@ -70,9 +70,25 @@ if required_compiler is not None:
     import cmath
     import math
     import _collections
-    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json, _csv, _struct, cmath, math, _collections):
+    import _functools
+    import functools
+    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json, _csv, _struct, cmath, math, _collections, _functools):
         assert replacement.__name__ in sys.builtin_module_names
         assert replacement.__spec__.origin == "built-in"
+    assert ctypes.pythonapi.jacpy_lru_call
+    assert _functools.reduce(lambda a, b: a + b, range(10)) == 45
+    hole = _functools.Placeholder
+    bound = _functools.partial(lambda *args, **kw: (args, kw), hole, 2, flag=True)
+    assert bound(1, 3) == ((1, 2, 3), {"flag": True})
+    assert sorted([4, 1, 3], key=_functools.cmp_to_key(lambda a, b: a - b)) == [1, 3, 4]
+    @functools.lru_cache(2)
+    def cached(value):
+        return value * 2
+    for value in (1, 2, 1, 3, 1):
+        assert cached(value) == value * 2
+    assert cached.cache_info() == (2, 3, 2, 2)
+    cached.cache_clear()
+    assert cached.cache_info() == (0, 0, 2, 0)
     assert ctypes.pythonapi.jacpy_math_fsum
     assert math.factorial(100) // math.factorial(99) == 100
     assert math.isqrt(10 ** 200 - 1) == 10 ** 100 - 1

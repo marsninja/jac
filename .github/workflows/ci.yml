@@ -594,6 +594,7 @@ jobs:
           jac run scripts/run_cpython_compiler_tests.jac --module test.test_defaultdict --native-modules _collections
           jac run scripts/run_cpython_compiler_tests.jac --module test.test_collections --native-modules _collections
           jac run scripts/run_cpython_compiler_tests.jac --module test.test_struct --native-modules _struct
+          jac run scripts/run_cpython_compiler_tests.jac --module test.test_functools --native-modules _functools
           jac run scripts/run_cpython_compiler_tests.jac --module test.test_math --native-modules math
           jac run scripts/run_cpython_compiler_tests.jac --module test.test_cmath --native-modules cmath
           jac run scripts/run_cpython_compiler_tests.jac --module test.test_csv --native-modules _csv
