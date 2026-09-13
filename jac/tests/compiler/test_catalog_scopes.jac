@@ -13,6 +13,7 @@ test "a catalog lookup materializes only the requested declaration" {
     isolated = catalog.fork();
     module = isolated.module('builtins');
     assert module is not None;
+    declaration_order = list(isolated._pending_scopes[module].members);
     assert not isolated._sym_memo;
     integer = module.lookup_local('int');
     assert integer is not None and integer.name == 'int';
@@ -24,6 +25,7 @@ test "a catalog lookup materializes only the requested declaration" {
     assert isinstance(names, dict);
     assert names['int'] is integer and 'str' in names and 'dict' in names;
     assert len(names) > 100;
+    assert list(names) == declaration_order;
 }
 
 test "catalog contexts isolate declarations and namespace replacement" {
@@ -97,4 +99,34 @@ test "installing builtin extensions leaves unrelated list methods unloaded" {
     install_builtin_extensions(list_type, int_type);
     assert scope.lookup_local('chunks') is not None;
     assert append_id not in isolated._sym_memo;
+}
+
+test "cached generic constructor fields retain declaration order after member lookup" {
+    import from pathlib { Path }
+    import from tempfile { TemporaryDirectory }
+    import from jaclang.compiler.session.session { JacProgram }
+    import from jaclang.compiler.session.options { CompileOptions }
+    with TemporaryDirectory() as td {
+        base = Path(td);
+        dep = base / 'model.jac';
+        dep.write_text('obj Box[T] { has first: T, second: int; }\n');
+        main = base / 'app.jac';
+        source = 'import from model { Box }\n'
+        'def make(existing: Box[str]) -> Box[str] {\n'
+        '    ignored = existing.second;\n'
+        '    return Box("value", 1);\n'
+        '}\n';
+        main.write_text(source);
+        cold = JacProgram();
+        cold.compile(str(main), options=CompileOptions(no_cgen=True));
+        assert not cold.errors_had , [error.msg for error in cold.errors_had];
+        main.write_text(
+            source + '\n# Recheck the caller using the cached dependency.\n'
+        );
+        warm = JacProgram();
+        module = warm.compile(str(main), options=CompileOptions(no_cgen=True));
+        assert not warm.errors_had , [error.msg for error in warm.errors_had];
+        context = warm.module_context(module);
+        assert context.load_dependency_module(str(dep)).stub_only;
+    }
 }

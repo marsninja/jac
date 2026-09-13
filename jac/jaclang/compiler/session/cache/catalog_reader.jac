@@ -324,7 +324,8 @@ obj CatalogResolver {
 
 obj PendingScope {
     has members: dict[str, int],
-        overloads: dict[str, list[int]];
+        overloads: dict[str, list[int]],
+        primary_order: list[str] = [];
 }
 
 obj StubCatalog {
@@ -642,7 +643,9 @@ obj StubCatalog {
 
     def _populate(scope: UniScopeNode, rec: ScopeRec) {
         self._pending_scopes[scope] = PendingScope(
-            members=dict(rec.members), overloads=dict(rec.overloads)
+            members=dict(rec.members),
+            overloads=dict(rec.overloads),
+            primary_order=[name for (name, _) in rec.members]
         );
     }
 
@@ -679,7 +682,31 @@ obj StubCatalog {
         } finally {
             if not nested {
                 self._loading_scopes.discard(scope);
+                if not pending.members and not pending.overloads {
+                    with MutationScope(scope.mutation_permit or MutationPermit(), 7) {
+                        self._finish_scope(scope, pending);
+                    }
+                }
             }
+        }
+    }
+
+    def _finish_scope(scope: UniScopeNode, pending: PendingScope) {
+        members = UniScopeNode.primary_names(scope);
+        ordered = {
+            name: members[name]
+            for name in pending.primary_order
+            if name in members
+        };
+        ordered.update(
+            {
+                name: sym
+                for (name, sym) in members.items()
+                if name not in ordered
+            }
+        );
+        if list(ordered) != list(members) {
+            UniScopeNode.set_primary_names(scope, ordered);
         }
     }
 

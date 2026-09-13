@@ -256,6 +256,9 @@ tracking preserves an existing summary when first indexing a source graph;
 refresh after a structural change invalidates the summary before reindexing.
 Catalog graphs rebuild summaries for placement walks because serialized
 element indices describe the original source body.
+Lazy name lookup preserves the catalog's declaration order when the full
+namespace is materialized, so constructor parameters do not depend on which
+field a caller queried first.
 
 Per-unit release keeps parsed stub trees while a compilation uses them.
 The runtime graph driver indexes anchors with non-owning handles, including
