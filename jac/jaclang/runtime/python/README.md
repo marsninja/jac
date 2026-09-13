@@ -1,9 +1,9 @@
 # Python compiler replacement
 
-With `zig build -Djacpython=true`, JacPython compiles Python source and ASTs
-using native Jac machine code. CPython still provides Python objects, the
-execution engine, and the standard library. Plain `zig build` uses CPython's
-compiler.
+Every `zig build` compiles Python source and ASTs using native Jac machine
+code. CPython still provides Python objects, the execution engine, and the
+standard library. There is no optional interpreted replacement or alternate
+shipped compiler.
 
 | Location (from repository root) | Responsibility |
 | --- | --- |
@@ -32,12 +32,12 @@ Rebuild after editing the replacement:
 
 ```sh
 cd jac
-zig build -Djacpython=true
+zig build
 JAC_NO_DEV_SOURCE=1 zig-out/bin/jac -c 'assert eval("6 * 7") == 42'
 ```
 
 See [CONTRIBUTING.md](../../../../CONTRIBUTING.md#trying-the-jacpython-release-binary)
-for downloading the experimental release variant. The upstream compatibility
+for downloading release binaries. The upstream compatibility
 runner, `scripts/run_cpython_compiler_tests.jac`, downloads checksum-pinned
 CPython tests and requires the native JacPython runtime. Build and test drivers
 may use Python; replacement algorithms execute natively.
