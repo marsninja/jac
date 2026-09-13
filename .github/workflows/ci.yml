@@ -589,6 +589,8 @@ jobs:
       - name: Check native standard-library replacements against CPython
         if: matrix.chunk == 'passes-native'
         run: |
+          jac install "hypothesis>=6,<7" --global
+          jac run scripts/run_cpython_compiler_tests.jac --module test.test_binascii --native-modules binascii
           jac run scripts/run_cpython_compiler_tests.jac --module test.test_bisect --native-modules _bisect
           jac run scripts/run_cpython_compiler_tests.jac --module test.test_heapq --native-modules _heapq
           jac run scripts/run_cpython_compiler_tests.jac --module test.test_random --native-modules _random

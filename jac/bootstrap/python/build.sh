@@ -216,6 +216,7 @@ SETUP
 _bisect jac_modules/bisect.c
 _heapq jac_modules/heapq.c
 _random jac_modules/random.c
+binascii jac_modules/binascii.c
 SETUP
     fi
     # CPython runs the compiler itself; dependency-oriented -O2 flags above

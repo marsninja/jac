@@ -141,3 +141,38 @@ int64_t jacpy_tuple_set_owned(uint64_t handle, int64_t index, uint64_t value) {
     if (!value) return -1;
     return PyTuple_SetItem(OBJECT(handle), index, OBJECT(value));
 }
+
+/* Argument converters keep an exported buffer alive through argument parsing
+ * and the native call. This preserves resize guards and callback ordering. */
+int jacpy_binary_buffer(PyObject *value, void *output) {
+    Py_buffer *view = output;
+    if (!value) { PyBuffer_Release(view); return 1; }
+    if (PyObject_GetBuffer(value, view, PyBUF_SIMPLE) < 0) return 0;
+    return Py_CLEANUP_SUPPORTED;
+}
+int jacpy_ascii_buffer(PyObject *value, void *output) {
+    Py_buffer *view = output;
+    if (!value) { PyBuffer_Release(view); return 1; }
+    if (PyUnicode_Check(value)) {
+        if (!PyUnicode_IS_ASCII(value)) {
+            PyErr_SetString(PyExc_ValueError, "string argument should contain only ASCII characters");
+            return 0;
+        }
+        if (PyBuffer_FillInfo(view, value, PyUnicode_DATA(value),
+                             PyUnicode_GET_LENGTH(value), 1, PyBUF_SIMPLE) < 0) return 0;
+    } else if (PyObject_GetBuffer(value, view, PyBUF_SIMPLE) < 0) {
+        if (!PyObject_CheckBuffer(value))
+            PyErr_Format(PyExc_TypeError, "argument should be bytes, buffer or ASCII string, not '%.100s'", Py_TYPE(value)->tp_name);
+        return 0;
+    }
+    return Py_CLEANUP_SUPPORTED;
+}
+uint64_t jacpy_buffer_bytes(const Py_buffer *view) {
+    if (PyBytes_CheckExact(view->obj) && view->buf == PyBytes_AS_STRING(view->obj)
+        && view->len == PyBytes_GET_SIZE(view->obj)) return HANDLE(Py_NewRef(view->obj));
+    return HANDLE(PyBytes_FromStringAndSize(view->buf, view->len));
+}
+void jacpy_set_exception(uint64_t type, const char *message, int64_t size) {
+    PyObject *text = PyUnicode_DecodeUTF8(message, size, "surrogatepass");
+    if (text) { PyErr_SetObject(OBJECT(type), text); Py_DECREF(text); }
+}

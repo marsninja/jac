@@ -61,9 +61,25 @@ if required_compiler is not None:
     import _bisect
     import _heapq
     import _random
-    for replacement in (_bisect, _heapq, _random):
+    import binascii
+    for replacement in (_bisect, _heapq, _random, binascii):
         assert replacement.__name__ in sys.builtin_module_names
         assert replacement.__spec__.origin == "built-in"
+    assert ctypes.pythonapi.jacpy_binascii_convert
+    assert binascii.a2b_base64(binascii.b2a_base64(b"native codec")) == b"native codec"
+    assert binascii.crc32(b"123456789") == 0xcbf43926
+    buffer = bytearray(b"data")
+    class ResizeDuringArgumentConversion:
+        def __bool__(self):
+            buffer.clear()
+            return False
+    try:
+        binascii.b2a_base64(buffer, newline=ResizeDuringArgumentConversion())
+    except BufferError:
+        pass
+    else:
+        raise AssertionError("Native codecs must preserve exported buffers")
+    buffer.clear()  # Failed argument conversion must release its export.
     assert ctypes.pythonapi.jacpy_bisect
     assert ctypes.pythonapi.jacpy_random_bits
     generator = _random.Random(42)

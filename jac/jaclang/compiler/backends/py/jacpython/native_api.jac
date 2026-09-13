@@ -1,4 +1,5 @@
 """Native request orchestration; CPython value conversion stays at the ABI."""
+import from jaclang.runtime.python.modules.binascii { jacpy_binascii_convert }
 import from jaclang.runtime.python.modules.random {
     jacpy_random_new,
     jacpy_random_seed,
