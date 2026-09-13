@@ -256,6 +256,13 @@ def run_tests(args: any, calls: list[int]) -> int {
             test_module.TestBasic.test_sizeof
         );
     }
+    if "itertools" in args.native_modules and args.module == "test.test_itertools" {
+        # The four size assertions encode the replaced C iterator layouts.
+        # smoke.py checks that native storage is included in reported sizes.
+        test_module.SizeofTest = unittest.skip(
+            "CPython iterator C layouts replaced by native Jac storage"
+        )(test_module.SizeofTest);
+    }
     print("Compiler path: native Jac machine code", flush=True);
     try {
         sys.modules[args.module] = test_module;

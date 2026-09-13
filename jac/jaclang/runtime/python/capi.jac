@@ -6,6 +6,8 @@ All calls require the interpreter lock; exceptions remain in CPython's thread
 state. No Python implementation of a replaced module is invoked here.
 """
 import from c {
+    def jacpy_tuple_unique(value: u64) -> i64;
+    def jacpy_tuple_exchange(value: u64, index: i64, item: u64) -> u64;
     def jacpy_call_two(callable: u64, a: u64, b: u64) -> u64;  def jacpy_object_type(
         value: u64
     ) -> u64;  def jacpy_callable(value: u64) -> i64;  def jacpy_is_exact_unicode(

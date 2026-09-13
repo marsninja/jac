@@ -1,4 +1,42 @@
 """Native request orchestration; CPython value conversion stays at the ABI."""
+import from jaclang.runtime.python.modules.iterators {
+    jacpy_pipeline_new,
+    jacpy_pipeline_field,
+    jacpy_pipeline_clear,
+    jacpy_pipeline_init,
+    jacpy_pipeline_next,
+    jacpy_pipeline_length,
+    jacpy_pipeline_repr
+}
+import from jaclang.runtime.python.modules.combinatorics {
+    jacpy_combinatorial_new,
+    jacpy_combinatorial_field,
+    jacpy_combinatorial_clear,
+    jacpy_combinatorial_memory,
+    jacpy_combinatorial_init,
+    jacpy_combinatorial_next
+}
+import from jaclang.runtime.python.modules.grouping {
+    jacpy_group_new,
+    jacpy_group_init,
+    jacpy_group_field,
+    jacpy_group_clear,
+    jacpy_group_activate,
+    jacpy_group_next,
+    jacpy_grouper_next
+}
+import from jaclang.runtime.python.modules.tee {
+    jacpy_tee_block_new,
+    jacpy_tee_block_init,
+    jacpy_tee_block_count,
+    jacpy_tee_block_field,
+    jacpy_tee_block_clear,
+    jacpy_tee_cursor_field,
+    jacpy_tee_cursor_clear,
+    jacpy_tee_construct,
+    jacpy_tee_split,
+    jacpy_tee_next
+}
 import from jaclang.runtime.python.modules.functools {
     jacpy_reduce,
     jacpy_cmp_key,

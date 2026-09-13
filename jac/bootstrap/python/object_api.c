@@ -475,3 +475,13 @@ int64_t jacpy_object_hash(uint64_t value) { return PyObject_Hash(OBJECT(value));
 uint64_t jacpy_dict_copy(uint64_t value) { return HANDLE(PyDict_Copy(OBJECT(value))); }
 int64_t jacpy_dict_update(uint64_t target, uint64_t source) { return PyDict_Update(OBJECT(target), OBJECT(source)); }
 uint64_t jacpy_ordered_dict_new(void) { return HANDLE(PyObject_CallNoArgs((PyObject *)&PyODict_Type)); }
+
+int64_t jacpy_tuple_unique(uint64_t value) { return Py_REFCNT(OBJECT(value)) == 1; }
+/* Exchange is valid only after the native caller has established exclusive
+ * ownership. It returns the old reference without invoking a finalizer. */
+uint64_t jacpy_tuple_exchange(uint64_t value, int64_t index, uint64_t item) {
+    PyObject *tuple=OBJECT(value), *old=PyTuple_GET_ITEM(tuple,index);
+    PyTuple_SET_ITEM(tuple,index,Py_NewRef(OBJECT(item)));
+    if(!PyObject_GC_IsTracked(tuple)) PyObject_GC_Track(tuple);
+    return HANDLE(old);
+}

@@ -72,9 +72,25 @@ if required_compiler is not None:
     import _collections
     import _functools
     import functools
-    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json, _csv, _struct, cmath, math, _collections, _functools):
+    import itertools
+    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json, _csv, _struct, cmath, math, _collections, _functools, itertools):
         assert replacement.__name__ in sys.builtin_module_names
         assert replacement.__spec__.origin == "built-in"
+    assert ctypes.pythonapi.jacpy_tee_next
+    assert list(itertools.batched(range(5), 2)) == [(0, 1), (2, 3), (4,)]
+    assert list(itertools.permutations("ab")) == [("a", "b"), ("b", "a")]
+    assert [(key, list(group)) for key, group in itertools.groupby("aabb")] == [
+        ("a", ["a", "a"]), ("b", ["b", "b"])]
+    leading, trailing = itertools.tee(range(1000))
+    assert list(leading) == list(range(1000))
+    assert list(trailing) == list(range(1000))
+    del leading, trailing
+    for factory in (itertools.product, itertools.combinations,
+                    itertools.combinations_with_replacement, itertools.permutations):
+        small = factory("ab", repeat=1) if factory is itertools.product else factory(range(300), 1)
+        large = factory("ab", repeat=300) if factory is itertools.product else factory(range(300), 300)
+        assert large.__sizeof__() > small.__sizeof__()
+    del small, large
     assert ctypes.pythonapi.jacpy_lru_call
     assert _functools.reduce(lambda a, b: a + b, range(10)) == 45
     hole = _functools.Placeholder

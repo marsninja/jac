@@ -8,8 +8,8 @@
 #
 # Commented source paths record exclusions for the JacPython replacement.
 # Counts use pinned CPython 3.14.6 source lines, including comments and blanks.
-# Excluded: 39 C files / 88,223 lines; 22 headers / 8,332 lines.
-# Total: 61 files / 96,555 source lines excluded from every shipped runtime.
+# Excluded: 40 C files / 92,326 lines; 23 headers / 9,300 lines.
+# Total: 63 files / 101,626 source lines excluded from every shipped runtime.
 # A separate build-only CPython host restores these marked entries to produce
 # the native object. The shipped JacPython runtime includes none of them.
 # Keep build dependencies and ABI adapters aligned with these exclusions.
@@ -532,7 +532,7 @@ Modules/clinic/fcntlmodule.c.h
 Modules/clinic/gcmodule.c.h
 Modules/clinic/grpmodule.c.h
 Modules/clinic/hmacmodule.c.h
-Modules/clinic/itertoolsmodule.c.h
+# Modules/clinic/itertoolsmodule.c.h  # removed: 968 source lines
 # Modules/clinic/mathmodule.c.h  # removed: 1,114 source lines
 Modules/clinic/md5module.c.h
 Modules/clinic/mmapmodule.c.h
@@ -567,7 +567,7 @@ Modules/getpath_noop.c
 Modules/grpmodule.c
 Modules/hashlib.h
 Modules/hmacmodule.c
-Modules/itertoolsmodule.c
+# Modules/itertoolsmodule.c  # removed: 4,103 source lines
 Modules/ld_so_aix.in
 Modules/main.c
 Modules/makesetup

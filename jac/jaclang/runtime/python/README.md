@@ -69,3 +69,10 @@ summation, vector norms, and dot products use native error-free transforms.
 comparison keys, and cache policy. Bounded caches reuse the retained runtime's
 ordered dictionary; the C boundary stores cached hashes and visits references.
 There is no separate native hash table or Python cache-policy callback.
+
+Iterator policies live in `modules/iterators.jac`, `combinatorics.jac`,
+`grouping.jac`, and `tee.jac`. Shared tee replay blocks have one CPython GC owner
+per block, so multiple cursors do not report duplicate reference edges. Tuple
+reuse preserves callback safety. As with deque, the four upstream iterator
+size tests describe the retired C layout; smoke tests check native storage
+accounting instead.
