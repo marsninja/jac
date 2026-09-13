@@ -150,15 +150,20 @@ test "client regeneration retains construction imports" {
     assert module.gen.js == first;
 }
 
-test "native construction runtime does not admit compiler internals" {
-    import from jaclang.compiler.frontend.codeinfo { resolve_native_module }
+test "native construction runtime sharing does not include compiler internals" {
+    import from jaclang.compiler.frontend.codeinfo {
+        is_shared_runtime_module,
+        resolve_native_module
+    }
+    import from jaclang.compiler.driver.modresolver { resolve_relative_path }
     import from tempfile { gettempdir }
     (_, runtime) = resolve_native_module(
         "jaclang.runtime.graph_fragment", gettempdir()
     );
     assert runtime is not None;
-    (_, compiler) = resolve_native_module("jaclang.cli.cli", gettempdir());
-    assert compiler is None;
+    assert is_shared_runtime_module(runtime);
+    compiler = resolve_relative_path("jaclang.cli.cli", gettempdir() + "/probe.jac");
+    assert not is_shared_runtime_module(compiler);
 }
 
 test "graph rejects suspension before backend lowering" {
