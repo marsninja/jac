@@ -68,10 +68,23 @@ if required_compiler is not None:
     import _csv
     import _struct
     import cmath
+    import math
     import _collections
-    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json, _csv, _struct, cmath, _collections):
+    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json, _csv, _struct, cmath, math, _collections):
         assert replacement.__name__ in sys.builtin_module_names
         assert replacement.__spec__.origin == "built-in"
+    assert ctypes.pythonapi.jacpy_math_fsum
+    assert math.factorial(100) // math.factorial(99) == 100
+    assert math.isqrt(10 ** 200 - 1) == 10 ** 100 - 1
+    assert math.comb(2 ** 100, 2) == 2 ** 99 * (2 ** 100 - 1)
+    assert math.fsum([1e100, 1, -1e100]) == 1
+    assert math.sumprod([1e100, 1, -1e100], [1., 1., 1.]) == 1
+    assert math.hypot(3, 4) == math.dist((0, 0), (3, 4)) == 5
+    assert math.copysign(1, math.nextafter(-5e-324, 0.)) == -1
+    class CustomCeil:
+        def __ceil__(self):
+            return "custom ceiling"
+    assert math.ceil(CustomCeil()) == "custom ceiling"
     assert ctypes.pythonapi.jacpy_deque_append
     deque = _collections.deque
     sequence = deque(range(1024))

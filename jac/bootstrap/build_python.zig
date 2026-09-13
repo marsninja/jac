@@ -17,6 +17,7 @@ const inputs = [_][]const u8{
     "bootstrap/python/modules/csv.c",      "bootstrap/python/prepare_native.py",
     "bootstrap/python/modules/json.c",     "bootstrap/python/modules/struct.c",
     "bootstrap/python/modules/cmath.c",    "bootstrap/python/modules/collections.c",
+    "bootstrap/python/modules/math.c",
 };
 const Source = struct { url: []const u8, sha256: []const u8, version: ?[]const u8 = null };
 const Mode = enum { host, jacpython };

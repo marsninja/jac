@@ -87,6 +87,7 @@ int64_t jacpy_slot_less(uint64_t slot, uint64_t left, uint64_t right) {
 }
 
 #include "internal/pycore_long.h"
+#include "internal/pycore_object.h"
 #include "internal/pycore_pylifecycle.h"
 #include <unistd.h>
 
@@ -425,3 +426,38 @@ void jacpy_set_key_error(uint64_t key) {
 uint64_t jacpy_dict_repr(uint64_t value) { return HANDLE(PyDict_Type.tp_repr(OBJECT(value))); }
 
 uint64_t jacpy_sequence_list(uint64_t value) { return HANDLE(PySequence_List(OBJECT(value))); }
+
+int64_t jacpy_long_sign(uint64_t value) {
+    PyLongObject *integer = (PyLongObject *)OBJECT(value);
+    return _PyLong_IsNegative(integer) ? -1 : _PyLong_IsZero(integer) ? 0 : 1;
+}
+uint64_t jacpy_long_gcd(uint64_t a, uint64_t b) { return HANDLE(_PyLong_GCD(OBJECT(a), OBJECT(b))); }
+uint64_t jacpy_long_shift(uint64_t value, int64_t count, int64_t left) {
+    return HANDLE(left ? _PyLong_Lshift(OBJECT(value), count) : _PyLong_Rshift(OBJECT(value), count));
+}
+
+uint64_t jacpy_special_noargs(uint64_t value, const char *name) {
+    PyObject *key=PyUnicode_InternFromString(name);
+    if(!key) return 0;
+    PyObject *method=_PyObject_LookupSpecial(OBJECT(value),key); Py_DECREF(key);
+    if(!method) return 0;
+    PyObject *result=PyObject_CallNoArgs(method); Py_DECREF(method); return HANDLE(result);
+}
+uint64_t jacpy_long_from_double(double value) { return HANDLE(PyLong_FromDouble(value)); }
+uint64_t jacpy_libm_parts(double value, int64_t integral) {
+    if(integral) { double whole; double fraction=modf(value,&whole); return HANDLE(Py_BuildValue("dd",fraction,whole)); }
+    int exponent=0; double fraction=frexp(value,&exponent); return HANDLE(Py_BuildValue("di",fraction,exponent));
+}
+uint64_t jacpy_float_bits(double value) { uint64_t bits; memcpy(&bits,&value,sizeof(bits)); return bits; }
+double jacpy_float_from_bits(uint64_t bits) { double value; memcpy(&value,&bits,sizeof(value)); return value; }
+uint64_t jacpy_long_frexp(uint64_t value) {
+    int64_t exponent; double fraction=_PyLong_Frexp((PyLongObject *)OBJECT(value),&exponent);
+    return PyErr_Occurred() ? 0 : HANDLE(Py_BuildValue("dL",fraction,(long long)exponent));
+}
+
+double jacpy_long_double(uint64_t value) { return PyLong_AsDouble(OBJECT(value)); }
+
+uint64_t jacpy_sequence_tuple(uint64_t value) { return HANDLE(PySequence_Tuple(OBJECT(value))); }
+int64_t jacpy_is_exact_float(uint64_t value) { return PyFloat_CheckExact(OBJECT(value)); }
+
+int64_t jacpy_long_fits_i64(uint64_t value) { int overflow; (void)PyLong_AsLongLongAndOverflow(OBJECT(value),&overflow); return overflow == 0; }

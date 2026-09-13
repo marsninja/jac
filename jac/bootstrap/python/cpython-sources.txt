@@ -533,7 +533,7 @@ Modules/clinic/gcmodule.c.h
 Modules/clinic/grpmodule.c.h
 Modules/clinic/hmacmodule.c.h
 Modules/clinic/itertoolsmodule.c.h
-Modules/clinic/mathmodule.c.h
+# Modules/clinic/mathmodule.c.h  # removed: 1,114 source lines
 Modules/clinic/md5module.c.h
 Modules/clinic/mmapmodule.c.h
 Modules/clinic/posixmodule.c.h
@@ -571,7 +571,7 @@ Modules/itertoolsmodule.c
 Modules/ld_so_aix.in
 Modules/main.c
 Modules/makesetup
-Modules/mathmodule.c
+# Modules/mathmodule.c  # removed: 4,202 source lines
 Modules/md5module.c
 Modules/mmapmodule.c
 Modules/posixmodule.c

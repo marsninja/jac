@@ -59,3 +59,8 @@ to CPython's cycle collector. Native objects report actual allocation sizes,
 including owned storage, rather than the layout sizes of the replaced C types.
 The compatibility runner excludes the upstream deque test that hard-codes that
 C layout; the runtime smoke checks allocation growth and reclamation instead.
+
+`modules/math.jac` and `modules/cmath.jac` share the platform libm interface in
+`modules/numeric.jac`. Integer algorithms use retained CPython integer operations;
+there is no second arbitrary-precision runtime for these modules. Accurate
+summation, vector norms, and dot products use native error-free transforms.
