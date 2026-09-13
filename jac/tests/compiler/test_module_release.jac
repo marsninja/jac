@@ -51,17 +51,13 @@ test "a fully compiled module is collectable after release_compile_closure" {
     );
 }
 
-test "a compiler phase boundary collects both application and selfhost trees" {
+test "a compiler phase boundary collects the application and remains reusable" {
     prog = JacProgram();
     compiler = prog._get_compiler();
-    internal = compiler.selfhost.program;
     (_, app_ref, _, _) = _probe(prog);
-    (_, internal_ref, _, _) = _probe(internal);
     compiler.release_compile_state(prog);
     assert app_ref() is None;
-    assert internal_ref() is None;
     assert not prog.source_store.units;
-    assert not internal.source_store.units;
     # Releasing working state must leave the compiler reusable.
     (_, next_ref, _, _) = _probe(prog);
     assert next_ref() is not None;
@@ -99,7 +95,7 @@ glob STUB_SRC: str = (
 def _stub_modules(prog: JacProgram) -> dict {
     import from jaclang.runtime.runtime { JacRuntime as Jac }
     out: dict = {};
-    for p in [prog, Jac.get_compiler().selfhost.program] {
+    for p in [prog] {
         for (path, mod) in p.mod.hub.items() {
             if path.endswith(".pyi") {
                 out[path] = weakref.ref(mod);
@@ -122,7 +118,6 @@ test "typeshed never enters the hub and builtins bindings survive a release" {
         "catalog serves them and nothing should parse a stdlib .pyi into a hub"
     );
     prog.release_compile_closure();
-    Jac.get_compiler().selfhost.program.release_compile_closure();
     gc.collect();
     second = prog.compile(
         file_path="stub_retention_probe_2.jac", use_str=STUB_SRC + "# second unit\n"

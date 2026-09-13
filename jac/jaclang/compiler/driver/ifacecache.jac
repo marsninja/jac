@@ -12,7 +12,7 @@ import from jaclang.compiler.driver.jir {
     ct_deps_section,
     deps_section,
     get_module_cache_path,
-    is_compiler_tree_path,
+    is_compiler_source_path,
     is_module_cache_valid,
     is_stub_like_path,
     jir_cacheable_source_path,
@@ -263,7 +263,7 @@ obj IfaceRegistry {
         importer = self.frames[-1];
         real = os.path.realpath(dep_path);
 
-        if real == importer or is_compiler_tree_path(real) {
+        if real == importer or is_compiler_source_path(real) {
             return;
         }
         if not jir_cacheable_source_path(real) {
@@ -375,9 +375,7 @@ obj IfaceRegistry {
             compilation_scope,
             context_identity
         }
-        identity = ''
-            if self.prog._get_compiler().selfhost.is_selfhost(self.prog)
-            else self.prog.context_key or context_identity(self.prog.options);
+        identity = self.prog.context_key or context_identity(self.prog.options);
         with compilation_scope(identity, self.prog.options) {
             yield ;
         }
@@ -1114,10 +1112,7 @@ obj IfaceRegistry {
             fresh = prog2.compile(
                 resolved,
                 options=CompileOptions(
-                    symtab_ir_only=True,
-                    no_cgen=True,
-                    force_target_program=True,
-                    need_full_ast=True
+                    symtab_ir_only=True, no_cgen=True, need_full_ast=True
                 )
             );
             served = ent.module;
@@ -1166,7 +1161,6 @@ obj IfaceRegistry {
                     options=CompileOptions(
                         no_cgen=options.no_cgen,
                         native_parity=options.native_parity,
-                        force_target_program=True,
                         suppress_codes=list(options.suppress_codes or []),
                         need_full_ast=True
                     )

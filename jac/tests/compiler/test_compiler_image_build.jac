@@ -1,0 +1,110 @@
+import tempfile;
+import shutil;
+import from pathlib { Path }
+import from tests.support { JAC_ROOT }
+import from bootstrap.compiler {
+    compile_module,
+    complete_image,
+    image_codec,
+    snapshot_sources
+}
+
+test "image completion accepts an empty build output and preserves occupied outputs" {
+    with tempfile.TemporaryDirectory() as directory {
+        workspace = Path(directory);
+        source = workspace / "source";
+        package = source / "jaclang";
+        driver = package / "compiler/driver";
+        driver.mkdir(parents=True);
+        shutil.copyfile(
+            Path(JAC_ROOT) / "jaclang/compiler/driver/image.py", driver / "image.py"
+        );
+        codec = image_codec(str(package));
+        precompiled = package / "_precompiled";
+        precompiled.mkdir();
+        codec.write_compiler_manifest(
+            precompiled,
+            {
+                "package": "jaclang",
+                "python_tag": codec.python_tag(),
+                "modules": {},
+                "payloads": {},
+                "producer_digest": "test-producer"
+            }
+        );
+        catalog = workspace / "stubcat.bin";
+        catalog.write_bytes(b"test-catalog");
+        output = workspace / "output";
+        output.mkdir();
+        complete_image(source, catalog, output);
+        assert (output / "jaclang/_precompiled/stubcat.bin").read_bytes()
+            == b"test-catalog";
+        completed = codec.load_image(output / "jaclang/_precompiled");
+        assert completed is not None;
+        completed.verify();
+        with testraises(OSError) {
+            complete_image(source, catalog, output);
+        }
+        assert (output / "jaclang/_precompiled/stubcat.bin").is_file();
+    }
+}
+
+test "compiler module cache follows dependency and source changes" {
+    with tempfile.TemporaryDirectory() as directory {
+        workspace = Path(directory);
+        package = workspace / "site" / "jaclang";
+        snapshot_sources(Path(JAC_ROOT) / "jaclang", package);
+        source = package / "probe.jac";
+        dependency = package / "dependency.jac";
+        dependency.write_text("def value -> int { return 7; }\n");
+        source.write_text(
+            "import from .dependency { value }\ndef answer -> int { return value(); }\n"
+        );
+        cache = workspace / "cache";
+        output = workspace / "probe.jir";
+        first = compile_module(source, package, output, cache, "test-producer");
+        assert not first.get("cached", False);
+        assert compile_module(source, package, output, cache, "test-producer").get(
+            "cached"
+        );
+        dependency.write_text("def value -> int { return 8; }\n");
+        assert not compile_module(source, package, output, cache, "test-producer").get(
+            "cached", False
+        );
+        source.write_text("def answer -> int { return 9; }\n");
+        assert not compile_module(source, package, output, cache, "test-producer").get(
+            "cached", False
+        );
+        assert not compile_module(source, package, output, cache, "new-producer").get(
+            "cached", False
+        );
+        (cache / "probe.jir").write_bytes(b"corrupt");
+        assert not compile_module(source, package, output, cache, "new-producer").get(
+            "cached", False
+        );
+    }
+}
+
+test "compiler bytecode does not depend on its staging directory" {
+    with tempfile.TemporaryDirectory() as directory {
+        workspace = Path(directory);
+        package = workspace / "first" / "jaclang";
+        snapshot_sources(Path(JAC_ROOT) / "jaclang", package);
+        source = package / "probe.jac";
+        source.write_text("obj Record { def answer -> int; }\n");
+        (package / "probe.impl.jac").write_text(
+            "impl Record.answer -> int { return 42; }\n"
+        );
+        first = workspace / "first.jir";
+        compile_module(source, package, first, identity="same-producer");
+        relocated = workspace / "second" / "jaclang";
+        shutil.copytree(package.parent, relocated.parent);
+        second = workspace / "second.jir";
+        compile_module(
+            relocated / "probe.jac", relocated, second, identity="same-producer"
+        );
+        codec = image_codec(str(package));
+        assert codec.read_section_bytes(first.read_bytes(), codec.SEC_BYTECODE)
+            == codec.read_section_bytes(second.read_bytes(), codec.SEC_BYTECODE);
+    }
+}

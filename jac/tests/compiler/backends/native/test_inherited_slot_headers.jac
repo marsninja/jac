@@ -46,10 +46,7 @@ def _compile(fixture: str) -> tuple {
         ir = prog.compile(
             file_path=os.path.join(FIXTURES, fixture),
             options=CompileOptions(
-                force_codespace='native',
-                force_target_program=True,
-                no_ir_cache=True,
-                aot_mode=True
+                force_codespace='native', no_ir_cache=True, aot_mode=True
             )
         );
     } finally {

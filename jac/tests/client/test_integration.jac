@@ -3,7 +3,7 @@
 Exercises the full build pipeline and Python dispatch roundtrip without
 requiring a webview or display. Covers:
 
-  1. Plugin transpilation: all .jac -> .py (with jac0 fallback)
+  1. Plugin transpilation: all .jac -> .py
   2. Generated host source validity
   3. Full Python dispatch: import real plugins, register, dispatch commands
   4. Config -> plugin registration (TOML -> enabled/disabled)
@@ -106,7 +106,7 @@ def _jac2py(jac_file: Path) -> tuple {
 
 """Transpile all plugin .jac files into a temp dir, returning (dir, results).
 
-results is a dict mapping relative path -> {ok, used_jac0, error}.
+results is a dict mapping relative path -> {ok, error}.
 """
 def _transpile_all_plugins -> tuple {
     tmp = tempfile.mkdtemp();
@@ -126,33 +126,9 @@ def _transpile_all_plugins -> tuple {
             with open(target, "w") as f {
                 f.write(stdout);
             }
-            results[rel] = {"ok": True, "used_jac0": False, "error": None};
+            results[rel] = {"ok": True, "error": None};
         } else {
-            # Safe fallback: jac0.compile_jac() uses a simpler transpilation
-            # path that handles f-strings the full pipeline can't (upstream bug
-            # jaseci-labs/jaseci#6564). Remove once fixed.
-            import jaclang.jac0 as jac0;
-            try {
-                jac0_out = jac0.compile_jac(jac_file.read_text());
-                if jac0_out and jac0_out.strip() {
-                    with open(target, "w") as f {
-                        f.write(jac0_out);
-                    }
-                    results[rel] = {"ok": True, "used_jac0": True, "error": None};
-                } else {
-                    results[rel] = {
-                        "ok": False,
-                        "used_jac0": False,
-                        "error": stderr or "(empty output from both jac2py and jac0)"
-                    };
-                }
-            } except Exception as e {
-                results[rel] = {
-                    "ok": False,
-                    "used_jac0": False,
-                    "error": f"{stderr or '(empty)'} | jac0: {e}"
-                };
-            }
+            results[rel] = {"ok": False, "error": stderr or "empty compiler output"};
         }
     }
     return (tmp, results);
@@ -212,8 +188,8 @@ def _get_generate_host_source -> object {
 # ---------------------------------------------------------------------------
 # 1. Plugin transpilation
 # ---------------------------------------------------------------------------
-"""Every plugin .jac file transpiles (via jac2py or jac0 fallback)."""
-test "all plugin files transpile or have jac0 fallback" {
+"""Every plugin .jac file transpiles through the full compiler."""
+test "all plugin files transpile through the full compiler" {
     (tmp, results) = _transpile_all_plugins();
     try {
         failures = [

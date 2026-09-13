@@ -1,10 +1,11 @@
 """Build the JacPython seed with the explicitly pinned build-time interpreter.
 
 This program is never shipped as a runtime compiler. Export uses the checkout's
-Jac compiler; capture records initialization under the instrumented host Python.
+compiled Jac image; capture records initialization under the instrumented host Python.
 The resulting image contains bytecode and a finite startup-request table.
 """
 import sys
+sys.dont_write_bytecode = True
 
 # Capture starts before importing the build driver's own dependencies: imports
 # such as functools create code dynamically (namedtuple), not only from files.
@@ -38,7 +39,8 @@ import tempfile
 import types
 import zlib
 
-mode, root_arg, output_arg = sys.argv[1:4]
+mode, root_arg, output_arg, image_arg = sys.argv[1:5]
+compiler_site = Path(image_arg).resolve(strict=True)
 root = Path(root_arg).resolve()
 output = Path(output_arg).resolve()
 recipe = root / "bootstrap/python"
@@ -47,15 +49,18 @@ if tuple(map(int, pin["version"].split("."))) != sys.version_info[:3]:
     raise RuntimeError("The seed must be generated with pinned CPython " + pin["version"])
 if not hasattr(sys, "_jacpython_code"):
     raise RuntimeError("The seed requires the instrumented, source-built host interpreter")
-sys.path.insert(0, str(root))
-os.environ["JAC_NO_DEV_SOURCE"] = "1"
+sys.path.insert(0, str(compiler_site))
 os.environ["JAC_STUBCAT_BUILDING"] = "1"
-os.environ["JAC_COMPILER_LIB"] = "off"
+from jaclang.compiler.driver.image import load_image
+compiler_image = load_image(compiler_site / "jaclang" / "_precompiled")
+if compiler_image is None:
+    raise RuntimeError("JacPython requires a complete compiled Jac image")
+compiler_image.verify()
 
 
 def normalized_code(code):
     filename = code.co_filename
-    for prefix, label in ((str(root) + "/", ""), (sys.base_prefix + "/", "stdlib/")):
+    for prefix, label in ((str(compiler_site) + "/", ""), (str(root) + "/", ""), (sys.base_prefix + "/", "stdlib/")):
         if filename.startswith(prefix):
             filename = "<jacpython-seed/" + label + filename[len(prefix):] + ">"
             break
@@ -99,7 +104,6 @@ def export():
 
 
 def capture():
-    from jaclang import jac0, bootstrap_manifest
     exported = marshal.loads(output.with_name("modules.marshal").read_bytes())
     requests = _startup_requests
     reference_compile = builtins.compile
@@ -126,7 +130,7 @@ def capture():
     class Records(dict):
         def get(self, name, default=None):
             if name not in self:
-                base = root / name.replace(".", "/")
+                base = compiler_site / name.replace(".", "/")
                 package = base.is_dir()
                 candidates = [base / "__init__.py", base / "__init__.jac"] if package else [
                     base.with_suffix(".py"), base.with_suffix(".jac")]
@@ -138,12 +142,10 @@ def capture():
                 elif path.suffix == ".py":
                     self[name] = (normalized_code(build_compile(path.read_bytes(), str(path))), package)
                 else:
-                    relative = path.relative_to(root / "jaclang").as_posix()
-                    if path.read_text().strip() and not bootstrap_manifest.is_seed_source(relative):
-                        raise ImportError("Unexported Jac compiler dependency: " + name)
-                    impls = [(Path(p).read_text(), str(p)) for p in jac0.discover_impl_files(str(path))]
-                    source = jac0.compile_jac(path.read_text(), str(path), impl_sources=impls)
-                    self[name] = (normalized_code(build_compile(source, str(path), 16777216)), package)
+                    code = compiler_image.code(name)
+                    if code is None:
+                        raise ImportError("Missing compiled JacPython dependency: " + name)
+                    self[name] = (normalized_code(code), package)
             return self[name]
 
     image = {"modules": Records(exported), "preparing": True}
@@ -151,11 +153,21 @@ def capture():
     loader.image = image
     sys.modules[loader.__name__] = loader
     code = build_compile((recipe / "seed_runtime.py").read_bytes(), "<jacpython-seed-loader>")
+    # A captured dependency must come from the private image, even though the
+    # build driver already loaded the public compiler to read its artifacts.
+    public_modules = {name: module for name, module in sys.modules.items()
+                      if name == "jaclang" or name.startswith("jaclang.")}
+    for name in public_modules:
+        sys.modules[name] = None
     sys._jacpython_compile = record
     try:
         exec(code, loader.__dict__)
+        loader.compile_python((recipe / "smoke.py").read_bytes(), "<jacpython-seed-smoke>", "exec")
+        if "jaclang.runtime.runtime" in image["modules"]:
+            raise RuntimeError("The Python compiler image must not initialize the application runtime")
     finally:
         del sys._jacpython_compile
+        sys.modules.update(public_modules)
     # Include the startup modules that loaded before Python could install the
     # recording callback, notably encodings. Frozen modules need no requests.
     library = Path(sys.base_prefix) / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}"
@@ -184,7 +196,7 @@ def capture():
 def prepare():
     output.mkdir(parents=True, exist_ok=True)
     script = str(Path(__file__).resolve())
-    subprocess.run([sys.executable, "-I", script, "export", str(root), str(output / "modules.marshal")], check=True)
+    subprocess.run([sys.executable, "-I", script, "export", str(root), str(output / "modules.marshal"), str(compiler_site)], check=True)
     images = []
     for optimize in range(3):
         path = output / f"seed-{optimize}.marshal"
@@ -192,7 +204,7 @@ def prepare():
             command = [sys.executable, "-I", "-B", "-X", "pycache_prefix=" + cache]
             if optimize:
                 command.append("-" + "O" * optimize)
-            subprocess.run(command + [script, "capture", str(root), str(path)], check=True)
+            subprocess.run(command + [script, "capture", str(root), str(path), str(compiler_site)], check=True)
         images.append(marshal.loads(path.read_bytes()))
     image = {"version": pin["version"], "loader": images[0]["loader"],
              "modules_by_optimization": [value["modules"] for value in images], "requests": {}}

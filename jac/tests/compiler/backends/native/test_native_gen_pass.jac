@@ -3669,14 +3669,8 @@ test "native-default chess.jac runs via cli" {
             os.path.join(os.path.dirname(CHESS_JAC), "chess.impl.jac"),
             os.path.join(tmpdir, "chess.impl.jac")
         );
-        import jaclang as _jl;
-        _src = os.path.dirname(os.path.dirname(os.path.abspath(_jl.__file__)));
         with open(os.path.join(tmpdir, "jac.toml"), "w") as f {
-            f.write(
-                '[project]\nname = "chess-na"\n\n[dev]\njaclang_source = "'
-                    + _src.replace("\\", "/")
-                    + '"\n\n[placement]\ndefault = "na"\n'
-            );
+            f.write('[project]\nname = "chess-na"\n\n[placement]\ndefault = "na"\n');
         }
         result = subprocess.run(
             [sys.executable, "-m", "jaclang", "run", "chess.jac"],
@@ -3749,14 +3743,8 @@ test "sys argv via jac run native default" {
     fixture = str(os.path.join(FIXTURES, "sys_argv.jac"));
     with tempfile.TemporaryDirectory() as tmpdir {
         shutil.copy(fixture, os.path.join(tmpdir, "sys_argv.jac"));
-        import jaclang as _jl;
-        _src = os.path.dirname(os.path.dirname(os.path.abspath(_jl.__file__)));
         with open(os.path.join(tmpdir, "jac.toml"), "w") as f {
-            f.write(
-                '[project]\nname = "argv-na"\n\n[dev]\njaclang_source = "'
-                    + _src.replace("\\", "/")
-                    + '"\n\n[placement]\ndefault = "na"\n'
-            );
+            f.write('[project]\nname = "argv-na"\n\n[placement]\ndefault = "na"\n');
         }
         result = subprocess.run(
             [

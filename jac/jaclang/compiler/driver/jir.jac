@@ -30,10 +30,11 @@ import from jaclang.compiler.driver.image {
     SEC_TERMINATOR,
     FLAG_PRECOMPILED,
     PRECOMPILE_SENTINEL,
-    FLAG_BOOTSTRAP,
     read_sections,
     read_section_bytes,
-    patch_co_filenames_bytes
+    patch_co_filenames_bytes,
+    write_sections,
+    write_precompiled_jir as encode_precompiled_jir
 }
 
 obj JirHeader {
@@ -140,25 +141,6 @@ def _related_files(source_path: str) -> list[tuple[str, str]] {
 }
 
 
-def is_compiler_tree_path(source_path: str) -> bool {
-    try {
-        resolved = str(Path(source_path).resolve());
-    } except OSError {
-        return False;
-    }
-    base = _jaclang_pkg_dir + os.sep;
-    if not resolved.startswith(base) {
-        return False;
-    }
-    rel = resolved[len(base):].replace(os.sep, "/");
-    for digest_root in COMPILER_DIGEST_ROOTS {
-        if rel == digest_root or rel.startswith(digest_root + "/") {
-            return True;
-        }
-    }
-    return False;
-}
-
 def is_compiler_source_path(source_path: str) -> bool {
     try {
         resolved = str(Path(source_path).resolve());
@@ -180,149 +162,25 @@ def _module_codespace_mode(source_path: str) -> str {
     }
 }
 
-glob COMPILER_DIGEST_ROOTS: tuple = (
-         "jac0.py",
-         "bootstrap_manifest.py",
-         "meta_importer.py",
-         "jac0core",
-         "compiler",
-         "runtime",
-         "lib",
-         "cli/cli_boot.jac",
-         "project/tomlio.jac",
-         "dist/precompile_bytecode.jac"
-     ),
-     COMPILER_DIGEST_SUFFIXES: tuple = (".jac", ".py"),
-     COMPILER_DIGEST_SKIP_DIRS: tuple = ("tests", "test", "__pycache__"),
-     COMPILER_DIGEST_SKIP: tuple = ();
-
-def compiler_source_files(pkg_dir: str) -> list[str] {
-    base = str(Path(pkg_dir));
-    rels: list[str] = [];
-    for `entry in COMPILER_DIGEST_ROOTS {
-        target = os.path.join(base, `entry.replace("/", os.sep));
-        if os.path.isfile(target) {
-            rels.append(`entry);
-            continue;
-        }
-        if not os.path.isdir(target) {
-            continue;
-        }
-        for (walk_dir, dirs, files) in os.walk(target) {
-            dirs[:] = [
-                d
-                for d in dirs
-                if not d.startswith(".") and d not in COMPILER_DIGEST_SKIP_DIRS
-            ];
-            for name in files {
-                if not name.endswith(COMPILER_DIGEST_SUFFIXES) or ".test." in name {
-                    continue;
-                }
-                rel = os.path.relpath(os.path.join(walk_dir, name), base).replace(
-                    os.sep, "/"
-                );
-                if rel in COMPILER_DIGEST_SKIP {
-                    continue;
-                }
-                rels.append(rel);
-            }
-        }
-    }
-    return sorted(rels);
-}
-
-def compiler_source_digest(pkg_dir: str) -> str {
-    base = str(Path(pkg_dir));
-    rels = compiler_source_files(base);
-    h = hashlib.sha256();
-    for rel in rels {
-        h.update(rel.encode());
-        h.update(
-            compute_content_sha256(
-                os.path.join(base, rel.replace("/", os.sep))
-            ).encode()
-        );
-    }
-    return f"{len(rels)}:{h.hexdigest()}";
-}
-
-glob _COMPILER_DIGEST_CACHE: list = [];
-
-def _digest_manifest_path(pkg_dir: str) -> Path {
-    tag = hashlib.sha256(str(Path(pkg_dir).resolve()).encode()).hexdigest()[:8];
-    return get_jir_cache_dir() / f"compiler_digest.{tag}.json";
-}
-
-def _manifest_compiler_digest(pkg_dir: str) -> str {
-    import json;
-    base = str(Path(pkg_dir));
-    rels = compiler_source_files(base);
-    manifest_path = _digest_manifest_path(base);
-    entries: dict = {};
-    stored_digest = "";
-    try {
-        raw = json.loads(manifest_path.read_text());
-        entries = raw.get("entries", {}) or {};
-        stored_digest = raw.get("digest", "") or "";
-    } except Exception {
-        entries = {};
-        stored_digest = "";
-    }
-    changed = False;
-    new_entries: dict = {};
-    h = hashlib.sha256();
-    for rel in rels {
-        full = os.path.join(base, rel.replace("/", os.sep));
-        st = os.stat(full);
-        prev = entries.get(rel);
-        if (
-            isinstance(prev, list)
-            and len(prev) == 3
-            and prev[0] == st.st_mtime
-            and prev[1] == st.st_size
-        ) {
-            sha = prev[2];
-        } else {
-            sha = compute_content_sha256(full);
-            changed = True;
-        }
-        new_entries[rel] = [st.st_mtime, st.st_size, sha];
-        h.update(rel.encode());
-        h.update(sha.encode());
-    }
-    if len(new_entries) != len(entries) {
-        changed = True;
-    }
-    digest = f"{len(rels)}:{h.hexdigest()}";
-    if changed or digest != stored_digest {
-        try {
-            manifest_path.parent.mkdir(parents=True, exist_ok=True);
-            tmp = manifest_path.with_suffix(f".{os.getpid()}.tmp");
-            tmp.write_text(json.dumps({"entries": new_entries, "digest": digest}));
-            tmp.rename(manifest_path);
-        } except Exception {}
-    }
-    return digest;
-}
+glob _COMPILER_DIGEST_CACHE: list[str] = [];
 
 def running_compiler_digest -> str {
     if not _COMPILER_DIGEST_CACHE {
-        pinned = os.environ.get("JAC_COMPILER_DIGEST_PIN", "").strip();
-        if pinned {
-            _COMPILER_DIGEST_CACHE.append(f"pin:{pinned}");
-        } else {
-            try {
-                digest = _manifest_compiler_digest(_jaclang_pkg_dir);
-            } except Exception {
-                digest = compiler_source_digest(_jaclang_pkg_dir);
-            }
-            _COMPILER_DIGEST_CACHE.append(digest);
+        import from jaclang.compiler.driver.image { _jaclang_image }
+        image = _jaclang_image();
+        if image is None {
+            raise RuntimeError("The running compiler image has no identity");
         }
+        digest = image.manifest.get("compiler_digest");
+        if not isinstance(digest, str) or not digest {
+            raise RuntimeError("The running compiler image has no identity");
+        }
+        _COMPILER_DIGEST_CACHE.append(digest);
     }
     return _COMPILER_DIGEST_CACHE[0];
 }
 
-glob _COMPILER_GENERATION_CACHE: list = [];
+glob _COMPILER_GENERATION_CACHE: list[str] = [];
 
 def compiler_generation -> str {
     if not _COMPILER_GENERATION_CACHE {
@@ -856,22 +714,6 @@ def scrub_cache_dirs(root_dir: str) -> int {
     return removed;
 }
 
-def write_sections(sections: (dict[int, bytes] | None)) -> bytes {
-    if not sections {
-        return bytes();
-    }
-    magic: any = SECTIONS_MAGIC;
-    buf = bytearray(magic);
-    for (sec_type, data) in sections.items() {
-        buf.append(sec_type);
-        buf.extend(struct.pack('<I', len(data)));
-        buf.extend(data);
-    }
-    buf.append(SEC_TERMINATOR);
-    buf.extend(bytes(4));
-    return bytes(buf);
-}
-
 def read_bytecode_only(data: bytes) -> (bytes | None) {
     return read_section_bytes(data, SEC_BYTECODE);
 }
@@ -882,33 +724,11 @@ def write_precompiled_jir(
     flags: int = 0,
     extra_sections: (dict[int, bytes] | None) = None
 ) -> bytes {
-    jac_hash = zlib.crc32(jaclang_version().encode()) & 0xFFFFFFFF;
-    header = struct.pack(
-        HEADER_FMT,
-        MAGIC,
-        FORMAT_VERSION,
-        (sys.version_info.major << 8) | sys.version_info.minor,
-        jac_hash,
-        0,
-        0,
-        0,
-        0,
-        flags
+    return encode_precompiled_jir(
+        bytecode, module_key, flags, extra_sections, jaclang_version()
     );
-    empty_payload = zlib.compress(bytes(1), 1);
-    sections: dict[int, bytes] = {};
-    if bytecode is not None {
-        sections[SEC_BYTECODE] = bytecode;
-    }
-    if module_key {
-        sections[SEC_MODKEY] = module_key.encode('utf-8');
-    }
-    if extra_sections {
-        sections.update(extra_sections);
-    }
-    section_bytes = write_sections(sections);
-    return header + empty_payload + section_bytes;
 }
+
 
 def read_debug_source(data: bytes) -> (str | None) {
     try {

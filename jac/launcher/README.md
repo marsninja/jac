@@ -82,14 +82,18 @@ zig build -Djacpython=true            # opt in to the experimental JacPython com
 
 zig build -Dpayload-progress         # stream the payload build live
 zig build -Dpayload=/tmp/p.tar.zst   # pack a prebuilt payload (skip fetch+assemble)
-zig build -Ddev                      # editable dev binary: link the compiler from this tree
+zig build compiler-image            # rebuild the development compiler image
+zig build compiler-stage2           # rebuild that image with itself
 ```
 
 `zig build` first builds CPython from the checksum-pinned sources in
 `bootstrap/python/sources.json` and fetches the pinned typeshed stubs. The
 Python seed uses Zig for C compilation and archiving, with the upstream
 configure/make recipes retained for platform probes and generated files.
-No installed Python, Jac, or python-build-standalone distribution is needed.
+The build fetches the checksum-pinned prior Jac compiler and uses it to build
+the current compiler image. No installed Python or Jac is needed. See the
+[bootstrap guide](../bootstrap/README.md) for the artifact graph and development
+image selection.
 Build hosts need Zig 0.16.0, make, Perl, a POSIX shell, and network access.
 macOS also needs the SDK provided by Xcode command line tools.
 
@@ -105,7 +109,8 @@ source and checks relocation before marking the distribution complete.
 `JAC_PYTHON_JOBS` controls build parallelism (default 4).
 
 Each supported release platform builds on its matching runner. Linux targets
-retain the glibc 2.17 floor; Intel macOS targets 12.0 and ARM macOS targets 11.0.
+retain the glibc 2.17 floor; ARM macOS targets 11.0. The bootstrap pin currently
+supports Linux x86-64/ARM64 and macOS ARM64.
 The existing launcher still loads the shared CPython library from its payload.
 The source-built runtime excludes Tk, curses, readline, dbm, and CPython test
 extensions. `bootstrap/python/cpython-sources.txt` is the source allowlist:

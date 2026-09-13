@@ -1,15 +1,5 @@
 import from jaclang.compiler.driver.pipeline { run_utility, UtilityProduct }
 import from jaclang.compiler.driver.pipeline_types { AnalysisFact }
-impl JacCompiler.selfhost.getter -> SelfHostCache {
-    cache = self._selfhost;
-    if (cache is None) {
-        import from jaclang.runtime.runtime { JacRuntime }
-        cache = JacRuntime.get_selfhost();
-        self._selfhost = cache;
-    }
-    return cache;
-}
-
 impl JacCompiler.stub_catalog -> StubCatalog | None {
     if self.stub_catalog_disabled or self._stub_trees_served {
         return None;
@@ -25,7 +15,7 @@ impl JacCompiler.stub_catalog -> StubCatalog | None {
 }
 
 impl JacCompiler.note_stub_tree_served(path: str, program: JacProgram) -> None {
-    if self._stub_trees_served or self.selfhost.is_selfhost(program) {
+    if self._stub_trees_served {
         return;
     }
     if self.stub_catalog() is not None {
@@ -125,14 +115,10 @@ impl JacCompiler.get_bytecode(
         context_program,
         compilation_scope
     }
-    actual = self.selfhost.resolve(full_target, target_program);
-    if not self.selfhost.is_selfhost(actual) {
-        options = bind_options(full_target, actual, actual.options);
-        actual = context_program(actual, options);
-    }
-    with compilation_scope(
-        '' if self.selfhost.is_selfhost(actual) else actual.context_key, actual.options
-    ) {
+    actual = target_program;
+    options = bind_options(full_target, actual, actual.options);
+    actual = context_program(actual, options);
+    with compilation_scope(actual.context_key, actual.options) {
         return self._get_bytecode(full_target, actual);
     }
 }
@@ -140,7 +126,7 @@ impl JacCompiler.get_bytecode(
 impl JacCompiler._get_bytecode(
     full_target: str, target_program: JacProgram
 ) -> (types.CodeType | None) {
-    actual_program = self.selfhost.resolve(full_target, target_program);
+    actual_program = target_program;
     (rebuild, no_precompile) = cache_mode();
     symtab_only_recovery = False;
 
@@ -165,8 +151,7 @@ impl JacCompiler._get_bytecode(
     ) {
         hit_mod = actual_program.mod.hub[full_target];
         codeobj = hit_mod.gen.py_bytecode;
-        if isinstance(codeobj, `bytes)
-            and not self.selfhost.is_selfhost(actual_program) {
+        if isinstance(codeobj, `bytes) {
             self._persist_module_cache(full_target, hit_mod, actual_program);
         }
         return marshal.loads(codeobj) if isinstance(codeobj, `bytes) else None;
@@ -211,9 +196,7 @@ impl JacCompiler._get_bytecode(
                 self._restore_sections(full_target, actual_program, secs);
                 _had_native_secs = SEC_NATIVE_OBJ in secs or SEC_LLVM_IR in secs;
                 if (
-                    _had_native_secs
-                    and full_target not in actual_program.hub.artifacts
-                    and not self.selfhost.is_selfhost(actual_program)
+                    _had_native_secs and full_target not in actual_program.hub.artifacts
                 ) {
                     import logging as _bc_logging;
                     _bc_logging.getLogger(__name__).warning(
@@ -255,43 +238,15 @@ impl JacCompiler._get_bytecode(
         return marshal.loads(precompiled_bc);
     }
 
-    is_internal = self.selfhost.is_selfhost(actual_program);
-    if is_internal {
-        setup_progress.on_internal_compile(full_target);
-        self.selfhost.enter_bytecode();
+    result = self.compile(
+        file_path=full_target, target_program=actual_program, options=CompileOptions()
+    );
+    if result.gen.py_bytecode {
+        actual_program.hub_cache_stamp(full_target);
+        self._persist_module_cache(full_target, result, actual_program);
+        return marshal.loads(result.gen.py_bytecode);
     }
-    options = CompileOptions();
-    result: (uni.Module | None) = None;
-    try {
-        result = self.compile(
-            file_path=full_target, target_program=actual_program, options=options
-        );
-        if result.gen.py_bytecode {
-            actual_program.hub_cache_stamp(full_target);
-            self._persist_module_cache(full_target, result, actual_program);
-            if is_internal {
-                note_compiler_source_failure(full_target, '');
-            }
-            return marshal.loads(result.gen.py_bytecode);
-        }
-        if is_internal {
-            note_compiler_source_failure(
-                full_target,
-                module_scoped_failure_details(full_target, actual_program)
-                    or bootstrap_tier_failure_details(full_target)
-            );
-        }
-        return None;
-    } finally {
-        if is_internal {
-            if self.selfhost.at_outermost_bytecode() {
-                self.selfhost.evict_unit(
-                    full_target, result, collect=self.unit_collect
-                );
-            }
-            self.selfhost.exit_bytecode();
-        }
-    }
+    return None;
 }
 
 impl JacCompiler._load_native_from_cache(
@@ -740,16 +695,15 @@ impl JacCompiler.parse_str(
                 not _forced_pre
                 and _p_opts is not None
                 and _p_opts.aot_mode
-                and not self.selfhost.is_selfhost(target_program)
                 and _default_codespace_for(target_program) == 'native'
             ) {
                 _forced_pre = 'native';
             }
-            if _forced_pre and not self.selfhost.is_selfhost(target_program) {
+            if _forced_pre {
                 codespace = _forced_pre;
             }
         }
-        if not codespace and not self.selfhost.is_selfhost(target_program) {
+        if not codespace {
             import from jaclang.compiler.placement.placement_pins {
                 config_kind_space as _kind_space_of
             }
@@ -761,19 +715,9 @@ impl JacCompiler.parse_str(
                 codespace = _kind_space;
             }
         }
-        if self.selfhost.is_selfhost(target_program) {
-            (mod, had_error) = parse_woven(
-                source_str,
-                file_path,
-                target_program,
-                annex_sources(file_path),
-                early_context=codespace or 'server'
-            );
-        } else {
-            (mod, had_error) = target_program.source_store.parse(
-                source_str, file_path, target_program, annex_sources(file_path)
-            );
-        }
+        (mod, had_error) = target_program.source_store.parse(
+            source_str, file_path, target_program, annex_sources(file_path)
+        );
         if (codespace == 'client') {
             _coerce_client_module(mod);
         } elif (codespace == 'native') {
@@ -812,13 +756,7 @@ impl JacCompiler.parse_str(
         );
         _native_eligible = (
             not _analysis_only
-            and (
-                _scope_native
-                or (
-                    not self.selfhost.is_selfhost(target_program)
-                    and _default_codespace_for(target_program) == 'native'
-                )
-            )
+            and (_scope_native or (_default_codespace_for(target_program) == 'native'))
         );
         if _native_eligible {
             import from jaclang.compiler.placement.placement_solver {
@@ -914,15 +852,6 @@ impl JacCompiler.stamp_access_check_facts(mod: uni.Module) -> None {
 impl JacCompiler.stamp_native_import_facts(
     mod: uni.Module, target_program: JacProgram
 ) -> None {
-    """Stamp each import with the emitter's native-only verdict.
-
-    Whether an import resolves to a module the native lane owns, and
-    whether that module lives inside jaclang's own tree, are both
-    import-resolution questions: they need the hub, the placement pins
-    and the filesystem, which is the driver's ground and not a pass's.
-    The emitter used to ask for them through `self.prog`, the one
-    driver read left in a sealed pass. It now consumes a bool.
-    """;
     import os;
     import from jaclang.compiler.frontend.module_facts { ModuleFacts }
     needs_native = mod.decided_codespace == 'native'
@@ -996,7 +925,6 @@ impl JacCompiler.stamp_boundary_facts(
             or (
                 _sb_opts is not None
                 and _sb_opts.aot_mode
-                and not self.selfhost.is_selfhost(target_program)
                 and _default_codespace_for(target_program) == 'native'
             )
         );
@@ -1231,21 +1159,12 @@ impl JacCompiler.compile(
         context_program
     }
     caller_program = target_program;
-    resolved_program = self.selfhost.resolve(file_path, target_program)
-        if not options.force_target_program
-        else target_program;
-    if not self.selfhost.is_selfhost(resolved_program) {
-        options = bind_options(file_path, resolved_program, options);
-        target_program = context_program(resolved_program, options);
-    } else {
-        target_program = resolved_program;
-    }
+    options = bind_options(file_path, target_program, options);
+    target_program = context_program(target_program, options);
     context_errors = len(target_program.errors_had);
     context_warnings = len(target_program.warnings_had);
     import from jaclang.compiler.driver.compilation_context { compilation_scope }
-    identity = ''
-        if self.selfhost.is_selfhost(target_program)
-        else target_program.context_key;
+    identity = target_program.context_key;
     with compilation_scope(identity, options) {
         import from jaclang.compiler.native_scope {
             activate_scope_lowering,
@@ -1266,14 +1185,12 @@ impl JacCompiler.compile(
                 _scope_armed = True;
             }
             if self._reentrant_depth == 0 and not self.stub_catalog_disabled {
-                if not self.selfhost.is_selfhost(target_program) {
-                    import from jaclang.compiler.types.stubcat.locate {
-                        StubCatalogUnavailable
-                    }
-                    try {
-                        self.ensure_stub_catalog();
-                    } except StubCatalogUnavailable {}
+                import from jaclang.compiler.types.stubcat.locate {
+                    StubCatalogUnavailable
                 }
+                try {
+                    self.ensure_stub_catalog();
+                } except StubCatalogUnavailable {}
             }
             import from pathlib { Path as _WrapPath }
             import from jaclang.compiler.frontend.codeinfo {
@@ -1308,11 +1225,7 @@ impl JacCompiler.compile(
                 native_ir_cache_set_suspended(True);
             }
             try {
-                if options.force_target_program {
-                    _wrap_prog = target_program;
-                } else {
-                    _wrap_prog = self.selfhost.resolve(file_path, target_program);
-                }
+                _wrap_prog = target_program;
 
                 _scratch_prog = _wrap_prog;
                 _wrap_prog.scratch.compile_depth += 1;
@@ -1333,20 +1246,6 @@ impl JacCompiler.compile(
                     );
                 } except Exception as _e {
                     _crash = _e;
-                }
-                if _crash is not None {
-                    _re_entered = import_error_re_enters(_crash, file_path);
-                    if _re_entered is not None {
-                        raise CompilerSourceError(
-                            f"compiling {file_path} re-entered it: a pass imported "
-                            f"'{_re_entered}' while Python was still executing that "
-                            "module, so the name is not bound yet. A module a pass "
-                            "reaches at run time belongs in the schedule's dependency "
-                            "list (IR_SCHED_DEPS in jaclang.compiler.driver.pipeline), "
-                            "which the loader pre-imports and which puts any compile "
-                            "nested in its import on the bootstrap tier."
-                        ) from _crash;
-                    }
                 }
                 _resolved = os.path.realpath(file_path);
                 _probe = _mod
@@ -1423,8 +1322,7 @@ impl JacCompiler.compile(
                     options=options
                 );
             } finally {
-                if target_program is not caller_program
-                    and not self.selfhost.is_selfhost(target_program) {
+                if target_program is not caller_program {
                     caller_program.errors_had.extend(
                         target_program.errors_had[context_errors:]
                     );
@@ -1573,11 +1471,7 @@ impl JacCompiler._compile_once(
             );
         }
     }
-    if options.force_target_program {
-        actual_program = target_program;
-    } else {
-        actual_program = self.selfhost.resolve(file_path, target_program);
-    }
+    actual_program = target_program;
 
     _prev_opts = actual_program.options;
     if _prev_opts is not None
@@ -1638,7 +1532,7 @@ impl JacCompiler._compile_once(
 impl JacCompiler._ingest_comptime_producers(
     mod_targ: uni.Module, actual_program: JacProgram, file_path: str
 ) -> None {
-    if mod_targ is None or self.selfhost.is_selfhost(actual_program) {
+    if mod_targ is None {
         return;
     }
     saved_opts = actual_program.options;
@@ -1689,7 +1583,7 @@ impl JacCompiler._compile_pipeline(
 impl JacCompiler.build(
     file_path: str, target_program: JacProgram, use_str: (str | None) = None
 ) -> uni.Module {
-    actual_program = self.selfhost.resolve(file_path, target_program);
+    actual_program = target_program;
     mod_targ = self.compile(
         file_path, actual_program, use_str, options=CompileOptions()
     );
@@ -1798,13 +1692,7 @@ impl JacCompiler._report_missing_native_ir(
     import from jaclang.compiler.frontend.diagnostics { E5092 }
     import from jaclang.compiler.frontend.module_facts { ModuleFacts }
     import from jaclang.compiler.passes.transform { Alert }
-    reason = native_schedule_failure();
-    if not reason {
-        (_avail, _why) = native_pipeline_available();
-        if not _avail {
-            reason = _why;
-        }
-    }
+    (_available, reason) = native_pipeline_available();
     if reason {
         detail = f"the native codegen schedule could not be built ({reason})";
     } elif not ModuleFacts.has_native_context_stmts(mod) {
@@ -2020,14 +1908,10 @@ impl JacCompiler.get_client_artifact(
         context_program,
         compilation_scope
     }
-    actual = self.selfhost.resolve(full_target, target_program);
-    if not self.selfhost.is_selfhost(actual) {
-        options = bind_options(full_target, actual, actual.options);
-        actual = context_program(actual, options);
-    }
-    with compilation_scope(
-        '' if self.selfhost.is_selfhost(actual) else actual.context_key, actual.options
-    ) {
+    actual = target_program;
+    options = bind_options(full_target, actual, actual.options);
+    actual = context_program(actual, options);
+    with compilation_scope(actual.context_key, actual.options) {
         return self._get_client_artifact(full_target, actual);
     }
 }
@@ -2036,7 +1920,7 @@ impl JacCompiler._get_client_artifact(
     full_target: str, target_program: JacProgram
 ) -> (ClientArtifact | None) {
     full_target = JacProgram.hub_key(full_target);
-    actual_program = self.selfhost.resolve(full_target, target_program);
+    actual_program = target_program;
     ready = self.client_codegen_target(full_target, actual_program);
     if ready is not None {
         if not self.ensure_client_codegen(ready, actual_program) {
@@ -2096,16 +1980,10 @@ impl JacCompiler.release_compile_state(target_program: JacProgram) -> None {
         return;
     }
     owner = target_program.context_root or target_program;
-    internal = self._selfhost.peek_program() if self._selfhost is not None else None;
-    if self._reentrant_depth
-        or owner.scratch.compile_depth
-        or (internal is not None and internal.scratch.compile_depth) {
+    if self._reentrant_depth or owner.scratch.compile_depth {
         raise RuntimeError("Cannot release compiler state during compilation");
     }
     owner.release_compile_closure(collect=False);
-    if internal is not None and internal is not owner {
-        internal.release_compile_closure(collect=False);
-    }
 
     import gc;
     gc.collect();

@@ -13,6 +13,7 @@ import type from jaclang.compiler.frontend.constant { EdgeDir }
 import type from jaclang.runtime.graph_query { GraphQuery, QHop, QOrder, QPred }
 import type from jaclang.runtime.runtime { JacRuntimeInterface }
 import type from jaclang.runtime.object_model { field }
+import type from jaclang.runtime.deletion { destroy, peek_attr, peek_item }
 import type from jaclang.runtime.function_metadata { impl_patch_filename }
 
 glob __all__ = [
@@ -65,32 +66,32 @@ glob __all__ = [
          'thread_wait'
      ],
      _EXPORTS: dict[str, tuple[str, str]] = {
-         "DSFunc": ("jaclang.runtime.archetype", "ObjectSpatialFunction"),
-         "Edge": ("jaclang.runtime.archetype", "EdgeArchetype"),
-         "EdgeDir": ("jaclang.compiler.frontend.constant", "EdgeDir"),
-         "GenericEdge": ("jaclang.runtime.archetype", "GenericEdge"),
-         "GraphQuery": ("jaclang.runtime.graph_query", "GraphQuery"),
-         "JacRuntimeInterface": ("jaclang.runtime.runtime", "JacRuntimeInterface"),
-         "JsxElement": ("jaclang.runtime.archetype", "JsxElement"),
-         "Node": ("jaclang.runtime.archetype", "NodeArchetype"),
-         "Obj": ("jaclang.runtime.archetype", "Archetype"),
-         "QHop": ("jaclang.runtime.graph_query", "QHop"),
-         "QOrder": ("jaclang.runtime.graph_query", "QOrder"),
-         "QPred": ("jaclang.runtime.graph_query", "QPred"),
-         "Root": ("jaclang.runtime.archetype", "Root"),
-         "Walker": ("jaclang.runtime.archetype", "WalkerArchetype"),
-         "field": ("jaclang.runtime.object_model", "field"),
-         "impl_patch_filename": (
-             "jaclang.runtime.function_metadata",
-             "impl_patch_filename"
-         ),
+         "destroy": ("..runtime.deletion", "destroy"),
+         "peek_attr": ("..runtime.deletion", "peek_attr"),
+         "peek_item": ("..runtime.deletion", "peek_item"),
+         "DSFunc": ("..runtime.archetype", "ObjectSpatialFunction"),
+         "Edge": ("..runtime.archetype", "EdgeArchetype"),
+         "EdgeDir": ("..compiler.frontend.constant", "EdgeDir"),
+         "GenericEdge": ("..runtime.archetype", "GenericEdge"),
+         "GraphQuery": ("..runtime.graph_query", "GraphQuery"),
+         "JacRuntimeInterface": ("..runtime.runtime", "JacRuntimeInterface"),
+         "JsxElement": ("..runtime.archetype", "JsxElement"),
+         "Node": ("..runtime.archetype", "NodeArchetype"),
+         "Obj": ("..runtime.archetype", "Archetype"),
+         "QHop": ("..runtime.graph_query", "QHop"),
+         "QOrder": ("..runtime.graph_query", "QOrder"),
+         "QPred": ("..runtime.graph_query", "QPred"),
+         "Root": ("..runtime.archetype", "Root"),
+         "Walker": ("..runtime.archetype", "WalkerArchetype"),
+         "field": ("..runtime.object_model", "field"),
+         "impl_patch_filename": ("..runtime.function_metadata", "impl_patch_filename"),
 
      };
 
 def __getattr__(name: str) -> any {
     owner = _EXPORTS.get(name);
     if owner is not None {
-        return getattr(importlib.import_module(owner[0]), owner[1]);
+        return getattr(importlib.import_module(owner[0], __package__), owner[1]);
     }
     if name in __all__ {
         import from jaclang.runtime.exports { runtime_function }

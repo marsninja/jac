@@ -11,8 +11,7 @@ test "compiled runtime facade loads without initializing the runtime" {
     source = Path(str(jaclang.__file__)).parent / "lib" / "jaclib.jac";
     program = JacProgram();
     module = program.compile(
-        file_path=str(source),
-        options=CompileOptions(force_target_program=True, force_codespace="server")
+        file_path=str(source), options=CompileOptions(force_codespace="server")
     );
     assert module is not None and module.gen.py_bytecode;
     code = module.gen.py_bytecode;
@@ -55,6 +54,7 @@ test "full compiler output initializes the runtime foundation without a seed" {
     package = Path(str(jaclang.__file__)).parent;
     sources = [
         "runtime/exports",
+        "runtime/deletion",
         "runtime/access_level",
         "runtime/object_model",
         "runtime/function_metadata",
@@ -76,10 +76,7 @@ test "full compiler output initializes the runtime foundation without a seed" {
                 module = program.compile(
                     file_path=str(package / (relative + ".jac")),
                     options=CompileOptions(
-                        force_target_program=True,
-                        force_codespace="server",
-                        need_full_ast=True,
-                        no_ir_cache=True
+                        force_codespace="server", need_full_ast=True, no_ir_cache=True
                     )
                 );
                 assert module is not None and module.gen.py_bytecode;
@@ -112,6 +109,11 @@ test "full compiler output initializes the runtime foundation without a seed" {
             "assert anchor.persistent is False\n"
             "anchor.persistent = True\n"
             "assert anchor.persistent is True\n"
+            "from jaclang.lib import destroy, peek_attr, peek_item\n"
+            "destroy([1, None, {'value': 7}])\n"
+            "assert peek_item({'value': 42}, 'value') == 42\n"
+            "assert peek_item({}, 'missing') is None\n"
+            "assert peek_attr(object(), 'missing') is None\n"
             "from jaclang.runtime.exports import runtime_function\n"
             "operation = runtime_function('example')\n"
             "assert operation is runtime_function('example')\n"

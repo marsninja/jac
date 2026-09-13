@@ -342,7 +342,6 @@ impl native_build(
             options = CompileOptions(
                 aot_mode=True,
                 default_codespace=('native' if auto_promote else ''),
-                force_target_program=True,
                 memory_profile=memory,
                 native_target=(_triple or None),
                 native_debug=(True if debug else None),

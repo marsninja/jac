@@ -1,11 +1,5 @@
 """Single source of truth for jac's global on-disk cache root.
 
-Pure Python with no jac dependencies, so it is importable during bootstrap —
-before the jac0core ``.jac`` modules have been transpiled. Both the bootstrap
-bytecode cache (``meta_importer``) and the JIR module cache
-(``jaclang.compiler.driver.jir``) derive their directories from here, so the
-platform-resolution logic lives in exactly one place.
-
 This module owns only the genuinely global, config-independent directories.
 The per-module cache locations (``jir/modules/`` and its ``native/`` subdir)
 are project-aware and therefore resolved in ``jaclang.compiler.driver.jir`` via
@@ -34,11 +28,6 @@ def get_jir_cache_dir() -> Path:
         xdg = os.environ.get("XDG_CACHE_HOME")
         base = Path(xdg) if xdg else (Path.home() / ".cache")
         return base / "jac" / "jir"
-
-
-def get_bootstrap_cache_dir() -> Path:
-    """Global cache dir for marshalled jac0core bootstrap bytecode."""
-    return get_jir_cache_dir() / "bootstrap"
 
 
 def get_app_cache_dir() -> Path:

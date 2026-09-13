@@ -27,6 +27,8 @@ assert not (package / "jac0core").exists()
 assert not (package / "bootstrap_manifest.py").exists()
 from jaclang.compiler.driver.program import JacProgram
 from jaclang.compiler.driver.compile_options import CompileOptions
+from jaclang.compiler.native_compiler import ensure_loaded
+assert ensure_loaded() is not None
 program = JacProgram()
 module = program.compile(
     file_path="<image-smoke>",
@@ -41,15 +43,17 @@ print("image verified")
 ''';
     env = dict(os.environ);
     for name in (
-        "JAC_DEV_SOURCE",
         "JAC_COMPILER_IMAGE",
         "JAC_COMPILER_LIB",
         "JAC_LLVM_SHIM",
-        "JACPATH"
+        "JACPATH",
+        "JAC_STUBCAT_BUILDING",
+        "JAC_STUBCAT_FILE",
+        "JAC_STUBCAT_OFF",
+        "JAC_STUBCAT_LEN"
     ) {
         env.pop(name, None);
     }
-    env["JAC_NO_DEV_SOURCE"] = "1";
     with tempfile.TemporaryDirectory() as work {
         result = subprocess.run(
             [sys.executable, "-I", "-S", "-c", probe, str(site)],

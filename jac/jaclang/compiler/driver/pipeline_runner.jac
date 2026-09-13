@@ -6,7 +6,6 @@ import type from jaclang.compiler.driver.compiler { JacCompiler }
 import jaclang.compiler.frontend.unitree as uni;
 import from jaclang.compiler.frontend.constant { CodeContext }
 import from jaclang.compiler.frontend.helpers { read_file_with_encoding }
-import from jaclang.compiler.driver.source_failures { module_import_in_flight }
 
 obj ModuleCompilation {
     has compiler: JacCompiler,
@@ -28,7 +27,6 @@ obj ModuleCompilation {
     def parse {
         existing = self.program.mod.hub.get(os.path.realpath(self.path));
         if self.source is None
-            and not self.compiler.selfhost.is_selfhost(self.program)
             and existing is not None
             and not existing.stub_only
             and not existing.parse_failed
@@ -61,10 +59,7 @@ obj ModuleCompilation {
         if self.options.symtab_ir_only {
             _head_sched = get_symtab_ir_sched();
         } else {
-            _head_sched = get_ir_gen_sched(
-                is_internal=self.compiler.selfhost.is_selfhost(self.program),
-                gen_mtir=not self.options.no_cgen
-            );
+            _head_sched = get_ir_gen_sched(gen_mtir=not self.options.no_cgen);
         }
 
         self.full_head = AnalysisFact.CFG_SUCC in providers_of(_head_sched);
@@ -114,14 +109,7 @@ obj ModuleCompilation {
             }
             _annex_of_base = _cc_base_file(str(self.path)) is not None;
         }
-        _analyze = self.full_head
-            and not _is_decl_stub
-            and not _annex_of_base
-            and (
-                self.native
-                or not self.compiler.selfhost.is_selfhost(self.program)
-                or not module_import_in_flight(self.path)
-            );
+        _analyze = self.full_head and not _is_decl_stub and not _annex_of_base;
 
         if _analyze {
             if not self.program.analysis.analyses_run.provides(
@@ -198,9 +186,7 @@ obj ModuleCompilation {
             cb_paths: list[str] = [];
 
             cb_opts = CompileOptions(
-                no_cgen=True,
-                force_target_program=True,
-                cancel_token=self.options.cancel_token
+                no_cgen=True, cancel_token=self.options.cancel_token
             );
             cb_reg = self.program.iface_registry();
             while cb_worklist or cb_paths {

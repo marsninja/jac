@@ -337,19 +337,19 @@ test "failed preparation does not replace the last working revision" {
 }
 
 
-test "preparation infrastructure compiles through the binary bootstrap" {
-    import from jaclang.jac0 { compile_jac }
-    package = Path(__file__).resolve().parents[2] / 'jaclang';
-    for relative in [
-        'compiler/driver/application.jac',
-        'compiler/backends/py/artifact_imports.jac',
-        'runtime/prepared.jac'
+test "preparation infrastructure is present in the compiler image" {
+    import jaclang;
+    import from jaclang.compiler.driver.image { load_image }
+    image = load_image(Path(jaclang.__file__).parent / "_precompiled");
+    assert image is not None;
+    for module in [
+        "jaclang.compiler.driver.application",
+        "jaclang.compiler.backends.py.artifact_imports",
+        "jaclang.runtime.prepared"
     ] {
-        path = package / relative;
-        compile(compile_jac(path.read_text(), str(path)), str(path), 'exec');
+        assert image.code(module) is not None;
     }
 }
-
 
 test "prepared services with the same entry filename load independently" {
     import from jaclang.runtime.prepared { load_prepared_module }

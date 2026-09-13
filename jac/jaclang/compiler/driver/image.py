@@ -5,7 +5,8 @@ justify itself against source" to "artifact trusted by construction": a
 build-time ``MANIFEST.json`` maps module fullnames to precompiled JIR, so the
 runtime resolves modules by *name* with no per-load source re-hashing. The
 ``.jac`` sources ship alongside the JIRs -- for tracebacks, ``inspect``, and
-as fallback when a JIR is unreadable -- but a sealed load never consults them.
+for compiler analysis of imported modules. Loading a compiler module always
+requires executable image bytecode.
 Integrity: images explicitly registered via ``register_image`` are hash-checked
 against the manifest at registration; the jaclang image inside a single binary
 is covered by the payload's sha256 trailer at materialization time instead.
@@ -32,7 +33,7 @@ kind/capabilities/entry/payloads)::
       "jir_format_version": 13,
       "jaclang_version": "0.8.7",
       "compiler_digest": "409:9f2c...",  # optional: the compiler that built
-                                         # this image (jir.compiler_source_digest;
+                                         # this image (content identity;
                                          # informational -- the seal already
                                          # verified every JIR against it, see #8178)
       "modules": {                      # key: source path relative to pkg dir
@@ -44,7 +45,7 @@ kind/capabilities/entry/payloads)::
         },
         "compiler/driver/modresolver.jac": {
           "module": "jaclang.compiler.driver.modresolver",
-          "jir": "jac0core/modresolver.jir",
+          "jir": "compiler/driver/modresolver.jir",
           "package": false,
           "sha256": "...",
         }, ...
@@ -73,7 +74,6 @@ import types
 import zlib
 from pathlib import Path
 
-from jaclang.compiler.driver import extensions as ext_registry
 
 MANIFEST_NAME = "MANIFEST.json"
 MANIFEST_FORMAT = 8
@@ -112,7 +112,6 @@ SEC_CLIENT = 0x10
 SEC_TERMINATOR = 0xFF
 FLAG_PRECOMPILED = 0x02
 PRECOMPILE_SENTINEL = "__PKG_ROOT__"
-FLAG_BOOTSTRAP = 0x04
 
 
 def read_sections(data: bytes | memoryview, start_pos: int) -> dict[int, bytes]:
@@ -142,11 +141,30 @@ def read_section_bytes(data: bytes, sec_type: int) -> bytes | None:
     return read_sections(data, pos + len(SECTIONS_MAGIC)).get(sec_type)
 
 
+def decode_code(data: bytes) -> types.CodeType:
+    """Validate an image module's header and read its executable code."""
+    if len(data) < HEADER_SIZE:
+        raise ValueError("Truncated JIR header")
+    header = struct.unpack(HEADER_FMT, data[:HEADER_SIZE])
+    expected_python = (sys.version_info.major << 8) | sys.version_info.minor
+    if header[:3] != (MAGIC, FORMAT_VERSION, expected_python):
+        raise ValueError("Incompatible JIR executable module")
+    raw = read_section_bytes(data, SEC_BYTECODE)
+    if raw is None:
+        raise ValueError("JIR module has no bytecode")
+    code = marshal.loads(raw)
+    if not isinstance(code, types.CodeType):
+        raise ValueError("JIR bytecode is not an executable code object")
+    return code
+
+
 def patch_code_filenames(
-    code: types.CodeType, find: str, replace: str
+    code: types.CodeType, find: str, replace: str, path_constants: bool = False
 ) -> types.CodeType:
     consts = tuple(
-        patch_code_filenames(c, find, replace) if isinstance(c, types.CodeType) else c
+        patch_code_filenames(c, find, replace, path_constants) if isinstance(c, types.CodeType)
+        else replace + c[len(find):] if path_constants and isinstance(c, str) and (c == find or c.startswith(find + "/"))
+        else c
         for c in code.co_consts
     )
     return code.replace(
@@ -154,15 +172,48 @@ def patch_code_filenames(
     )
 
 
-def patch_co_filenames_bytes(raw_bc: bytes, find: str, replace: str) -> bytes:
+def patch_co_filenames_bytes(raw_bc: bytes, find: str, replace: str, path_constants: bool = False) -> bytes:
     """Rebase valid code; preserve opaque/unreadable bytecode for the caller."""
     try:
         code = marshal.loads(raw_bc)
         if not isinstance(code, types.CodeType):
             return raw_bc
-        return marshal.dumps(patch_code_filenames(code, find, replace))
+        return marshal.dumps(patch_code_filenames(code, find, replace, path_constants))
     except (EOFError, ValueError, TypeError):
         return raw_bc
+
+
+def write_sections(sections: dict[int, bytes] | None) -> bytes:
+    if not sections:
+        return b""
+    result = bytearray(SECTIONS_MAGIC)
+    for section, data in sorted(sections.items()):
+        result.append(section)
+        result.extend(struct.pack("<I", len(data)))
+        result.extend(data)
+    result.extend(bytes((SEC_TERMINATOR, 0, 0, 0, 0)))
+    return bytes(result)
+
+
+def write_precompiled_jir(
+    bytecode: bytes | None,
+    module_key: str = "",
+    flags: int = 0,
+    extra_sections: dict[int, bytes] | None = None,
+    version: str = "",
+) -> bytes:
+    """Serialize an executable image module using the canonical JIR codec."""
+    header = struct.pack(
+        HEADER_FMT, MAGIC, FORMAT_VERSION,
+        (sys.version_info.major << 8) | sys.version_info.minor,
+        zlib.crc32(version.encode()) & 0xFFFFFFFF, 0, 0, 0, 0, flags,
+    )
+    sections = dict(extra_sections or {})
+    if bytecode is not None:
+        sections[SEC_BYTECODE] = bytecode
+    if module_key:
+        sections[SEC_MODKEY] = module_key.encode()
+    return header + zlib.compress(bytes(1), 1) + write_sections(sections)
 
 
 JIR_FORMAT_VERSION = FORMAT_VERSION
@@ -171,15 +222,6 @@ JIR_FORMAT_VERSION = FORMAT_VERSION
 def python_tag() -> str:
     """Return the running interpreter's tag, e.g. ``cpython-314``."""
     return f"cpython-{sys.version_info.major}{sys.version_info.minor}"
-
-
-_ARCH_ALIASES = {
-    "arm64": "aarch64",
-    "aarch64": "aarch64",
-    "x86_64": "x86_64",
-    "amd64": "x86_64",
-}
-
 
 
 class SealedImage:
@@ -208,6 +250,8 @@ class SealedImage:
         self._build_index()
 
     def _build_index(self) -> None:
+        from jaclang.compiler.driver import extensions as ext_registry
+
         # MODULE_SUFFIXES precedence: earlier (shorter) suffixes win -- same
         # rule the filesystem finder applies. Process in precedence-sorted
         # order and keep first.
@@ -226,6 +270,9 @@ class SealedImage:
         modules: dict[str, dict] = self.manifest.get("modules", {})
         for src in sorted(modules, key=precedence):
             entry = modules[src]
+            for relative in (src, entry.get("jir", "")):
+                if not isinstance(relative, str) or not relative or os.path.isabs(relative) or ".." in Path(relative).parts:
+                    raise RuntimeError(f"sealed image: illegal module path {relative!r}")
             fullname = entry.get("module")
             if fullname and fullname not in self.index:
                 self.index[fullname] = (entry, src)
@@ -271,6 +318,9 @@ class SealedImage:
         integrity cover; the jaclang image inside a single binary skips this
         because the payload's sha256 trailer already covers the whole tree.
         """
+        if self.package == "jaclang" and self.manifest.get("producer_digest"):
+            if self.manifest.get("compiler_digest") != compiler_image_digest(self.manifest):
+                raise RuntimeError("compiler image identity does not match its manifest inputs")
         for entry, _src in self.index.values():
             path = self.jir_path(entry)
             try:
@@ -281,18 +331,22 @@ class SealedImage:
                 raise RuntimeError(
                     f"sealed image: {path} does not match its manifest sha256"
                 )
-        for rel, want in self.payloads.items():
-            if os.path.isabs(rel) or ".." in Path(rel).parts:
-                raise RuntimeError(f"sealed image: illegal payload path {rel!r}")
-            path = self.pkg_dir / rel
-            try:
-                digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            except OSError as exc:
-                raise RuntimeError(f"sealed image: cannot read {path}: {exc}") from exc
-            if digest != want:
-                raise RuntimeError(
-                    f"sealed image: payload {path} does not match its manifest sha256"
-                )
+        payload_groups = [(self.pkg_dir, self.payloads)]
+        if self.package == "jaclang":
+            payload_groups.append((self.pkg_dir.parent, self.manifest.get("site_payloads", {})))
+        for root, records in payload_groups:
+            for rel, want in records.items():
+                if not rel or os.path.isabs(rel) or ".." in Path(rel).parts:
+                    raise RuntimeError(f"sealed image: illegal payload path {rel!r}")
+                path = root / rel
+                try:
+                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                except OSError as exc:
+                    raise RuntimeError(f"sealed image: cannot read {path}: {exc}") from exc
+                if digest != want:
+                    raise RuntimeError(
+                        f"sealed image: payload {path} does not match its manifest sha256"
+                    )
 
     def code(self, fullname: str) -> types.CodeType | None:
         """Read executable module code without initializing a compiler."""
@@ -302,13 +356,29 @@ class SealedImage:
         data = self._jir_bytes(fullname)
         if data is None:
             return None
-        raw = read_section_bytes(data, SEC_BYTECODE)
-        if raw is None:
-            return None
-        code = marshal.loads(raw)  # noqa: S302 -- trusted sealed artifact
-        if not isinstance(code, types.CodeType):
-            raise RuntimeError(f"sealed image: {fullname} has no executable code object")
-        return patch_code_filenames(code, PRECOMPILE_SENTINEL, str(self.pkg_dir))
+        code = decode_code(data)
+        return patch_code_filenames(code, PRECOMPILE_SENTINEL, str(self.pkg_dir), self.package == "jaclang")
+
+
+def compiler_image_digest(manifest: dict) -> str:
+    """Identify executable compiler inputs independently of its derived catalog."""
+    identity = {key: manifest.get(key, {}) for key in
+                ("modules", "payloads", "site_payloads", "python_tag")}
+    identity["payloads"] = {path: digest for path, digest in identity["payloads"].items()
+                            if path != "_precompiled/stubcat.bin"}
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True,
+                                     separators=(",", ":")).encode()).hexdigest()
+    return "image:" + digest
+
+
+def write_compiler_manifest(directory: str | Path, manifest: dict) -> None:
+    """Publish the identity of an independently compiled compiler image."""
+    manifest.pop("native", None)
+    manifest["format"] = MANIFEST_FORMAT
+    manifest["jir_format_version"] = FORMAT_VERSION
+    manifest["compiler_digest"] = compiler_image_digest(manifest)
+    (Path(directory) / MANIFEST_NAME).write_text(
+        json.dumps(manifest, sort_keys=True, indent=1) + "\n", encoding="utf-8")
 
 
 def load_image(precompiled_dir: str | Path) -> SealedImage | None:
@@ -386,6 +456,8 @@ def _jaclang_image() -> SealedImage | None:
         pkg_dir = Path(__file__).resolve().parents[2]
         image = load_image(pkg_dir / "_precompiled")
         if image is not None:
+            if os.environ.get("JAC_COMPILER_IMAGE"):
+                image.verify()
             _images.insert(0, image)
     for img in _images:
         if img.package == "jaclang":

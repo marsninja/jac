@@ -7,7 +7,6 @@ import json;
 import os;
 import sys;
 import types;
-import from collections { deque }
 import from concurrent.futures { Future, ThreadPoolExecutor }
 import from contextvars { ContextVar }
 import from jaclang.runtime.object_model { field }
@@ -61,7 +60,6 @@ import type from jaclang.byllm.mtir { MTRuntime }
 import type from jaclang.cli.console { JacConsole as ConsoleImpl }
 import type from jaclang.compiler.driver.compiler { JacCompiler }
 import type from jaclang.compiler.driver.program { JacProgram }
-import type from jaclang.compiler.driver.selfhost { SelfHostCache }
 import type from jaclang.client.client_bundle { ClientBundle, ClientBundleBuilder }
 import type from jaclang.runtime.context { ExecutionContext }
 import type from jaclang.server.server { JacAPIServer as JacServer }
@@ -227,7 +225,6 @@ class JacPersistence {
     static def object_ref(`obj: Archetype) -> str;
     static def save(`obj: (Archetype | Anchor)) -> None;
     static def destroy(objs: any, strict: bool = False) -> None;
-    static def _destroy_anchors(objs: any, strict: bool) -> list[Anchor];
     static def peek_attr(`obj: any, name: str) -> any;
     static def peek_item(container: any, key: any) -> any;
     static def get_user_manager(base_path: str) -> UserManager;
@@ -523,7 +520,6 @@ class JacRuntime(JacRuntimeInterface) {
     with entry {
         compiler: (JacCompiler | None) = None;
         program: (JacProgram | None) = None;
-        selfhost: (SelfHostCache | None) = None;
         pool: ThreadPoolExecutor = ThreadPoolExecutor();
         exec_ctx: (ExecutionContext | None) = None;
         loaded_modules: dict[(str, types.ModuleType)] = {};
@@ -542,9 +538,6 @@ class JacRuntime(JacRuntimeInterface) {
 
     @classmethod
     def get_program(cls: any) -> JacProgram;
-
-    @classmethod
-    def get_selfhost(cls: any) -> SelfHostCache;
 
     static def get_base_path_dir -> (str | None);
     static def get_full_target_path -> (str | None);

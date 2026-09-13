@@ -187,9 +187,8 @@ test "compiler images execute without invoking the compiler or seed transpiler" 
                 JacRuntime,
                 "get_compiler",
                 side_effect=AssertionError("compiler invoked")
-            ), patch.object(
-                loader, "_exec_seed_source", side_effect=AssertionError("seed invoked")
             ) {
+                assert not hasattr(loader, "_exec_seed_source");
                 loader.exec_module(module);
                 assert module.answer == 42;
                 assert loader.get_code(fullname) is not None;
@@ -225,5 +224,68 @@ test "image relocation preserves annex traceback filenames" {
             == "/build/site/jaclang-other/file.jac";
     } finally {
         sealed._images.remove(image);
+    }
+}
+
+test "compiler image verifies supporting files and compiler inputs" {
+    import hashlib;
+    import tempfile;
+    import from pathlib { Path }
+    with tempfile.TemporaryDirectory() as work {
+        site = Path(work);
+        pre = site / "jaclang/_precompiled";
+        pre.mkdir(parents=True);
+        source = site / "jaclang/module.jac";
+        finder = site / "_jac_finder.py";
+        source.write_bytes(b"source");
+        finder.write_bytes(b"finder");
+        manifest = {
+            "package": "jaclang",
+            "python_tag": sealed.python_tag(),
+            "modules": {},
+            "payloads": {"module.jac": hashlib.sha256(source.read_bytes()).hexdigest()},
+            "site_payloads": {
+                "_jac_finder.py": hashlib.sha256(finder.read_bytes()).hexdigest()
+            }
+        };
+        sealed.write_compiler_manifest(pre, manifest);
+        identity = manifest["compiler_digest"];
+        catalog = pre / "stubcat.bin";
+        catalog.write_bytes(b"catalog");
+        manifest["payloads"]["_precompiled/stubcat.bin"] = hashlib.sha256(
+            catalog.read_bytes()
+        ).hexdigest();
+        sealed.write_compiler_manifest(pre, manifest);
+        assert manifest["compiler_digest"] == identity;
+        image = sealed.load_image(pre);
+        assert image is not None;
+        image.verify();
+        source.write_bytes(b"modified source");
+        with testraises(RuntimeError) {
+            image.verify();
+        }
+        source.write_bytes(b"source");
+        finder.write_bytes(b"modified finder");
+        with testraises(RuntimeError) {
+            image.verify();
+        }
+    }
+}
+
+test "image decoder rejects incompatible or nonexecutable bytecode" {
+    import struct;
+    raw = write_precompiled_jir(marshal.dumps(compile("answer = 42", "probe", "exec")));
+    wrong_version = bytearray(raw);
+    struct.pack_into("<H", wrong_version, 4, FORMAT_VERSION + 1);
+    with testraises(ValueError) {
+        sealed.decode_code(bytes(wrong_version));
+    }
+    wrong_python = bytearray(raw);
+    struct.pack_into("<H", wrong_python, 6, 0);
+    with testraises(ValueError) {
+        sealed.decode_code(bytes(wrong_python));
+    }
+    with testraises(ValueError) {
+        sealed.decode_code(write_precompiled_jir(marshal.dumps(42)));
     }
 }

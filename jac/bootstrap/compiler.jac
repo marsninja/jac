@@ -5,21 +5,109 @@ import tempfile;
 import json;
 import sys;
 import time;
+import importlib.util;
+import from functools { lru_cache }
+import from types { ModuleType }
 import from pathlib { Path }
 import jaclang;
 import from jaclang.compiler.driver.program { JacProgram }
-import from jaclang.compiler.driver.modresolver { push_import_base, pop_import_base }
+import from jaclang.compiler.driver.modresolver {
+    push_import_base,
+    pop_import_base,
+    find_project_root
+}
 import from jaclang.compiler.driver.compile_options { CompileOptions }
 import from jaclang.compiler.placement.placement_facts { toolchain_native_by_policy }
 import from jaclang.compiler.driver.jir {
     FLAG_PRECOMPILED,
     PRECOMPILE_SENTINEL,
     compute_precompile_module_key,
-    patch_co_filenames_bytes,
-    write_precompiled_jir
+    precompiled_jir_matches_source,
+    ct_deps_section,
+    SEC_CTDEPS
 }
 
-def compile_module(source: Path, package: Path, output: Path) -> dict[str, any] {
+def snapshot_sources(package: Path, destination: Path) {
+    import from jaclang.dist.payload.fsutil { copy_tree, skip_jaclang }
+    def excluded(path: str) -> bool {
+        return skip_jaclang(path)
+            or any(
+                part.startswith(".") or part in ("tests", "test")
+                for part in Path(path).parts
+            );
+    }
+    copy_tree(str(package), str(destination), excluded);
+    project = find_project_root(package);
+    if project is None {
+        raise ValueError("Compiler sources have no project manifest");
+    }
+    shutil.copyfile(project[1], destination.parent / "jac.toml");
+
+    (destination / "jac0core").mkdir(exist_ok=True);
+}
+
+def compile_kernel(package: Path, output: Path, target: str) {
+    import from jaclang.cli.cli_boot { start_cli }
+    package = package.resolve(strict=True);
+    output = output.resolve();
+    output.parent.mkdir(parents=True, exist_ok=True);
+    with tempfile.TemporaryDirectory(prefix="jac-compiler-kernel-") as work {
+        snapshot = Path(work).resolve() / "jaclang";
+        snapshot_sources(package, snapshot);
+        argv = sys.argv;
+        push_import_base(str(snapshot.parent));
+        try {
+            sys.argv = [
+                "jac",
+                "build",
+                "--native",
+                "--lib",
+                "--target",
+                target,
+                str(snapshot / "compiler/jc_unit.jac"),
+                "-o",
+                str(output)
+            ];
+            try {
+                start_cli();
+            } except SystemExit as result {
+                if result.code {
+                    raise;
+                }
+            }
+        } finally {
+            pop_import_base();
+            sys.argv = argv;
+        }
+    }
+    if not output.is_file() or not Path(str(output) + ".layout.json").is_file() {
+        raise RuntimeError(
+            "Native compiler build did not produce its library and layout"
+        );
+    }
+}
+
+@lru_cache(maxsize=4)
+def image_codec(package: str) -> ModuleType {
+    spec = importlib.util.spec_from_file_location(
+        "_jac_compiler_image_codec", str(Path(package) / "compiler/driver/image.py")
+    );
+    if spec is None or spec.loader is None {
+        raise RuntimeError("Missing target compiler image codec");
+    }
+    codec = importlib.util.module_from_spec(spec);
+    spec.loader.exec_module(codec);
+    return codec;
+}
+
+def compile_module(
+    source: Path,
+    package: Path,
+    output: Path,
+    cache: Path | None = None,
+    identity: str = "",
+    version: str = ""
+) -> dict[str, any] {
     source = source.resolve(strict=True);
     package = package.resolve(strict=True);
     relative = source.relative_to(package);
@@ -30,23 +118,45 @@ def compile_module(source: Path, package: Path, output: Path) -> dict[str, any] 
         );
     }
     started = time.monotonic();
+    codec = image_codec(str(package));
+    cached = cache / relative.with_suffix(".jir") if cache is not None else None;
+    if cached is not None and cached.is_file() {
+        try {
+            data = cached.read_bytes();
+            if precompiled_jir_matches_source(
+                data, str(source), identity, str(package)
+            ) {
+                codec.decode_code(data);
+                output.parent.mkdir(parents=True, exist_ok=True);
+                output.write_bytes(data);
+                return {
+                    "source": relative.as_posix(),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "cached": True,
+                    "seconds": time.monotonic() - started
+                };
+            }
+        } except (OSError, ValueError, EOFError, TypeError) {}
+    }
     program = JacProgram();
     push_import_base(str(package.parent));
     try {
-        module = program.compile(
-            file_path=str(source),
-            options=CompileOptions(
-                force_target_program=True,
-                force_codespace="server",
-                need_full_ast=True,
-                no_ir_cache=True,
-                project_root=str(package.parent),
-                entry_point=str(source)
-            )
+        options = CompileOptions(
+            force_codespace="server",
+            need_full_ast=True,
+            no_ir_cache=True,
+            project_root=str(package.parent),
+            entry_point=str(source)
         );
+
+        if hasattr(options, "force_target_program") {
+            setattr(options, "force_target_program", True);
+        }
+        module = program.compile(file_path=str(source), options=options);
+        contexts = [program] + list(program.contexts.values());
         foreign = [
-            path
-            for path in program.mod.hub
+            path for context in contexts
+            for path in context.mod.hub
             if path.endswith(".jac")
                 and Path(path).is_relative_to(producer)
                 and not toolchain_native_by_policy(str(producer), path)
@@ -63,14 +173,42 @@ def compile_module(source: Path, package: Path, output: Path) -> dict[str, any] 
         for diagnostic in program.errors_had {
             sys.stderr.write(diagnostic.pretty_print() + "\n");
         }
-        bytecode = patch_co_filenames_bytes(
-            module.gen.py_bytecode, str(package), PRECOMPILE_SENTINEL
+        bytecode = codec.patch_co_filenames_bytes(
+            module.gen.py_bytecode, str(package), PRECOMPILE_SENTINEL, True
         );
-        artifact = write_precompiled_jir(
-            bytecode, compute_precompile_module_key(str(source)), FLAG_PRECOMPILED
+        dependencies: set[str] = set();
+        bodies: set[str] = set();
+        for context in contexts {
+            for (path, unit) in context.mod.hub.items() {
+                if Path(path).is_file() {
+                    dependencies.add(path);
+                    if path.endswith(".jac") {
+                        bodies.add(path);
+                    }
+                }
+                dependencies.update(unit.ct_file_deps or []);
+                bodies.update(unit.ct_body_deps or []);
+            }
+        }
+        artifact = codec.write_precompiled_jir(
+            bytecode,
+            compute_precompile_module_key(str(source), identity),
+            FLAG_PRECOMPILED,
+            {
+                int(SEC_CTDEPS): ct_deps_section(
+                    list(dependencies), list(bodies), str(package)
+                )
+            },
+            version
         );
         output.parent.mkdir(parents=True, exist_ok=True);
         output.write_bytes(artifact);
+        if cached is not None {
+            cached.parent.mkdir(parents=True, exist_ok=True);
+            temporary = cached.with_suffix(f".{os.getpid()}.tmp");
+            temporary.write_bytes(artifact);
+            temporary.replace(cached);
+        }
         elapsed = time.monotonic() - started;
         return {
             "source": relative.as_posix(),
@@ -93,10 +231,10 @@ def compile_image(
     kernel: Path,
     shim: Path,
     jobs: int,
-    native_only: list[str]
+    native_only: list[str],
+    cache: Path | None = None
 ) {
     import from jaclang.cli.workpool { WorkPool, pool_available, resolve_jobs }
-    import from jaclang.dist.payload.fsutil { copy_tree, skip_jaclang }
     import from jaclang.dist.precompile_bytecode {
         find_jac_files,
         jir_to_module,
@@ -104,10 +242,7 @@ def compile_image(
         _nested_project_dirs,
         _precompile_retire
     }
-    import from jaclang.compiler.driver.jir {
-        compiler_source_digest,
-        running_compiler_digest
-    }
+    import from jaclang.compiler.driver.jir { running_compiler_digest }
 
     package = package.resolve(strict=True);
     output = output.resolve();
@@ -128,20 +263,27 @@ def compile_image(
     output.parent.mkdir(parents=True, exist_ok=True);
     started = time.monotonic();
     producer_digest = running_compiler_digest();
-    source_digest = compiler_source_digest(str(package));
-    with tempfile.TemporaryDirectory(
-        prefix=".compiler-image-", dir=str(output.parent)
-    ) as work {
-        site = Path(work) / "site";
+    project = find_project_root(package);
+    if project is None {
+        raise ValueError("Compiler sources have no project manifest");
+    }
+    import from jaclang.project.tomlio { read_toml_with_encoding }
+    metadata = read_toml_with_encoding(str(project[1]));
+    version = str(metadata["project"]["version"]);
+    with tempfile.TemporaryDirectory(prefix="jac-compiler-image-") as work {
+        site = Path(work).resolve() / "site";
         snapshot = site / "jaclang";
-        def exclude_path(relative: str) -> bool {
-            return skip_jaclang(relative)
-                or relative in ("jac0.py", "bootstrap_manifest.py", "jac0core")
-                or relative.startswith("jac0core/");
-        }
-        copy_tree(str(package), str(snapshot), exclude_path);
+        snapshot_sources(package, snapshot);
         resolver_marker = snapshot / "jac0core";
-        resolver_marker.mkdir();
+        shutil.copyfile(
+            package.parent / "bootstrap/pins.json", snapshot / "dist/payload/pins.json"
+        );
+        shutil.copyfile(
+            package.parent / "bootstrap/python/sources.json",
+            snapshot / "dist/payload/python-sources.json"
+        );
+        import from jaclang.dist.payload.assemble { write_dist_info }
+        write_dist_info(str(package.parent), str(site));
         finder = package.parent / "_jac_finder.py";
         if finder.is_file() {
             shutil.copyfile(finder, site / finder.name);
@@ -161,6 +303,22 @@ def compile_image(
         artifacts = precompiled / pyver;
         artifacts.mkdir(parents=True, exist_ok=True);
         nested = _nested_project_dirs(str(snapshot));
+        codec = image_codec(str(snapshot));
+        layout_digest = hashlib.sha256(producer_digest.encode());
+        layout_digest.update(Path(__file__).read_bytes());
+        layout_digest.update((snapshot / "compiler/driver/image.py").read_bytes());
+        layout_digest.update((site / "jac.toml").read_bytes());
+        for path in sorted(snapshot.rglob("*")) {
+            if path.is_file() and precompiled not in path.parents {
+                relative_path = path.relative_to(snapshot).as_posix();
+                layout_digest.update(relative_path.encode() + b"\0");
+                if path.suffix in (".toml", ".json") {
+                    layout_digest.update(path.read_bytes());
+                }
+            }
+        }
+        cache_identity = layout_digest.hexdigest();
+        module_cache = cache / cache_identity if cache is not None else None;
         sources = [
             source
             for source in find_jac_files(str(snapshot))
@@ -173,7 +331,9 @@ def compile_image(
         def job(request: dict[str, any]) -> dict[str, any] {
             source = Path(str(request["path"]));
             destination = artifacts / source.relative_to(snapshot).with_suffix(".jir");
-            return compile_module(source, snapshot, destination);
+            return compile_module(
+                source, snapshot, destination, module_cache, cache_identity, version
+            );
         }
         def record(index: int, message: dict[str, any]) {
             result = message.get("result");
@@ -212,11 +372,10 @@ def compile_image(
             raise RuntimeError(f"Incomplete compiler image: {failures}");
         }
         resolver_marker.rmdir();
+        (site / "jac.toml").unlink();
         payloads: dict[str, str] = {};
         for path in sorted(snapshot.rglob("*")) {
-            if path.is_file()
-                and path.suffix in (".py", ".so", ".dylib", ".json")
-                and precompiled not in path.parents {
+            if path.is_file() and precompiled not in path.parents {
                 payloads[path.relative_to(snapshot).as_posix()] = hashlib.sha256(
                     path.read_bytes()
                 ).hexdigest();
@@ -225,19 +384,21 @@ def compile_image(
         write_manifest(precompiled, "jaclang", pyver, modules, payloads);
         manifest_path = precompiled / "MANIFEST.json";
         manifest = json.loads(manifest_path.read_text());
-        identity = hashlib.sha256(
-            json.dumps(
-                {"modules": modules, "payloads": payloads, "python_tag": pyver},
-                sort_keys=True,
-                separators=(",", ":")
-            ).encode()
-        ).hexdigest();
+        manifest["site_payloads"] = {
+            path.relative_to(site).as_posix(): hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+            for path in sorted(site.rglob("*"))
+            if path.is_file() and snapshot not in path.parents
+        };
+        manifest["jaclang_version"] = version;
         manifest["producer_digest"] = producer_digest;
-        manifest["source_digest"] = source_digest;
-        manifest["source_root"] = str(snapshot);
-        manifest["compiler_digest"] = f"image:{identity}";
-        manifest_path.write_text(json.dumps(manifest, sort_keys=True, indent=1) + "\n");
-        site.replace(output);
+        manifest["source_root"] = PRECOMPILE_SENTINEL;
+        codec.write_compiler_manifest(precompiled, manifest);
+        if output.exists() {
+            output.rmdir();
+        }
+        shutil.move(str(site), str(output));
     }
     sys.stdout.write(
         json.dumps(
@@ -251,15 +412,45 @@ def compile_image(
     );
 }
 
-with entry {
-    if len(sys.argv) >= 7 and sys.argv[1] == "image" {
+def complete_image(source: Path, catalog: Path, output: Path) {
+    source = source.resolve(strict=True);
+    catalog = catalog.resolve(strict=True);
+    output = output.resolve();
+    codec = image_codec(str(source / "jaclang"));
+    image = codec.load_image(source / "jaclang/_precompiled");
+    if image is None {
+        raise ValueError("Cannot complete a missing compiler image");
+    }
+    image.verify();
+    if output.exists() {
+        output.rmdir();
+    }
+    shutil.copytree(source, output);
+    precompiled = output / "jaclang/_precompiled";
+    destination = precompiled / "stubcat.bin";
+    shutil.copyfile(catalog, destination);
+    manifest = dict(image.manifest);
+    manifest["payloads"] = {
+        ** manifest["payloads"],
+        "_precompiled/stubcat.bin": hashlib.sha256(destination.read_bytes()).hexdigest()
+    };
+    codec.write_compiler_manifest(precompiled, manifest);
+}
+
+with entry:__main__ {
+    if len(sys.argv) == 5 and sys.argv[1] == "complete" {
+        complete_image(Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4]));
+    } elif len(sys.argv) == 5 and sys.argv[1] == "kernel" {
+        compile_kernel(Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]);
+    } elif len(sys.argv) >= 8 and sys.argv[1] == "image" {
         compile_image(
             Path(sys.argv[2]),
             Path(sys.argv[3]),
             Path(sys.argv[4]),
             Path(sys.argv[5]),
             int(sys.argv[6]),
-            list(sys.argv[7:])
+            list(sys.argv[8:]),
+            Path(sys.argv[7])
         );
     } elif len(sys.argv) == 4 {
         package = Path(sys.argv[1]);
@@ -268,7 +459,7 @@ with entry {
     } else {
         raise SystemExit(
             "usage: compiler.jac <package> <source-relative-path> <output.jir>\n"
-            "       compiler.jac image <package> <output-site> <kernel> <shim> <jobs> [native-only-source ...]"
+            "       compiler.jac image <package> <output-site> <kernel> <shim> <jobs> <module-cache> [native-only-source ...]"
         );
     }
 }

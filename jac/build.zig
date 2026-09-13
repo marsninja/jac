@@ -1,31 +1,19 @@
-//! Build the self-contained `jac` binary.
+//! Build a self-contained Jac binary from a verified prior Jac release.
 //!
-//! The binary is `[ launcher stub ][ runtime.tar.zst payload ][ trailer ]`.
-//! Both halves are produced by Jac:
+//! Stage 0 builds the current native compiler kernel and complete stage-1
+//! compiler image. Stage 1 builds the launcher and stub catalog; packaging
+//! consumes those artifacts. Stage 2 rebuilds the kernel and image with stage 1.
 //!
-//!   * the launcher stub is `launcher/launcher.jac` over the fused-runtime
-//!     library (`jaclang/dist/fused`), compiled by the in-checkout
-//!     compiler with `jac build --as native` (the Jac-native linkers; no
-//!     external toolchain) -- it links only libc/libdl and dlopens the bundled
-//!     CPython at runtime;
-//!   * the payload tool is `jaclang.dist.payload`, Python-tier Jac that fetches the
-//!     vendored inputs, stages the runtime tree, packs it, and appends it to the
-//!     stub with the trailer.
+//! Python and native dependencies are built from pinned sources using Zig.
+//! Each full distribution builds on its matching release runner.
 //!
-//! The build first compiles the pinned CPython and native libraries from
-//! bootstrap/python/sources.json using Zig's C toolchain. The seed verifies
-//! sources before running the retained upstream configure/make recipes.
-//! Build hosts need Zig 0.16.0, make, Perl, a POSIX shell, and a network
-//! connection. No installed Python or Jac is required. Each release target
-//! builds on its matching runner; the resulting Python tree is relocatable.
-//!
-//!   zig build build-python        # just Python and its native dependencies
-//!   zig build test                # offline bootstrap tests
-//!   zig build stub                # just the launcher
-//!   zig build                     # complete binary -> zig-out/bin/jac
-//!   zig build -Ddev               # link compiler sources from this checkout
-//!   zig build -Djaclang-dir=PATH   # link another compiler source tree
-//!   zig build -Dpayload=PATH       # pack an existing payload
+//!   zig build fetch-jac            # acquire and verify the pinned compiler
+//!   zig build compiler-image       # stage 1 -> zig-out/compiler-site
+//!   zig build compiler-stage2      # self rebuild -> zig-out/stage2-site
+//!   zig build verify-compiler-image
+//!   zig build build-python         # source-built Python runtime
+//!   zig build                      # complete binary -> zig-out/bin/jac
+//!   zig build test                 # offline bootstrap tests
 //!
 const std = @import("std");
 // Pinned toolchain inputs (Python, LLVM slices), read from bootstrap/pins.json --
@@ -43,33 +31,17 @@ fn llvmCacheDir(b: *std.Build, target: std.Build.ResolvedTarget) ?[]const u8 {
     return b.fmt("{s}/{s}", .{ LLVM_CACHE_BASE, rel.dirname });
 }
 
-// The built LLVMPY_* shim: `bin` is bundled into the payload (--shim); `place`
-// writes it into the source tree for the editable dev loop. `bin` is a LazyPath
-// (not a *Compile) so the Linux `zig c++` path and the macOS system-`c++`
-// link path can both feed it through the same mkpayload/place plumbing.
-const Shim = struct { bin: std.Build.LazyPath, place: *std.Build.Step };
+// The shim is an explicit artifact, installed under zig-out/lib.
+const Shim = struct { bin: std.Build.LazyPath };
 
-/// The Python that boots the in-checkout compiler on the source-built CPython. `zig
-/// build` builds CPython from pinned sources first (bootstrap/build_python.zig, the
-/// first step that runs before any Python exists) and then drives every other
-/// build step through this program, so the build tooling is Jac
-/// (`jaclang.dist.payload`) and needs no prior jac binary:
-///
-///     <built-python> -I -c JACBOOT <root> payload <subcommand> [args...]   # jaclang.dist.payload.cli
-///     <built-python> -I -c JACBOOT <root> jac <jac-cli-args...>             # the jac CLI itself
-///
-/// `-I` keeps the interpreter isolated from the ambient environment; the
-/// checkout root is put on sys.path explicitly and the lazy `.jac` finder
-/// installed, which is all importing the compiler from source takes (jaclang
-/// has no third-party runtime dependencies). JAC_NO_DEV_SOURCE pins the build
-/// to this checkout: it must never be rerouted to a dev-source tree or a
-/// project venv, because this checkout IS the source being built.
+/// Run tools from an explicit compiled image in an isolated interpreter.
+/// The build never adds the checkout to Python's import path.
 const JACBOOT_SRC =
     "import os, sys\n" ++
+    "sys.dont_write_bytecode = True\n" ++
     "root, mode, argv = sys.argv[1], sys.argv[2], sys.argv[3:]\n" ++
     "sys.path.insert(0, root)\n" ++
-    "os.environ['JAC_NO_DEV_SOURCE'] = '1'\n" ++
-    "os.environ['JAC_STUBCAT_BUILDING'] = '1'\n" ++
+    "if mode == 'stubcat': os.environ['JAC_STUBCAT_BUILDING'] = '1'\n" ++
     "import _jac_finder\n" ++
     "_jac_finder.install()\n" ++
     "if mode == 'stubcat':\n" ++
@@ -82,13 +54,7 @@ const JACBOOT_SRC =
     "from jaclang.cli.cli_boot import start_cli\n" ++
     "start_cli()\n";
 
-/// The Jac build tooling, as a runnable. Every run depends on BOTH seed
-/// fetches, which is what keeps the bootstrap acyclic: the callee imports the
-/// compiler from this checkout and compiling anything at all needs the source-built
-/// CPython to run on and the vendored typeshed to type-check against, so a Jac
-/// tool run can never be the thing that puts either of them in place (#8785).
-/// Callers that cache on inputs must also declare the jaclang tree
-/// (addTreeInputs).
+/// Image and interpreter dependencies accompany every tool invocation.
 const JacTool = struct {
     b: *std.Build,
     python: []const u8,
@@ -98,6 +64,7 @@ const JacTool = struct {
 
     fn run(self: JacTool, mode: []const u8, args: []const []const u8) *std.Build.Step.Run {
         const cmd = self.b.addSystemCommand(&.{ self.python, "-I", "-S", "-c", JACBOOT_SRC });
+        isolateCompilerRun(cmd);
         cmd.addDirectoryArg(self.image);
         cmd.addArg(mode);
         const python_dir = std.fs.path.dirname(std.fs.path.dirname(std.fs.path.dirname(self.python).?).?).?;
@@ -111,23 +78,27 @@ const JacTool = struct {
 
 fn isolateCompilerRun(run: *std.Build.Step.Run) void {
     run.setEnvironmentVariable("JAC_NO_DEV_SOURCE", "1");
-    for ([_][]const u8{ "JAC_DEV_SOURCE", "JAC_COMPILER_IMAGE", "JAC_COMPILER_LIB", "JAC_LLVM_SHIM", "JAC_STUBCAT_BUILDING", "JACPATH" }) |name| {
+    for ([_][]const u8{ "JAC_DEV_SOURCE", "JAC_COMPILER_IMAGE", "JAC_COMPILER_LIB", "JAC_LLVM_SHIM", "JAC_STUBCAT_BUILDING", "JAC_STUBCAT_FILE", "JAC_STUBCAT_OFF", "JAC_STUBCAT_LEN", "JACPATH" }) |name| {
         run.removeEnvironmentVariable(name);
     }
 }
 
 fn configureCompilerKernel(b: *std.Build, run: *std.Build.Step.Run, target: std.Build.ResolvedTarget) std.Build.LazyPath {
     isolateCompilerRun(run);
-    run.addArgs(&.{ "--target", b.fmt("{s}-{s}", .{
-        @tagName(target.result.cpu.arch),
-        if (target.result.os.tag == .macos) "apple-darwin" else "unknown-linux-gnu",
-    }) });
-    run.addFileArg(b.path("jaclang/compiler/jc_unit.jac"));
-    run.addArg("-o");
+    if (target.result.cpu.arch != b.graph.host.result.cpu.arch or target.result.os.tag != b.graph.host.result.os.tag) {
+        run.step.dependOn(&b.addFail("Compiler images must be built on a matching OS and architecture; use the corresponding release runner").step);
+    }
+    run.addFileArg(b.path("bootstrap/compiler.jac"));
+    run.addArgs(&.{ "kernel", b.pathFromRoot("jaclang") });
     const name = if (target.result.os.tag == .macos) "libjac_compiler.dylib" else "libjac_compiler.so";
     const kernel = run.addOutputFileArg(name);
+    run.addArg(b.fmt("{s}-{s}", .{
+        @tagName(target.result.cpu.arch),
+        if (target.result.os.tag == .macos) "apple-darwin" else "unknown-linux-gnu",
+    }));
     addTreeInputs(b, run, "jaclang");
     run.addFileInput(b.path("bootstrap/pins.json"));
+    run.addFileInput(b.path("../jac.toml"));
     return kernel;
 }
 
@@ -139,11 +110,24 @@ fn configureCompilerImage(b: *std.Build, run: *std.Build.Step.Run, kernel: std.B
     run.addFileArg(kernel);
     run.addFileArg(shim);
     run.addArg(b.fmt("{d}", .{jobs}));
+    run.addArg(b.pathFromRoot(".compiler-build"));
     run.addArgs(&.{ "compiler/jc_unit.jac", "compiler/jc_materialize.jac" });
     addTreeInputs(b, run, "jaclang");
     run.addFileInput(b.path("_jac_finder.py"));
+    run.addFileInput(b.path("bootstrap/python/sources.json"));
     run.addFileInput(b.path("bootstrap/pins.json"));
+    run.addFileInput(b.path("../jac.toml"));
     return image;
+}
+
+fn completeCompilerImage(b: *std.Build, tool: JacTool, core: std.Build.LazyPath, catalog: std.Build.LazyPath) std.Build.LazyPath {
+    const complete = tool.run("jac", &.{ "run", "--backend", "python" });
+    complete.setEnvironmentVariable("JAC_STUBCAT_BUILDING", "1");
+    complete.addFileArg(b.path("bootstrap/compiler.jac"));
+    complete.addArg("complete");
+    complete.addDirectoryArg(core);
+    complete.addFileArg(catalog);
+    return complete.addOutputDirectoryArg("compiler-site");
 }
 
 pub fn build(b: *std.Build) void {
@@ -229,7 +213,6 @@ pub fn build(b: *std.Build) void {
     });
     const ts_seed = b.addExecutable(.{ .name = "fetch_typeshed", .root_module = ts_seed_mod });
     const fetch_ts = b.addRunArtifact(ts_seed);
-    if (jacpython) fetch_host.step.dependOn(&fetch_ts.step);
     fetch_ts.addArg(b.pathFromRoot("jaclang/vendor/typeshed"));
     // has_side_effects: the output lands in the source tree, not the cache, so
     // the step must run even when its (unchanging) argv would otherwise cache
@@ -240,7 +223,7 @@ pub fn build(b: *std.Build) void {
 
     // Native compiler artifacts belong to the build graph. The pinned compiler
     // owns its runtime and LLVM; payload assembly only consumes the library.
-    const kernel_build = b.addSystemCommand(&.{ stage0_path, "build", "--native", "--lib" });
+    const kernel_build = b.addSystemCommand(&.{ stage0_path, "run", "--backend", "python" });
     kernel_build.step.dependOn(fetch_jac_step);
     kernel_build.step.dependOn(&fetch_ts.step);
     const compiler_kernel = configureCompilerKernel(b, kernel_build, target);
@@ -249,38 +232,53 @@ pub fn build(b: *std.Build) void {
 
     // Stage 1 is an ordinary compiled image produced by the pinned release.
     // Its output is immutable and separate from both producer and target sources.
-    const compiler_jobs = b.option(u32, "compiler-jobs", "Parallel compiler-image workers") orelse 4;
+    const compiler_jobs = b.option(u32, "compiler-jobs", "Parallel compiler-image workers (default 2 for compiler memory use)") orelse 2;
     const image_step = b.step("compiler-image", "Build the current compiler image with the pinned stage-0 compiler");
-    const compiler_image: std.Build.LazyPath = if (jacllvm) |shim| image: {
-        const image_build = b.addSystemCommand(&.{ stage0_path, "run" });
+    const compiler_core: std.Build.LazyPath = if (jacllvm) |shim| image: {
+        const image_build = b.addSystemCommand(&.{ stage0_path, "run", "--backend", "python" });
         image_build.step.dependOn(fetch_jac_step);
         image_build.step.dependOn(&fetch_ts.step);
         const compiler_image = configureCompilerImage(b, image_build, compiler_kernel, shim.bin, compiler_jobs);
-        const install_image = b.addInstallDirectory(.{
-            .source_dir = compiler_image,
-            .install_dir = .prefix,
-            .install_subdir = "compiler-site",
-        });
-        image_step.dependOn(&install_image.step);
         break :image compiler_image;
     } else image: {
         image_step.dependOn(&b.addFail("compiler-image requires the pinned LLVM shim; run zig build fetch-llvm").step);
         break :image b.path(".unavailable-compiler-image");
     };
 
-    const tool = JacTool{
+    if (jacpython) fetch_host.addDirectoryArg(compiler_core);
+
+    const bootstrap_tool = JacTool{
         .b = b,
         .python = b.fmt("{s}/python/install/bin/python{s}", .{ host_python_dir, pins.pyMinor(b) }),
-        .image = compiler_image,
+        .image = compiler_core,
         .build_python = &fetch_host.step,
         .fetch_typeshed = &fetch_ts.step,
     };
 
+    const build_catalog = bootstrap_tool.run("stubcat", &.{});
+    const stub_catalog = build_catalog.addOutputFileArg("stubcat.bin");
+    b.step("stub-catalog", "Build the typeshed catalog with the current compiler image")
+        .dependOn(&build_catalog.step);
+    const compiler_image = completeCompilerImage(b, bootstrap_tool, compiler_core, stub_catalog);
+    const install_image = b.addInstallDirectory(.{
+        .source_dir = compiler_image,
+        .install_dir = .prefix,
+        .install_subdir = "compiler-site",
+    });
+    image_step.dependOn(&install_image.step);
+    var tool = bootstrap_tool;
+    tool.image = compiler_image;
+
     if (jacllvm) |shim| {
-        const rebuild_kernel = tool.run("jac", &.{ "build", "--native", "--lib" });
+        const rebuild_kernel = tool.run("jac", &.{ "run", "--backend", "python" });
         const stage2_kernel = configureCompilerKernel(b, rebuild_kernel, target);
-        const rebuild_image = tool.run("jac", &.{"run"});
-        const stage2_image = configureCompilerImage(b, rebuild_image, stage2_kernel, shim.bin, compiler_jobs);
+        const rebuild_image = tool.run("jac", &.{ "run", "--backend", "python" });
+        const stage2_core = configureCompilerImage(b, rebuild_image, stage2_kernel, shim.bin, compiler_jobs);
+        var stage2_tool = tool;
+        stage2_tool.image = stage2_core;
+        const rebuild_catalog = stage2_tool.run("stubcat", &.{});
+        const stage2_catalog = rebuild_catalog.addOutputFileArg("stubcat.bin");
+        const stage2_image = completeCompilerImage(b, stage2_tool, stage2_core, stage2_catalog);
         const install_stage2 = b.addInstallDirectory(.{
             .source_dir = stage2_image,
             .install_dir = .prefix,
@@ -288,17 +286,17 @@ pub fn build(b: *std.Build) void {
         });
         b.step("compiler-stage2", "Rebuild the compiler kernel and image using stage 1")
             .dependOn(&install_stage2.step);
+        stage2_tool.image = stage2_image;
+        const verify_stage2 = stage2_tool.run("jac", &.{"test"});
+        verify_stage2.addFileArg(b.path("tests/compiler/test_compiler_image.jac"));
+        b.step("verify-compiler-stage2", "Verify execution and integrity of the self-rebuilt compiler")
+            .dependOn(&verify_stage2.step);
     }
 
     const verify_image = tool.run("jac", &.{"test"});
     verify_image.addFileArg(b.path("tests/compiler/test_compiler_image.jac"));
     b.step("verify-compiler-image", "Verify the staged compiler in an isolated interpreter")
         .dependOn(&verify_image.step);
-
-    const build_catalog = tool.run("stubcat", &.{});
-    const stub_catalog = build_catalog.addOutputFileArg("stubcat.bin");
-    b.step("stub-catalog", "Build the typeshed catalog with the current compiler image")
-        .dependOn(&build_catalog.step);
 
     // Standalone step: materialize the gitignored typeshed stdlib stubs at the
     // pinned commit, without building a binary. Used by CI (test-binary) and
@@ -389,7 +387,10 @@ pub fn build(b: *std.Build) void {
     const fetch_target: *std.Build.Step = if (std.mem.eql(u8, osarch, host_osarch)) &fetch_host.step else blk: {
         const fetch = b.addRunArtifact(seed);
         fetch.addArgs(&.{ osarch, python_dir, root, b.graph.zig_exe });
-        if (jacpython) fetch.addArg("--jacpython");
+        if (jacpython) {
+            fetch.addArg("--jacpython");
+            fetch.addDirectoryArg(compiler_image);
+        }
         fetch.has_side_effects = true;
         break :blk &fetch.step;
     };
@@ -608,12 +609,9 @@ fn addLlvmShim(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bu
     // `zig build` (no option) always links from source.
     if (b.option([]const u8, "shim-bin", "Prebuilt LLVMPY_* shim to bundle (skips the LLVM fetch + link)")) |p| {
         const bin: std.Build.LazyPath = .{ .cwd_relative = p };
-        const place = b.addUpdateSourceFiles();
-        place.addCopyFileToSource(bin, b.fmt("jaclang/compiler/backends/native/llvm/{s}", .{shim_file}));
-        const jacllvm_step = b.step("jacllvm", "Build the LLVMPY_* shim (jac/native), static-link LLVM, place it in-tree");
+        const jacllvm_step = b.step("jacllvm", "Build and install the LLVMPY_* shim");
         jacllvm_step.dependOn(&b.addInstallLibFile(bin, shim_file).step);
-        jacllvm_step.dependOn(&place.step);
-        return .{ .bin = bin, .place = &place.step };
+        return .{ .bin = bin };
     }
 
     // -Dllvm-dir wins; otherwise use the fetch-llvm cache (.llvm-build). If
@@ -654,18 +652,9 @@ fn addLlvmShim(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bu
     else
         linuxShim(b, target, optimize, &dir, llvm_dir, libdir, &shim_srcs, &shim_flags);
 
-    // Also write the built shim back into the source tree (gitignored) so the
-    // editable dev loop -- which runs jaclang from source, not from the binary's
-    // payload -- finds it via ffi.jac's __file__-relative lookup. Mirrors how
-    // fetch-typeshed materializes gitignored stubs into the tree. mkpayload's
-    // jaclang copy skips this file (it ships the shim via --shim instead).
-    const place = b.addUpdateSourceFiles();
-    place.addCopyFileToSource(bin, b.fmt("jaclang/compiler/backends/native/llvm/{s}", .{shim_file}));
-
-    const jacllvm_step = b.step("jacllvm", "Build the LLVMPY_* shim (jac/native), static-link LLVM, place it in-tree");
+    const jacllvm_step = b.step("jacllvm", "Build and install the LLVMPY_* shim");
     jacllvm_step.dependOn(&b.addInstallLibFile(bin, shim_file).step);
-    jacllvm_step.dependOn(&place.step);
-    return .{ .bin = bin, .place = &place.step };
+    return .{ .bin = bin };
 }
 
 /// Linux link path for the LLVMPY_* shim. Which path a target takes is decided by

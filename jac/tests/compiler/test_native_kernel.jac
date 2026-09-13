@@ -221,3 +221,36 @@ test "kernel parses retain no native memory once the tree is handed over" {
         }
     }
 }
+
+test "native kernel selection rejects missing explicit artifacts" {
+    import from unittest.mock { patch }
+    import from jaclang.compiler.native_compiler { _find_lib }
+    with patch.dict(
+        os.environ, {"JAC_COMPILER_LIB": "/missing/compiler-kernel.so"}, clear=True
+    ) {
+        with testraises(OSError) {
+            _find_lib();
+        }
+    }
+    with patch.dict(os.environ, {"JAC_COMPILER_LIB": "off"}, clear=True) {
+        assert _find_lib() is None;
+    }
+}
+
+test "native kernel selection requires its matching layout sidecar" {
+    import tempfile;
+    import from pathlib { Path }
+    import from unittest.mock { patch }
+    import from jaclang.compiler.native_compiler { _find_lib }
+    with tempfile.TemporaryDirectory() as directory {
+        library = Path(directory) / "libjac_compiler.so";
+        library.write_bytes(b"not loaded by selection");
+        with patch.dict(os.environ, {"JAC_COMPILER_LIB": str(library)}, clear=True) {
+            with testraises(OSError) {
+                _find_lib();
+            }
+            Path(str(library) + ".layout.json").write_text("{}");
+            assert _find_lib() == str(library);
+        }
+    }
+}

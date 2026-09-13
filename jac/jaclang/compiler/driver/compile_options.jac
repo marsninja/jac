@@ -26,7 +26,6 @@ obj CompileOptions {
         skip_native_engine: bool = False,
         no_ir_cache: bool = False,
         resolve_annex_parent: bool = False,
-        force_target_program: bool = False,
         aot_mode: bool = False,
         kernel_unit: bool = False,
         force_codespace: str = "",
@@ -164,7 +163,6 @@ obj CompileOptions {
         result.iface_ok = not need_tree;
         result.need_full_ast = need_tree;
         result.native_parity = False;
-        result.force_target_program = False;
         return result;
     }
 
@@ -173,7 +171,6 @@ obj CompileOptions {
             skip_native_engine=True,
             aot_mode=True,
             default_codespace='native',
-            force_target_program=True,
             no_ir_cache=self.no_ir_cache,
             na_gc_mode=self.na_gc_mode,
             nogc_enforce_all=self.nogc_enforce_all,

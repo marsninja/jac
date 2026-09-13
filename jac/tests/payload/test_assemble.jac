@@ -370,10 +370,20 @@ test "payload assembly consumes and verifies a compiler image without source wri
         payloads = {
             "compiler/" + name: b"prebuilt-kernel",
             "compiler/" + name + ".layout.json": b'{"classes": {}}',
-            "compiler/backends/native/llvm/" + _shim_name(): b"prebuilt-shim"
+            "compiler/backends/native/llvm/" + _shim_name(): b"prebuilt-shim",
+            "_precompiled/stubcat.bin": b"compiled-catalog",
+            "dist/payload/pins.json": b'{"compiler": "pinned"}',
+            "dist/payload/python-sources.json": b'{"python": "pinned"}'
         };
         for (path, data) in payloads.items() {
             wf(package, path, data);
+        }
+        site_payloads = {
+            "_jac_finder.py": b"compiled-image-finder",
+            "jaclang-0.0.0.dist-info/METADATA": b"compiled-image-metadata"
+        };
+        for (path, data) in site_payloads.items() {
+            wf(image_site, path, data);
         }
         wf(
             package,
@@ -385,6 +395,10 @@ test "payload assembly consumes and verifies a compiler image without source wri
                     "python_tag": images.python_tag(),
                     "jir_format_version": images.JIR_FORMAT_VERSION,
                     "modules": {},
+                    "site_payloads": {
+                        p: hashlib.sha256(v).hexdigest()
+                        for (p, v) in site_payloads.items()
+                    },
                     "payloads": {
                         p: hashlib.sha256(v).hexdigest() for (p, v) in payloads.items()
                     }
@@ -399,9 +413,17 @@ test "payload assembly consumes and verifies a compiler image without source wri
         for (path, data) in payloads.items() {
             assert rf(os.path.join(site, "jaclang", path)) == data;
         }
+        for (path, data) in site_payloads.items() {
+            assert rf(os.path.join(site, path)) == data;
+        }
         assert rf(os.path.join(site, "jaclang", "_precompiled", "stubcat.bin"))
             == b"compiled-catalog";
         assert not os.path.exists(os.path.join(repo, "jaclang", "compiler", name));
+        wf(base, "stubcat.bin", b"another-compiler-catalog");
+        with testraises(PayloadDie) {
+            assemble_site(repo, site, opts);
+        }
+        wf(base, "stubcat.bin", b"compiled-catalog");
         os.unlink(os.path.join(package, "compiler", name + ".layout.json"));
         with testraises(RuntimeError) {
             assemble_site(repo, site, opts);

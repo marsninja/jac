@@ -31,7 +31,7 @@ like the old suffix.
 """
 def native_force_opts -> CompileOptions {
     import from jaclang.compiler.driver.compile_options { CompileOptions }
-    return CompileOptions(force_codespace='native', force_target_program=True);
+    return CompileOptions(force_codespace='native');
 }
 
 

@@ -107,16 +107,13 @@ impl assemble_site(repo_root: str, site: str, opts: MkPayloadOpts) {
             "mkpayload: --stub-catalog requires a prebuilt catalog; run zig build stub-catalog"
         );
     }
+    if compiled.payloads.get("_precompiled/stubcat.bin")
+        != sha256_hex(read_bytes(catalog)) {
+        raise PayloadDie(
+            "mkpayload: stub catalog does not belong to the complete compiler image"
+        );
+    }
     copy_tree(image_site, site, skip_none);
-    copy_file(catalog, os.path.join(site, "jaclang", "_precompiled", "stubcat.bin"));
-    copy_file(
-        os.path.join(repo_root, "bootstrap", "pins.json"),
-        os.path.join(site, "jaclang", "dist", "payload", "pins.json")
-    );
-    copy_file(
-        os.path.join(repo_root, "bootstrap", "python", "sources.json"),
-        os.path.join(site, "jaclang", "dist", "payload", "python-sources.json")
-    );
     awesome_src = os.path.join(repo_root, "examples", "jaclang_org");
     if os.path.isdir(awesome_src) {
         log("==> bundling the jaclang.org site as the --awesome template");
@@ -124,9 +121,7 @@ impl assemble_site(repo_root: str, site: str, opts: MkPayloadOpts) {
             awesome_src, os.path.join(site, "awesome_template"), skip_site_template
         );
     }
-    copy_into(repo_root, "_jac_finder.py", site);
     copy_into(repo_root, "sitecustomize.py", site);
-    write_dist_info(repo_root, site);
     _bundle_bun(site, opts);
 }
 

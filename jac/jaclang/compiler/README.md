@@ -88,12 +88,11 @@ no redeclared signatures.
 `impl/<module>.impl.jac`. A declaration with several keeps them in
 `<module>.impl/<part>.impl.jac`. Nothing else.
 
-**The bootstrap tier constrains imports.** `jaclang/bootstrap_manifest.py`
-lists the modules the seed transpiler (`jac0`) compiles: the frontend, the
-driver, placement, the Python backend and the pass bases. A seed module may
-import a non-seed module only inside a function body, because a hoisted
-import deadlocks bootstrap. That is why many imports in this tree are local
-to the function that uses them; `scripts/check_seed_manifest.py` enforces it.
+**The compiler is built by a pinned prior compiler.** All executable compiler
+modules use the full pipeline and load from a compiled image. There is no seed
+membership or reduced import schedule. Preserve normal architectural layering
+and resolve real import cycles at their owners. See
+[the bootstrap guide](../../bootstrap/README.md).
 
 **Type checking.** `jac check .` runs in CI over the whole repository with
 the exclusions in the root `.jacignore`. Every entry there is a debt with a

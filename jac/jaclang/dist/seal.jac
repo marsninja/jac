@@ -32,7 +32,7 @@ def run_precompiler(src_dir: str, flags: list[str]) -> int {
     import subprocess;
 
     code = (
-        "import _jac_finder as _jf; _jf.apply_dev_source_override(); _jf.install(); "
+        "import _jac_finder as _jf; _jf.apply_compiler_image(); _jf.install(); "
         "import sys; sys.argv = ['jac', 'precompile', "
         + repr(src_dir)
         + "] + "

@@ -193,10 +193,8 @@ def context_program(program: JacProgram, options: CompileOptions) -> JacProgram 
 
 def program_for(path: str, program: JacProgram) -> JacProgram {
     compiler = program._get_compiler();
-    actual = compiler.selfhost.resolve(path, program);
-    if compiler.selfhost.is_selfhost(actual) {
-        return actual;
-    }
+    actual = program;
+
     return context_program(actual, bind_options(path, actual, actual.options));
 }
 
@@ -220,9 +218,7 @@ def context_app(path: str) -> AppSpec | None {
 def artifact_cache_path(path: str, program: JacProgram) -> Path {
     import from jaclang.compiler.driver.jir { get_module_cache_path }
     selected = program_for(path, program);
-    identity = ''
-        if selected._get_compiler().selfhost.is_selfhost(selected)
-        else selected.context_key;
+    identity = selected.context_key;
     with cache_scope(identity, selected.options) {
         return get_module_cache_path(path);
     }

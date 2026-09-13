@@ -278,9 +278,7 @@ def _prepare_sealed(
         pos = data.find(SECTIONS_MAGIC, HEADER_SIZE);
         if pos >= 0 {
             compiler._restore_sections(
-                path,
-                compiler.selfhost.resolve(path, program),
-                read_sections(data, pos + len(SECTIONS_MAGIC))
+                path, program, read_sections(data, pos + len(SECTIONS_MAGIC))
             );
         }
         revision.native[path] = compiler.get_native_interop_setup(path, program);
@@ -515,13 +513,9 @@ def _prepare(
         code = compiler.get_bytecode(path, program);
         _check(program, before);
         if (code is None) {
-            import from jaclang.compiler.driver.source_failures {
-                module_scoped_failure_details,
-                bootstrap_tier_failure_details
-            }
-            actual = compiler.selfhost.resolve(path, program);
-            details = module_scoped_failure_details(path, actual)
-                or bootstrap_tier_failure_details(path);
+            details = "\n".join(
+                alert.pretty_print() for alert in program.diags.owned_errors(path)
+            );
             if details {
                 raise RuntimeError(details);
             }

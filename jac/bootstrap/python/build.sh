@@ -8,6 +8,7 @@ recipe=$4
 host=${5:-}
 root=$6
 mode=$7
+compiler_image=${8:-}
 case "$mode:$host" in
     cpython:|host:|jacpython:?*) ;;
     *) echo "Invalid Python build mode/host: $mode" >&2; exit 1 ;;
@@ -248,7 +249,7 @@ if [ -n "$host" ]; then
     cp -R "$host/python/build/include/." "$deps/include/"
     cp "$host/python/build/lib/"*.a "$deps/lib/"
     cp -R "$host/python/licenses" "$work/python/licenses"
-    step seed "$host/python/install/bin/python3.14" -I "$recipe/prepare_seed.py" prepare "$root" "$work/seed"
+    step seed "$host/python/install/bin/python3.14" -I "$recipe/prepare_seed.py" prepare "$root" "$work/seed" "$compiler_image"
 else
     # Preserve notices before discarding each dependency's installed build tree.
     mkdir -p "$work/python/licenses"

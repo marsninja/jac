@@ -141,25 +141,17 @@ test "a zero TTL disables the sweep" {
     assert gen.is_dir();
 }
 
-test "JacPython sources participate in the producing compiler identity" {
-    import from jaclang.compiler.driver.jir {
-        compiler_source_digest,
-        _manifest_compiler_digest
-    }
-    prefixes = (
+test "JacPython sources participate in the compiler image" {
+    import jaclang;
+    import from jaclang.compiler.driver.image { load_image }
+    image = load_image(Path(jaclang.__file__).parent / "_precompiled");
+    assert image is not None;
+    for prefix in (
         "compiler/frontend/python/",
         "compiler/backends/py/jacpython/",
         "runtime/python/"
-    );
-    with tempfile.TemporaryDirectory() as pkg {
-        for prefix in prefixes {
-            src = Path(pkg) / prefix / "module.jac";
-            src.parent.mkdir(parents=True, exist_ok=True);
-            src.write_text("def f() -> int { return 1; }\n");
-            before = compiler_source_digest(pkg);
-            src.write_text("def f() -> int { return 2; }\n");
-            assert compiler_source_digest(pkg) != before;
-            assert _manifest_compiler_digest(pkg) != before;
-        }
+    ) {
+        assert any(path.startswith(prefix) for path in image.manifest["modules"]);
+        assert any(path.startswith(prefix) for path in image.payloads);
     }
 }

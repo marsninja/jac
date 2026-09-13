@@ -1335,107 +1335,19 @@ impl JacPersistence.save(`obj: (Archetype | Anchor)) -> None {
     }
 }
 
-impl JacPersistence._destroy_anchors(objs: any, strict: bool) -> list[Anchor] {
-    anchors: list[Anchor] = [];
-    queue: list[any] = [objs];
-    seen: set[int] = set();
-    idx = 0;
-    while idx < len(queue) {
-        item = queue[idx];
-        idx += 1;
-        if isinstance(item, Archetype) {
-            anchors.append(item.__jac__);
-        } elif isinstance(item, Anchor) {
-            anchors.append(item);
-        } elif isinstance(item, (`list, `tuple, `set, frozenset, deque, `dict)) {
-            if id(item) not in seen {
-                seen.add(id(item));
-                for sub in (item.values() if isinstance(item, `dict) else item) {
-                    queue.append(sub);
-                }
-            }
-        } elif strict {
-            raise TypeError(
-                f"cannot destroy {type(item).__name__!r}: a `del` value "
-                "target must yield nodes, edges or archetypes"
-            );
-        }
-    }
-    return anchors;
-}
-
 impl JacPersistence.destroy(objs: any, strict: bool = False) -> None {
-    anchors = JacPersistence._destroy_anchors(objs, strict);
-    if not anchors {
-        return;
-    }
-    import from jaclang.runtime.osp_kernel { osp_forget }
-    import from jaclang.runtime.region { run_drop }
-    for anchor in anchors {
-        if isinstance(anchor.archetype, Root) {
-            raise RuntimeError("cannot destroy root");
-        }
-        if anchor.destroyed {
-            continue;
-        }
-        if JacRuntimeInterface.check_write_access(anchor, op_hint="delete") {
-            match anchor {
-                case NodeAnchor():
-                    anchor.detach_light();
-                    for `edge in anchor.edges[:] {
-                        eid = `edge.id;
-                        `edge.detach();
-                        `edge.destroyed = True;
-                        _edge_handle: any = `edge.archetype;
-                        run_drop(_edge_handle);
-                        osp_forget(_edge_handle);
-                        if eid is not None {
-                            JacRuntimeInterface.get_context().mem.delete(eid);
-                        }
-                    }
-
-                case EdgeAnchor():
-                    anchor.detach();
-
-                case _:
-                    ;
-
-            }
-            aid = anchor.id;
-            if aid is not None {
-                JacRuntimeInterface.get_context().mem.delete(aid);
-            }
-            anchor.destroyed = True;
-            _handle: any = anchor.archetype;
-            run_drop(_handle);
-            osp_forget(_handle);
-        }
-    }
+    import from jaclang.runtime.deletion { destroy }
+    destroy(objs, strict);
 }
 
 impl JacPersistence.peek_attr(`obj: any, name: str) -> any {
-    try {
-        return getattr(`obj, name);
-    } except Exception {
-        return None;
-    }
+    import from jaclang.runtime.deletion { peek_attr }
+    return peek_attr(`obj, name);
 }
 
 impl JacPersistence.peek_item(container: any, key: any) -> any {
-    try {
-        if isinstance(container, `dict) {
-            return `dict.get(container, key);
-        }
-        if isinstance(container, (`list, `tuple)) {
-            builtin_getitem: any = `list.__getitem__
-                if isinstance(container, `list)
-                else `tuple.__getitem__;
-            return builtin_getitem(container, key);
-        }
-        return container[key];
-    } except Exception {
-        return None;
-    }
+    import from jaclang.runtime.deletion { peek_item }
+    return peek_item(container, key);
 }
 
 impl JacArchetype.on_entry(func: Callable) -> Callable {
@@ -1945,7 +1857,6 @@ impl JacRuntime.reset_process_state(cls: any, clear_modules: bool = True) -> Non
     }
     cls.program = None;
     cls.compiler = None;
-    cls.selfhost = None;
     import from jaclang.project.config { set_config }
     set_config(None);
 }
@@ -1972,13 +1883,6 @@ impl JacRuntime.get_program(cls: any) -> JacProgram {
     return cls.program;
 }
 
-impl JacRuntime.get_selfhost(cls: any) -> SelfHostCache {
-    if (cls.selfhost is None) {
-        import from jaclang.compiler.driver.selfhost { SelfHostCache }
-        cls.selfhost = SelfHostCache();
-    }
-    return cls.selfhost;
-}
 
 impl JacRuntime.shared_root_id -> (UUID | None) {
     resolver = _shared_root_resolver[0];

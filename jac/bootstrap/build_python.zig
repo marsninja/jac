@@ -20,8 +20,8 @@ fn parseMode(args: []const []const u8) !Mode {
     if (args.len == 5) return .cpython;
     if (args.len == 6) {
         if (std.mem.eql(u8, args[5], "--host")) return .host;
-        if (std.mem.eql(u8, args[5], "--jacpython")) return .jacpython;
     }
+    if (args.len == 7 and std.mem.eql(u8, args[5], "--jacpython") and args[6].len > 0) return .jacpython;
     return error.InvalidBuildMode;
 }
 
@@ -52,7 +52,8 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const a = init.arena.allocator();
     const args = try init.minimal.args.toSlice(a);
-    const mode = parseMode(args) catch seed.die("usage: build_python <os-arch> <destination> <jac-root> <zig> [--jacpython|--host]", .{});
+    const mode = parseMode(args) catch seed.die("usage: build_python <os-arch> <destination> <jac-root> <zig> [--host|--jacpython <compiler-image>]", .{});
+    const compiler_image = if (mode == .jacpython) args[6] else "";
     const platform = args[1];
     if (!supported(platform)) seed.die("build-python: unsupported platform {s}", .{platform});
     if (!std.mem.eql(u8, platform, hostPlatform()))
@@ -66,7 +67,7 @@ pub fn main(init: std.process.Init) !void {
         if (result != .exited or result.exited != 0) return error.HostPythonBuildFailed;
     }
     const smoke = try std.fs.path.join(a, &.{ root, "bootstrap/python/smoke.py" });
-    const key = try buildKey(io, a, platform, root, host_dest, mode);
+    const key = try buildKey(io, a, platform, root, host_dest, mode, compiler_image);
     const stamp_path = try std.fs.path.join(a, &.{ dest, "build-key" });
     const old = Io.Dir.cwd().readFileAlloc(io, stamp_path, a, .limited(128)) catch "";
     const python = try std.fs.path.join(a, &.{ dest, "python/install/bin/python3.14" });
@@ -110,7 +111,7 @@ pub fn main(init: std.process.Init) !void {
     }
     const recipe = try std.fs.path.join(a, &.{ root, "bootstrap/python" });
     const script = try std.fs.path.join(a, &.{ recipe, "build.sh" });
-    var child = try std.process.spawn(io, .{ .argv = &.{ "sh", script, platform, work, args[4], recipe, if (mode == .jacpython) host_dest else "", root, @tagName(mode) } });
+    var child = try std.process.spawn(io, .{ .argv = &.{ "sh", script, platform, work, args[4], recipe, if (mode == .jacpython) host_dest else "", root, @tagName(mode), compiler_image } });
     const term = try child.wait(io);
     if (term != .exited or term.exited != 0) seed.die("build-python: build failed; logs at {s}/logs", .{work});
     // Cache only the runtime and link archives, not intermediate objects or sources.
@@ -124,7 +125,7 @@ pub fn main(init: std.process.Init) !void {
     try Io.Dir.cwd().writeFile(io, .{ .sub_path = stamp_path, .data = &key });
 }
 
-fn buildKey(io: Io, a: std.mem.Allocator, platform: []const u8, root: []const u8, host_dest: []const u8, mode: Mode) ![64]u8 {
+fn buildKey(io: Io, a: std.mem.Allocator, platform: []const u8, root: []const u8, host_dest: []const u8, mode: Mode, compiler_image: []const u8) ![64]u8 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
     hash.update(@tagName(mode));
     hash.update(platform);
@@ -145,37 +146,10 @@ fn buildKey(io: Io, a: std.mem.Allocator, platform: []const u8, root: []const u8
         hash.update(content);
     }
     if (mode == .jacpython) {
-        // The producing compiler and its Jac/Python inputs are part of the
-        // embedded seed. Source edits must invalidate the reduced runtime.
-        for ([_][]const u8{ "jaclang/vendor/typeshed/PIN", "jaclang/vendor/typeshed/TARBALL_SHA256" }) |path| {
-            hash.update(path);
-            hash.update(try Io.Dir.cwd().readFileAlloc(io, try std.fs.path.join(a, &.{ root, path }), a, .limited(1024)));
-        }
-        const package_path = try std.fs.path.join(a, &.{ root, "jaclang" });
-        var package = try Io.Dir.cwd().openDir(io, package_path, .{ .iterate = true });
-        defer package.close(io);
-        var walker = try package.walkSelectively(a);
-        defer walker.deinit();
-        var paths: std.ArrayList([]const u8) = .empty;
-        while (try walker.next(io)) |entry| {
-            if (entry.kind == .directory) {
-                if (!std.mem.startsWith(u8, entry.basename, ".") and
-                    !std.mem.eql(u8, entry.basename, "node_modules") and
-                    !std.mem.eql(u8, entry.basename, "__pycache__") and
-                    !std.mem.eql(u8, entry.basename, "vendor")) try walker.enter(io, entry);
-            } else if (entry.kind == .file and (std.mem.endsWith(u8, entry.path, ".jac") or std.mem.endsWith(u8, entry.path, ".py"))) {
-                try paths.append(a, try a.dupe(u8, entry.path));
-            }
-        }
-        std.mem.sort([]const u8, paths.items, {}, struct {
-            fn less(_: void, left: []const u8, right: []const u8) bool {
-                return std.mem.lessThan(u8, left, right);
-            }
-        }.less);
-        for (paths.items) |path| {
-            hash.update(path);
-            hash.update(try package.readFileAlloc(io, path, a, .unlimited));
-        }
+        // The immutable compiler manifest covers every executable input.
+        // Verification runs when the build loads that image.
+        const manifest = try std.fs.path.join(a, &.{ compiler_image, "jaclang/_precompiled/MANIFEST.json" });
+        hash.update(try Io.Dir.cwd().readFileAlloc(io, manifest, a, .unlimited));
         hash.update(try Io.Dir.cwd().readFileAlloc(io, try std.fs.path.join(a, &.{ host_dest, "build-key" }), a, .limited(128)));
     }
     var digest: [32]u8 = undefined;
@@ -281,7 +255,7 @@ test "only release targets are accepted" {
 test "CPython is the default and JacPython must be explicitly selected" {
     const args = [_][]const u8{ "build_python", "linux-x86_64", "out", "root", "zig" };
     try std.testing.expectEqual(Mode.cpython, try parseMode(&args));
-    try std.testing.expectEqual(Mode.jacpython, try parseMode(&(args ++ .{"--jacpython"})));
+    try std.testing.expectEqual(Mode.jacpython, try parseMode(&(args ++ .{ "--jacpython", "compiler-site" })));
     try std.testing.expectEqual(Mode.host, try parseMode(&(args ++ .{"--host"})));
     try std.testing.expectError(error.InvalidBuildMode, parseMode(&(args ++ .{"--typo"})));
     try std.testing.expectError(error.InvalidBuildMode, parseMode(args[0..4]));
@@ -360,26 +334,31 @@ test "compiler modes isolate caches; seed edits invalidate only JacPython" {
     try tmp.dir.writeFile(io, .{ .sub_path = "jaclang/compiler.jac", .data = "compiler" });
     const root = try tmp.dir.realPathFileAlloc(io, ".", a);
     const host = try std.fs.path.join(a, &.{ root, "host" });
-    const before_cpython = try buildKey(io, a, hostPlatform(), root, host, .cpython);
-    const before_host = try buildKey(io, a, hostPlatform(), root, host, .host);
-    const before_runtime = try buildKey(io, a, hostPlatform(), root, host, .jacpython);
+    try tmp.dir.createDirPath(io, "image/jaclang/_precompiled");
+    try tmp.dir.writeFile(io, .{ .sub_path = "image/jaclang/_precompiled/MANIFEST.json", .data = "first image" });
+    const image = try std.fs.path.join(a, &.{ root, "image" });
+    const before_cpython = try buildKey(io, a, hostPlatform(), root, host, .cpython, "");
+    const before_host = try buildKey(io, a, hostPlatform(), root, host, .host, "");
+    const before_runtime = try buildKey(io, a, hostPlatform(), root, host, .jacpython, image);
     try std.testing.expect(!std.mem.eql(u8, &before_cpython, &before_host));
     try std.testing.expect(!std.mem.eql(u8, &before_host, &before_runtime));
     try tmp.dir.writeFile(io, .{ .sub_path = "jaclang/compiler.jac", .data = "changed compiler" });
-    const changed_runtime = try buildKey(io, a, hostPlatform(), root, host, .jacpython);
+    try std.testing.expectEqual(before_runtime, try buildKey(io, a, hostPlatform(), root, host, .jacpython, image));
+    try tmp.dir.writeFile(io, .{ .sub_path = "image/jaclang/_precompiled/MANIFEST.json", .data = "changed image" });
+    const changed_runtime = try buildKey(io, a, hostPlatform(), root, host, .jacpython, image);
     try std.testing.expect(!std.mem.eql(u8, &before_runtime, &changed_runtime));
-    try std.testing.expectEqual(before_host, try buildKey(io, a, hostPlatform(), root, host, .host));
+    try std.testing.expectEqual(before_host, try buildKey(io, a, hostPlatform(), root, host, .host, ""));
     try tmp.dir.writeFile(io, .{ .sub_path = "jaclang/vendor/generated.py", .data = "materialized vendor data" });
-    try std.testing.expectEqual(changed_runtime, try buildKey(io, a, hostPlatform(), root, host, .jacpython));
+    try std.testing.expectEqual(changed_runtime, try buildKey(io, a, hostPlatform(), root, host, .jacpython, image));
     try tmp.dir.writeFile(io, .{ .sub_path = "bootstrap/python/seed_runtime.py", .data = "changed seed loader" });
-    try std.testing.expect(!std.mem.eql(u8, &changed_runtime, &(try buildKey(io, a, hostPlatform(), root, host, .jacpython))));
-    try std.testing.expectEqual(before_host, try buildKey(io, a, hostPlatform(), root, host, .host));
-    try std.testing.expectEqual(before_cpython, try buildKey(io, a, hostPlatform(), root, host, .cpython));
-    const before_recipe = try buildKey(io, a, hostPlatform(), root, host, .jacpython);
+    try std.testing.expect(!std.mem.eql(u8, &changed_runtime, &(try buildKey(io, a, hostPlatform(), root, host, .jacpython, image))));
+    try std.testing.expectEqual(before_host, try buildKey(io, a, hostPlatform(), root, host, .host, ""));
+    try std.testing.expectEqual(before_cpython, try buildKey(io, a, hostPlatform(), root, host, .cpython, ""));
+    const before_recipe = try buildKey(io, a, hostPlatform(), root, host, .jacpython, image);
     try tmp.dir.writeFile(io, .{ .sub_path = "bootstrap/python/cpython-sources.txt", .data = "changed C source selection" });
-    try std.testing.expect(!std.mem.eql(u8, &before_host, &(try buildKey(io, a, hostPlatform(), root, host, .host))));
-    try std.testing.expect(!std.mem.eql(u8, &before_recipe, &(try buildKey(io, a, hostPlatform(), root, host, .jacpython))));
-    const before_host_key = try buildKey(io, a, hostPlatform(), root, host, .jacpython);
+    try std.testing.expect(!std.mem.eql(u8, &before_host, &(try buildKey(io, a, hostPlatform(), root, host, .host, ""))));
+    try std.testing.expect(!std.mem.eql(u8, &before_recipe, &(try buildKey(io, a, hostPlatform(), root, host, .jacpython, image))));
+    const before_host_key = try buildKey(io, a, hostPlatform(), root, host, .jacpython, image);
     try tmp.dir.writeFile(io, .{ .sub_path = "host/build-key", .data = "rebuilt host" });
-    try std.testing.expect(!std.mem.eql(u8, &before_host_key, &(try buildKey(io, a, hostPlatform(), root, host, .jacpython))));
+    try std.testing.expect(!std.mem.eql(u8, &before_host_key, &(try buildKey(io, a, hostPlatform(), root, host, .jacpython, image))));
 }

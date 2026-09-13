@@ -7,14 +7,12 @@ integrate Jac modules into Python's import system.
 
 from __future__ import annotations
 
-import hashlib
 import importlib.abc
 import importlib.machinery
 import importlib.util
 from importlib.abc import Loader, MetaPathFinder
 from importlib.machinery import ModuleSpec
 import logging
-import marshal
 import os
 import sys
 import types
@@ -25,85 +23,15 @@ from types import ModuleType
 from jaclang.compiler.driver import extensions as ext_registry
 from jaclang.compiler.driver import image as _sealed
 
-_jac0_hash: bytes | None = None
-
 # Inline logging config (previously in jaclang.compiler.driver.log)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
-
-
-# ---------------------------------------------------------------------------
-# Bootstrap bytecode cache
-#
-# Seed-tier .jac files are transpiled by jac0 on every invocation.  Caching
-# the resulting bytecode avoids ~200 ms of repeated work when the sources
-# haven't changed.  The cache lives at ~/.cache/jac/jir/bootstrap/ as plain
-# marshalled code objects: the cache *filename* already encodes a digest over
-# the Python version, the jac0 transpiler, and all source/impl contents, so no
-# in-file header or validation is needed.  The directory is resolved by the
-# pure-Python `jaclang.compiler.driver.cache_paths` (importable here, before the JIR
-# Jac modules are bootstrapped), so it shares one platform-resolution rule with
-# `jaclang.compiler.driver.jir`; the cache *key*, however, stays independent of that
-# module's `compute_module_key` since it must work before the seed tier compiles.
-# ---------------------------------------------------------------------------
-
-
-def _bootstrap_compile(
-    file_path: str,
-    jac_source: str,
-    impl_sources: list[tuple[str, str]] | None = None,
-) -> types.CodeType:
-    """Compile a bootstrap .jac file, using a marshalled bytecode disk cache."""
-    from jaclang import jac0
-    from jaclang.compiler.driver.cache_paths import get_bootstrap_cache_dir
-
-    global _jac0_hash
-    if _jac0_hash is None:
-        _jac0_hash = hashlib.sha256(Path(jac0.__file__).read_bytes()).digest()
-
-    # Build the hash key from all source inputs + Python version + transpiler.
-    h = hashlib.sha256()
-    h.update(sys.version.encode())
-    h.update(_jac0_hash)
-    h.update(jac_source.encode())
-    if impl_sources:
-        for src, path in impl_sources:
-            h.update(path.encode())
-            h.update(src.encode())
-    digest = h.hexdigest()[:16]
-
-    base_name = os.path.splitext(os.path.basename(file_path))[0]
-    cache_file = get_bootstrap_cache_dir() / f"{base_name}.{digest}.jbc"
-
-    if cache_file.is_file():
-        try:
-            return marshal.loads(cache_file.read_bytes())  # noqa: S302
-        except Exception:
-            cache_file.unlink(missing_ok=True)
-
-    # Cache miss — transpile with jac0, compile, and cache (best-effort).
-    py_source = jac0.compile_jac(jac_source, file_path, impl_sources=impl_sources)
-    code = compile(py_source, file_path, "exec")
-    try:
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        # Process-unique temp + atomic replace so concurrent bootstraps (e.g.
-        # parallel test workers) can't read a half-written cache file.
-        tmp_file = cache_file.with_suffix(cache_file.suffix + f".{os.getpid()}.tmp")
-        try:
-            tmp_file.write_bytes(marshal.dumps(code))
-            os.replace(tmp_file, cache_file)
-        finally:
-            tmp_file.unlink(missing_ok=True)
-    except OSError:
-        pass
-
-    return code
 
 
 class JacSourceCompileError(ImportError):
     """A .jac module was found on disk but its source failed to compile.
 
     Distinct from a module that is simply absent (``ModuleNotFoundError``) or
-    only partially initialized mid-bootstrap (``cannot import name ...``): the
+    only partially initialized during import (``cannot import name ...``): the
     file resolved, so this is a defect in that file, never a condition to
     degrade around silently. It subclasses ``ImportError`` so existing handlers
     keep their behavior; callers that must not degrade -- the compiler's own
@@ -116,16 +44,6 @@ class JacSourceCompileError(ImportError):
         self.jac_source_path = jac_source_path
 
 
-def _retained_failure_details(file_path: str) -> str:
-    """Recover diagnostics the internal compile closure already evicted."""
-    try:
-        from jaclang.compiler.driver.source_failures import compiler_source_failure_details
-
-        return compiler_source_failure_details(file_path) or ""
-    except Exception:
-        return ""
-
-
 def _module_scoped_alerts(program: object, file_path: str) -> list:
     """Compile errors recorded against file_path or one of its annexes.
 
@@ -136,25 +54,20 @@ def _module_scoped_alerts(program: object, file_path: str) -> list:
     return program.diags.owned_errors(file_path)
 
 
-# Bootstrap modresolver.jac before JacMetaImporter is registered. This module
-# must be available for find_spec()/get_code(), but normal .jac imports are not
-# yet operational at this point. Compiled images provide its code directly;
-# only a source development tree needs live seed compilation.
-_modresolver_jac = os.path.join(
-    os.path.dirname(__file__), "compiler", "driver", "modresolver.jac"
-)
-_modresolver_code = None
-_modresolver_origin = _modresolver_jac
-_frozen_modresolver = _sealed.find_module("jaclang.compiler.driver.modresolver")
-if _frozen_modresolver is not None:
-    _mr_image = _frozen_modresolver[0]
-    _modresolver_code = _mr_image.code("jaclang.compiler.driver.modresolver")
-    if _modresolver_code is None:
-        raise ImportError("compiler image contains no executable module resolver")
-    _modresolver_origin = _mr_image.virtual_origin(_frozen_modresolver[2])
+# The resolver must be executable before the Jac finder is registered.
+# Its code comes from the same image as every other compiler module.
+_resolver_name = "jaclang.compiler.driver.modresolver"
+_resolver_entry = _sealed.find_module(_resolver_name)
+if _resolver_entry is None:
+    raise ImportError(
+        "Jac requires a compiled compiler image. Run 'zig build compiler-image' "
+        "and select zig-out/compiler-site with JAC_COMPILER_IMAGE."
+    )
+_resolver_image, _, _resolver_source = _resolver_entry
+_modresolver_code = _resolver_image.code(_resolver_name)
 if _modresolver_code is None:
-    with open(_modresolver_jac, encoding="utf-8") as _f:
-        _modresolver_code = _bootstrap_compile(_modresolver_jac, _f.read())
+    raise ImportError("compiler image contains no executable module resolver")
+_modresolver_origin = _resolver_image.virtual_origin(_resolver_source)
 _modresolver = types.ModuleType("jaclang.compiler.driver.modresolver")
 _modresolver.__file__ = _modresolver_origin
 _modresolver.__package__ = "jaclang.compiler.driver"
@@ -179,34 +92,6 @@ class _PreparedAliasLoader(Loader):
 class JacMetaImporter(MetaPathFinder, Loader):
     """Meta path importer to load .jac modules via Python's import system."""
 
-    # Directory containing the jaclang package (for bootstrap detection)
-    _jaclang_dir: str = str(Path(__file__).parent)
-
-    # Source development only. A compiled image need not carry seed sources.
-    _seed_dirs: tuple[str, ...] | None = None
-    _seed_files: frozenset[str] = frozenset()
-
-    def _is_bootstrap_jac(self, file_path: str) -> bool:
-        """Check if a .jac file should be compiled with jac0 (bootstrap).
-
-        Files the bootstrap manifest covers are part of the compiler
-        infrastructure and must be compiled with the lightweight jac0
-        transpiler rather than the full Jac compiler (which depends on
-        them). Everything else uses full Jac syntax and goes through the
-        full compiler.
-        """
-        if _sealed._jaclang_image() is not None:
-            return False
-        if self._seed_dirs is None:
-            from jaclang import bootstrap_manifest
-
-            self._seed_dirs, self._seed_files = bootstrap_manifest.seed_abs_entries(
-                self._jaclang_dir
-            )
-        if file_path in self._seed_files:
-            return True
-        return any(file_path.startswith(d) for d in self._seed_dirs)
-
     def find_spec(
         self,
         fullname: str,
@@ -226,8 +111,7 @@ class JacMetaImporter(MetaPathFinder, Loader):
         # Sealed image is authoritative: a sealed binary resolves its modules
         # from the manifest by name, with no filesystem probing for .jac. This
         # is the primary path (not a fallback) so a sealed runtime never touches
-        # the disk for its own code. In an unsealed dev tree no image is loaded,
-        # so this is a no-op and resolution falls through to the source search.
+        # source compiler for its own code. Application imports use source search.
         sealed_spec = self._sealed_spec(fullname)
         if sealed_spec is not None:
             return sealed_spec
@@ -311,26 +195,6 @@ class JacMetaImporter(MetaPathFinder, Loader):
         """Create the module."""
         return None  # use default machinery
 
-    def _exec_seed_source(self, module: ModuleType, file_path: str) -> None:
-        """Execute a bootstrap .jac module using jac0 with bytecode caching.
-
-        Bootstrap modules are part of the jaclang compiler infrastructure.
-        They are compiled with the lightweight jac0 transpiler rather than
-        the full Jac compiler, which depends on them.
-        """
-        with open(file_path, encoding="utf-8") as f:
-            jac_source = f.read()
-
-        impl_sources: list[tuple[str, str]] = []
-        from jaclang.jac0 import discover_impl_files
-
-        for impl_path in discover_impl_files(file_path):
-            with open(impl_path, encoding="utf-8") as f:
-                impl_sources.append((f.read(), impl_path))
-
-        code = _bootstrap_compile(file_path, jac_source, impl_sources or None)
-        exec(code, module.__dict__)
-
     def exec_module(self, module: ModuleType) -> None:
         """Execute the module by loading and executing its bytecode.
 
@@ -354,9 +218,8 @@ class JacMetaImporter(MetaPathFinder, Loader):
                 raise ImportError(f"compiler image contains no code for {module.__name__}")
             exec(code, module.__dict__)  # noqa: S102
             return
-        if self._is_bootstrap_jac(file_path):
-            self._exec_seed_source(module, file_path)
-            return
+        if module.__name__.startswith("jaclang."):
+            raise ImportError(f"compiler image contains no code for {module.__name__}")
 
         from jaclang.runtime.runtime import JacRuntime as Jac
 
@@ -394,16 +257,7 @@ class JacMetaImporter(MetaPathFinder, Loader):
                 # Empty package is OK - just register it
                 return
             alerts = _module_scoped_alerts(program, file_path)
-            if not alerts:
-                # Files under the jaclang tree compile into the compiler's
-                # internal program, so their diagnostics live there rather
-                # than in the runtime program handed to us.
-                internal = compiler.selfhost.peek_program()
-                if internal is not None:
-                    alerts = _module_scoped_alerts(internal, file_path)
             details = "\n".join(a.pretty_print() for a in alerts)
-            if not details:
-                details = _retained_failure_details(file_path)
             if details:
                 raise JacSourceCompileError(
                     f"{file_path} failed to compile:\n{details}", file_path
@@ -456,8 +310,7 @@ class JacMetaImporter(MetaPathFinder, Loader):
         # An inferred-native module keeps its plain python side for python
         # callers (the preference must not route sv-side calls through the
         # marshal bridge); sv->na calls go through the interop stubs the
-        # manifest generates. Sealed compiler-native modules bind through
-        # the AOT artifact instead.
+        # manifest generates.
 
     def get_source(self, fullname: str) -> str | None:
         """Return module source text when available.
@@ -479,6 +332,8 @@ class JacMetaImporter(MetaPathFinder, Loader):
         if found is not None and found[0].package == "jaclang":
             return found[0].code(fullname)
 
+        if fullname.startswith("jaclang."):
+            raise ImportError(f"compiler image contains no code for {fullname}")
         from jaclang.runtime.runtime import JacRuntime as Jac
 
         if found is not None:

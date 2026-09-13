@@ -1297,7 +1297,6 @@ impl _parse_toml_data(
         dev_data = data["dev"];
 
         config.dev = DevConfig(
-            jaclang_source=str(dev_data.get("jaclang_source", "")),
             jobs=str(dev_data.get("jobs", "")),
             test_jobs=str(dev_data.get("test_jobs", "")),
             check_jobs=str(dev_data.get("check_jobs", "")),

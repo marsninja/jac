@@ -514,26 +514,6 @@ def _lib_name -> str {
 }
 
 
-def _kit_site_present -> bool {
-    shim = "libjacllvm.dylib" if sys.platform == "darwin" else "libjacllvm.so";
-    here = os.path.dirname(os.path.abspath(__file__));
-    if os.path.isfile(os.path.join(here, "backends", "native", "llvm", shim)) {
-        return True;
-    }
-    for p in sys.path {
-        if p
-            and os.path.isfile(
-                os.path.join(
-                    p, "jaclang", "compiler", "backends", "native", "llvm", shim
-                )
-            ) {
-            return True;
-        }
-    }
-    return False;
-}
-
-
 def _find_lib -> (str | None) {
     if os.environ.get("JAC_STUBCAT_BUILDING") {
         return None;
@@ -557,27 +537,12 @@ def _find_lib -> (str | None) {
     if os.path.isfile(cand) and os.path.isfile(cand + ".layout.json") {
         return cand;
     }
-    if os.environ.get("JAC_DEV_SOURCE") {
-        return None;
-    }
-    for p in sys.path {
-        if not p {
-            continue;
-        }
-        alt = os.path.join(p, "jaclang", "compiler", name);
-        if os.path.isfile(alt) and os.path.isfile(alt + ".layout.json") {
-            return alt;
-        }
-    }
-    if _kit_site_present() {
-        raise OSError(
-            f"This jac build is missing its native compiler kernel ('{name}' "
-            "+ .layout.json under jaclang/compiler/). Every fully built jac "
-            "binary parses natively; rebuild the kit (zig build), or set "
-            "JAC_COMPILER_LIB=off to run the store parser explicitly."
-        );
-    }
-    return None;
+    raise OSError(
+        f"Compiler image is missing its native frontend kernel ('{name}' "
+        "+ .layout.json under jaclang/compiler/). Rebuild with "
+        "'zig build compiler-image' or set JAC_COMPILER_LIB=off to select "
+        "the Python frontend explicitly."
+    );
 }
 
 
