@@ -12,7 +12,8 @@ import from jaclang.compiler.analysis.boundaries.classify {
     classify_client_import_item,
     import_declares_native_target,
     is_client_boundary_import,
-    is_client_native_edge_import
+    is_client_native_edge_import,
+    module_has_client_top
 }
 
 import from jaclang.compiler.pipeline.program_pass { ProgramTransform }
@@ -154,6 +155,7 @@ def stamp_boundary_facts(mod: uni.Module, target_program: AnalysisServices) {
         }
     }
 
+    has_client_top = module_has_client_top(mod);
     for nd in mod.get_all_sub_nodes(uni.Import) {
         facts = uni.ImportBoundaryFacts();
         nd.boundary_facts = facts;
@@ -165,7 +167,9 @@ def stamp_boundary_facts(mod: uni.Module, target_program: AnalysisServices) {
                 module_name = '.'.join(p.value for p in nd.from_loc.path);
             }
             if module_name {
-                cl_na_edge = is_client_native_edge_import(nd, target_program);
+                cl_na_edge = is_client_native_edge_import(
+                    nd, target_program, has_client_top
+                );
                 facts.client_native_edge = cl_na_edge;
                 na_intent = (
                     native_ctx

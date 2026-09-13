@@ -607,7 +607,7 @@ def utility_pipeline(product: UtilityProduct) -> list[PassIdentity] {
     } elif product == UtilityProduct.SYNTAX_DIAGNOSTICS {
         return [PassIdentity.ASTValidationPass];
     } elif product == UtilityProduct.INTERFACE_CONTEXT {
-        return [PassIdentity.AppContextPass, PassIdentity.InterfaceReferenceTypesPass];
+        return [PassIdentity.AppContextPass];
     } elif product == UtilityProduct.PYTHON_SYMBOLS {
         return [PassIdentity.AbsorbImportsPass, PassIdentity.SymTabBuildPass];
     } elif product == UtilityProduct.GRAMMAR {
@@ -1114,24 +1114,6 @@ def _create_InterfaceFactsPass(context: PassContext) -> Transform {
         InterfaceFactsPass
     }
     return InterfaceFactsPass(
-        ir_in=context.ir,
-        cancel_token=context.cancel_token,
-        cancel_requested=bool(
-            context.cancel_token is not None and context.cancel_token.is_set()
-        ),
-        policy=context.policy,
-        errors_had=context.errors,
-        warnings_had=context.warnings,
-        completed=context.completed,
-        prog=context.program
-    );
-}
-
-def _create_InterfaceReferenceTypesPass(context: PassContext) -> Transform {
-    import from jaclang.compiler.analysis.interfaces.reference_types_pass {
-        InterfaceReferenceTypesPass
-    }
-    return InterfaceReferenceTypesPass(
         ir_in=context.ir,
         cancel_token=context.cancel_token,
         cancel_requested=bool(
@@ -1916,15 +1898,6 @@ glob PASS_REGISTRY: dict[PassIdentity, PassSpec] = {
          PassIdentity.InterfaceFactsPass: PassSpec(
              PassIdentity.InterfaceFactsPass,
              _create_InterfaceFactsPass,
-             PassScope.MODULE,
-             frozenset(
-                 {RelationFamily.BINDING, RelationFamily.TYPES, RelationFamily.FLOW}
-             ),
-             AnalysisContract()
-         ),
-         PassIdentity.InterfaceReferenceTypesPass: PassSpec(
-             PassIdentity.InterfaceReferenceTypesPass,
-             _create_InterfaceReferenceTypesPass,
              PassScope.MODULE,
              frozenset(
                  {RelationFamily.BINDING, RelationFamily.TYPES, RelationFamily.FLOW}

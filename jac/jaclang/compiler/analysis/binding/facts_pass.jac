@@ -1,5 +1,11 @@
 import from jaclang.compiler.pipeline.program_pass { ProgramTransform }
-import from jaclang.compiler.ir.schema { Module, UniScopeNode, NameAtom, Symbol }
+import from jaclang.compiler.ir.schema {
+    Module,
+    UniNode,
+    UniScopeNode,
+    NameAtom,
+    Symbol
+}
 import from jaclang.compiler.analysis.binding.bindings {
     classify_binding,
     classify_storage,
@@ -7,33 +13,43 @@ import from jaclang.compiler.analysis.binding.bindings {
 }
 
 walker BindingFactsPass(ProgramTransform) {
-    def transform(ir_in: Module) -> Module {
-        scopes: list[UniScopeNode] = [ir_in];
+    has scopes: list[UniScopeNode] = [],
         symbols: set[Symbol] = set();
-        for (kind, candidates) in ir_in._sub_node_tab.items() {
+
+    can collect_scope with UniScopeNode entry {
+        self.scopes.append(here);
+        self.symbols.update(here.names_in_scope.values());
+    }
+
+    can collect_name with NameAtom entry {
+        if (symbol := here.sym) is not None {
+            self.symbols.add(symbol);
+        }
+    }
+
+    can classify with Symbol entry {
+        here.storage = classify_storage(here);
+        here.binding_fact = classify_binding(here);
+    }
+
+    def transform(ir_in: Module) -> Module {
+        scope_nodes: list[UniNode] = [ir_in];
+        names: list[UniNode] = [];
+        for (kind, nodes) in ir_in._sub_node_tab.items() {
             if issubclass(kind, UniScopeNode) {
-                scopes.extend(
-                    node
-                    for node in candidates
-                    if isinstance(node, UniScopeNode)
-                );
+                scope_nodes.extend(nodes);
             }
             if issubclass(kind, NameAtom) {
-                for name in candidates {
-                    if isinstance(name, NameAtom)
-                        and (symbol := name.sym) is not None {
-                        symbols.add(symbol);
-                    }
-                }
+                names.extend(nodes);
             }
         }
-        for scope in scopes {
-            symbols.update(scope.names_in_scope.values());
+        scope_nodes spawn self;
+        collect_capture_facts(ir_in, self.scopes);
+        if names {
+            names spawn self;
         }
-        collect_capture_facts(ir_in, scopes);
-        for symbol in symbols {
-            symbol.storage = classify_storage(symbol);
-            symbol.binding_fact = classify_binding(symbol);
+        if self.symbols {
+            list(self.symbols) spawn self;
         }
         return ir_in;
     }

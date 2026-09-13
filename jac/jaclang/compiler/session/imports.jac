@@ -975,9 +975,12 @@ obj IfaceRegistry(CatalogResolver) {
     def resolve_shared(
         module_path: str, dotted: str, class_name: str
     ) -> ClassDetailsShared | None {
-        mod = self.resolve_module(module_path);
-        if mod is None or not dotted {
+        if not dotted {
             return None;
+        }
+        mod = self.resolve_module(module_path);
+        if mod is None {
+            mod = self.prog.load_dependency_module(module_path);
         }
         parts = dotted.split(".");
         scope: UniScopeNode = mod;
@@ -994,8 +997,13 @@ obj IfaceRegistry(CatalogResolver) {
         }
 
         resolved_type = sym.decl.type;
-        if resolved_type is None and sym.provider is not None {
-            resolved_type = sym.provider.resolve_type(sym);
+        if resolved_type is None {
+            if sym.provider is not None {
+                resolved_type = sym.provider.resolve_type(sym);
+            } else {
+                import from jaclang.compiler.api { query_type }
+                resolved_type = query_type(self.prog, sym);
+            }
         }
         if isinstance(resolved_type, ClassType) {
             return resolved_type.shared;

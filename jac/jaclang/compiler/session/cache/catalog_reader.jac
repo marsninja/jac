@@ -87,13 +87,6 @@ import from jaclang.compiler.session.cache.catalog_format {
     unpack_header
 }
 
-obj ExternalClassReference {
-    has shared_id: int,
-        module_path: str,
-        qualified_name: str;
-}
-
-
 obj CatProvider(SymbolProvider) {
     has cat: StubCatalog,
         type_id: int,
@@ -1031,27 +1024,6 @@ obj StubCatalog {
         );
         self._type_memo[tid] = uk;
         return uk;
-    }
-
-    def external_class_references -> list[ExternalClassReference] {
-        references: list[ExternalClassReference] = [];
-        for shid in range(self.hdr.n_shared) {
-            record = self._rec(self.hdr.off_sharedtab, shid);
-            record.u();
-            bits = record.u();
-            if bits & SH_XREF {
-                module_id = record.ref();
-                dotted = self.string(record.u());
-                if module_id >= 0 {
-                    references.append(
-                        ExternalClassReference(
-                            shid, self.abs_path(self._mod_recs[module_id][1]), dotted
-                        )
-                    );
-                }
-            }
-        }
-        return references;
     }
 
     def shared_of(shid: int) -> (ClassDetailsShared | None) {

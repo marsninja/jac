@@ -126,8 +126,7 @@ test "a warm no-edit check replays diagnostics and only restores interface conte
     assert events.get("analysis_replay", 0) == 1 , (
         f"warm check did not replay (events: {events})"
     );
-    assert set(warm_prog.analysis.pass_runs)
-        == {"AppContextPass", "InterfaceReferenceTypesPass"} , (
+    assert set(warm_prog.analysis.pass_runs) == {"AppContextPass"} , (
         f"warm no-edit check reanalyzed source: {sorted(warm_prog.analysis.pass_runs)}"
     );
     assert warm_diags == cold_diags , "warm diagnostics diverge from cold";
@@ -1059,7 +1058,7 @@ test "hydrated interfaces prepare source-stub classes before resolving reference
         _rewrite(main, Path(main).read_text() + '\n# Recheck the consumer.\n');
         (warm, warm_diags) = _check(main);
         assert warm.analysis.cache_events.get('dep_hydrate', 0) >= 1;
-        assert 'InterfaceReferenceTypesPass' in warm.analysis.pass_runs;
+        assert 'TypeQueryPass' in warm.analysis.pass_runs;
         assert not warm.errors_had , warm_diags;
     }
 }
@@ -1177,6 +1176,53 @@ test "hydrated interfaces resolve class types on symbol-only source modules" {
     }
 }
 
+test "hydrating an interface defers source class analysis until a scheduled query" {
+    import from jaclang.compiler.api { query_type }
+    import from jaclang.compiler.ir.types.nodes { ClassType, FunctionType }
+    import from jaclang.compiler.session.cache.catalog_reader { CatModule }
+    (main, provider) = _project(
+        'import from data { Data }\ndef f -> Data { return Data(); }'
+    );
+    data = str(Path(main).parent / 'data.jac');
+    Path(data).write_text('obj Data { has value: int = 1; }');
+    (cold, diagnostics) = _check(main);
+    assert not cold.errors_had , diagnostics;
+    cold.release_compile_closure(collect=False);
+    program = _context(main);
+    symbols = program.options.for_symbols();
+    symbols.need_full_ast = True;
+    source = program.compile(data, options=symbols);
+    declaration = source.lookup_local('Data');
+    assert declaration is not None and declaration.decl.type is None;
+    cached = program.compile(provider, options=program.options.for_symbols());
+    assert isinstance(cached, CatModule);
+    assert declaration.decl.type is None , 'hydration eagerly analyzed a source class';
+    function = cached.lookup_local('f');
+    assert function is not None;
+    context = program.module_context(cached);
+    before = context.analysis.pass_runs.get('TypeQueryPass', 0);
+    result = query_type(context, function);
+    assert isinstance(result, FunctionType)
+        and isinstance(result.return_type, ClassType);
+    assert result.return_type.shared.symbol_table.lookup_local('value') is not None;
+    assert declaration.decl.type is not None;
+    assert context.analysis.pass_runs.get('TypeQueryPass', 0) > before;
+}
+
+test "an interface class reference loads an absent source module through the pipeline" {
+    (main, _) = _project('def f -> int { return 1; }');
+    data = str(Path(main).parent / 'data.jac');
+    Path(data).write_text('obj Data { has value: int = 1; }');
+    program = _context(main);
+    assert program.find_module(data) is None;
+    shared = program.iface_registry().resolve_shared(data, 'Data', 'Data');
+    assert shared is not None;
+    assert shared.symbol_table.lookup_local('value') is not None;
+    assert program.find_module(data) is not None;
+    assert program.analysis.pass_runs.get('TypeQueryPass', 0) > 0;
+    assert not program.errors_had;
+}
+
 test "compiler references use the compiler fingerprint without expanding interface dependencies" {
     import from jaclang.compiler.session.cache.artifact_codec { is_compiler_tree_path }
     with tempfile.TemporaryDirectory() as tmp {
@@ -1198,6 +1244,7 @@ test "compiler references use the compiler fingerprint without expanding interfa
 }
 
 test "prepared interface references survive full-tree provider replacement" {
+    import from jaclang.compiler.api { query_type }
     import from jaclang.compiler.session.cache.catalog_reader { CatModule }
     import from jaclang.compiler.session.context { artifact_cache_path }
     import from jaclang.compiler.ir.types.nodes { ClassType, FunctionType }
@@ -1245,8 +1292,7 @@ test "prepared interface references survive full-tree provider replacement" {
         }
         # Decode the retained interface directly: recompiling main would
         # prepare its dependencies again and conceal the lost references.
-        evaluator = context.get_type_evaluator();
-        make_type = evaluator.get_type_of_symbol(make);
+        make_type = query_type(context, make);
         assert isinstance(make_type, FunctionType);
         data_type = make_type.return_type;
         assert isinstance(data_type, ClassType);
@@ -1254,7 +1300,7 @@ test "prepared interface references survive full-tree provider replacement" {
         assert data_scope is not None;
         detail_symbol = data_scope.lookup("detail");
         assert detail_symbol is not None , "the retained Data reference lost its fields";
-        detail_type = evaluator.get_type_of_symbol(detail_symbol);
+        detail_type = query_type(context, detail_symbol);
         assert isinstance(detail_type, ClassType);
         detail_scope = detail_type.shared.symbol_table;
         assert detail_scope is not None;

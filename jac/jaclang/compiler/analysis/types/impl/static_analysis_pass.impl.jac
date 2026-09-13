@@ -451,7 +451,8 @@ impl StaticAnalysisPass._check_semantic_patterns(mod: Module) -> None {
 
 impl StaticAnalysisPass._check_client_imports(mod: Module) -> None {
     import from jaclang.compiler.analysis.boundaries.classify {
-        is_client_native_edge_import
+        is_client_native_edge_import,
+        module_has_client_top
     }
     import from jaclang.compiler.ir.enums { CodeContext }
     import from jaclang.compiler.analysis.binding.symbol_utils {
@@ -463,8 +464,9 @@ impl StaticAnalysisPass._check_client_imports(mod: Module) -> None {
         report_dead_client_import,
         resolve_import_source_module
     }
+    has_client_top = module_has_client_top(mod);
     for nd in mod.get_all_sub_nodes(typ=Import) {
-        if is_client_native_edge_import(nd, self.prog) {
+        if is_client_native_edge_import(nd, self.prog, has_client_top) {
             continue;
         }
         if nd.code_context != CodeContext.CLIENT {

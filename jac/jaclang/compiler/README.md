@@ -102,6 +102,11 @@ Interface and artifact codecs under `session/cache` consume prepared records.
 Interface preparation belongs to `analysis/interfaces`; dependency loading
 belongs to `session/imports`. Cache decoding reconstructs graph data within the
 selected mutation scope and does not substitute a graph from another context.
+Interface hydration restores application context without walking transitive
+class references. The session resolver loads missing referenced modules through
+the compilation pipeline and requests the scheduled `TypeQueryPass` when a
+source class's type is missing. Catalog providers
+continue to decode their recorded types without running semantic analysis.
 
 The native parser adapter consumes the central schema and registered early-pass
 bits. `jaclang/bootstrap_manifest.py` is the minimal Python seed boundary needed
@@ -150,8 +155,11 @@ and publishes the result through the scheduled product/query infrastructure.
 `ElementReferenceScan` resolves each name once to collect both references and
 function escapes. Its declaration-to-element map lives only for that summary,
 so a later binding or structure change cannot reuse stale associations.
-`BindingFactsPass` uses the same syntax index to collect scopes and names for
-storage and capture analysis, avoiding a separate walk of every syntax node.
+`BindingFactsPass` likewise seeds typed scope/name abilities from the syntax
+index, then dispatches the collected `Symbol` nodes for storage and binding
+classification. It avoids a separate walk of every syntax node.
+Import classification computes the module's client-context flag once per
+analysis traversal, rather than rescanning the module body for each import.
 
 `ir/syntax/cloning.jac` is the storage boundary for copying validated syntax.
 It preserves endpoint types, edge ordering, and shared children while creating

@@ -223,10 +223,15 @@ def native_only_import_target(nd: uni.Import, prog: AnalysisServices) -> (str | 
     return None;
 }
 
-def is_client_native_edge_import(nd: uni.Import, prog: AnalysisServices) -> bool {
-    if nd.code_context == CodeContext.CLIENT {} elif nd.code_context
-        == CodeContext.SERVER
-        and module_has_client_top(nd.find_parent_of_type(uni.Module)) {} else {
+def is_client_native_edge_import(
+    nd: uni.Import, prog: AnalysisServices, has_client_top: bool
+) -> bool {
+    if nd.is_typed or nd.is_virtual_jac or nd.from_loc is None or not nd.items {
+        return False;
+    }
+    context = nd.code_context;
+    if context != CodeContext.CLIENT
+        and (context != CodeContext.SERVER or not has_client_top) {
         return False;
     }
     return plain_native_import_target(nd, prog) is not None;
