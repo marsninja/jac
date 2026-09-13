@@ -754,8 +754,10 @@ test "private native helpers cannot satisfy another library's C symbols" {
     );
     native.link_in(library);
     native.verify();
-    assert any(value.name == "foreign_operation" and value.is_declaration
-               for value in native.functions);
+    assert any(
+        value.name == "foreign_operation" and value.is_declaration
+        for value in native.functions
+    );
     target = llvm.Target.from_default_triple().create_target_machine();
     engine = llvm.create_mcjit_compiler(native, target);
     engine.finalize_object();
@@ -765,4 +767,52 @@ test "private native helpers cannot satisfy another library's C symbols" {
     assert engine.get_global_value_address("public_state") != 0;
     assert engine.get_function_address("linker_support") != 0;
     engine.close();
+}
+
+test "opaque native owners account for object and growing list allocations" {
+    import ctypes;
+    import from jaclang.compiler.backends.native.shared_emit { init_object_codegen }
+    program = JacProgram();
+    module = program.compile(
+        file_path=os.path.join(FIXTURES, "shared_heap_accounting.jac"),
+        options=CompileOptions(
+            aot_mode=True, default_codespace="native", memory_profile="managed"
+        )
+    );
+    assert not program.errors_had;
+    assert module is not None;
+    (source, exports) = _inject_shared_init(
+        native_linked_ir_text(module), module.gen.interop_manifest
+    );
+    assert "jac_heap_size" in exports and "jac_list_heap_size" in exports;
+    init_object_codegen();
+    compiled = llvm.parse_assembly(source);
+    compiled.verify();
+    target = llvm.Target.from_default_triple().create_target_machine();
+    engine = llvm.create_mcjit_compiler(compiled, target);
+    engine.finalize_object();
+    ctypes.CFUNCTYPE(None)(engine.get_function_address("__jac_shared_init"))();
+    make = ctypes.CFUNCTYPE(ctypes.c_void_p)(engine.get_function_address("make_owned"));
+    grow = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(
+        engine.get_function_address("grow_owned")
+    );
+    size = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_void_p)(
+        engine.get_function_address("owned_size")
+    );
+    release = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(
+        engine.get_function_address("jac_release")
+    );
+    heap_size = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_uint64)(
+        engine.get_function_address("jac_heap_size")
+    );
+    assert heap_size(0) == 0;
+    owner = make();
+    try {
+        before = size(owner);
+        assert before > 0;
+        grow(owner);
+        assert size(owner) >= before + 1000 * 8;
+    } finally {
+        release(owner);
+    }
 }

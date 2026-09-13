@@ -23,6 +23,69 @@ def internalize_native_implementation(module: ModuleRef, exports: list[str]) {
 }
 
 
+"""Expose allocation accounting only when a managed library requests it.
+
+The allocator header and list storage layout belong to the native backend.
+Foreign object adapters can account for opaque owned state without copying
+those layouts or estimating their allocation sizes.
+"""
+def inject_heap_accounting(llvm_ir_str: str) -> tuple[str, list[str]] {
+    import re;
+    import from jaclang.compiler.frontend.codeinfo { HDR_TOTAL }
+    requested = [
+        name
+        for name in ("jac_heap_size", "jac_list_heap_size")
+        if re.search(r'declare[^\n]*@"?' + name + r'"?\(', llvm_ir_str)
+    ];
+    if not requested {
+        return (llvm_ir_str, []);
+    }
+    if not re.search(r'define[^\n]*@"?__rc_alloc"?\(', llvm_ir_str) {
+        raise RuntimeError("Native heap accounting requires managed allocations");
+    }
+    apple = re.search(r'target triple = "[^"\n]*(?:apple|darwin)', llvm_ir_str)
+        is not None;
+    allocator_size = "malloc_size" if apple else "malloc_usable_size";
+    definitions: list[str] = [];
+    if not re.search(
+        r'(?:declare|define)[^\n]*@"?' + allocator_size + r'"?\(', llvm_ir_str
+    ) {
+        definitions.append("declare i64 @" + allocator_size + "(ptr)");
+    }
+    for name in requested {
+        llvm_ir_str = re.sub(
+            r'(?m)^declare[^\n]*@"?' + name + r'"?\([^\n]*\)[^\n]*$', "", llvm_ir_str
+        );
+        body = (
+            "define i64 @"
+            + name
+            + "(i64 %address) {\nentry:\n"
+            "  %empty = icmp eq i64 %address, 0\n"
+            "  br i1 %empty, label %zero, label %measure\nzero:\n  ret i64 0\nmeasure:\n"
+            "  %object = inttoptr i64 %address to ptr\n"
+            "  %base = getelementptr i8, ptr %object, i64 -"
+            + str(HDR_TOTAL)
+            + "\n" "  %owned = call i64 @"
+            + allocator_size
+            + "(ptr %base)\n"
+        );
+        if name == "jac_list_heap_size" {
+            body += (
+                "  %slot = getelementptr { i64, i64, ptr }, ptr %object, i32 0, i32 2\n"
+                "  %data = load ptr, ptr %slot\n"
+                "  %buffer = call i64 @"
+                + allocator_size
+                + "(ptr %data)\n"
+                "  %total = add i64 %owned, %buffer\n  ret i64 %total\n}"
+            );
+        } else {
+            body += "  ret i64 %owned\n}";
+        }
+        definitions.append(body);
+    }
+    return (llvm_ir_str + "\n" + "\n".join(definitions) + "\n", requested);
+}
+
 def inject_shared_init(llvm_ir_str: str, manifest: any) -> tuple[str, list[str]] {
     init_calls: list[str] = [];
     transitive_sources: list[str] = [];
@@ -74,7 +137,7 @@ def inject_shared_init(llvm_ir_str: str, manifest: any) -> tuple[str, list[str]]
     parts.append(
         "define void @__jac_shared_init() {\nentry:\n" + _body + "  ret void\n}"
     );
-    extra_exports: list[str] = [];
+    (llvm_ir_str, extra_exports) = inject_heap_accounting(llvm_ir_str);
 
     if ("@__rc_retain(" in llvm_ir_str) or ('@"__rc_retain"(' in llvm_ir_str) {
         parts.append(
