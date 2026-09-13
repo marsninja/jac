@@ -811,7 +811,7 @@ def build_annotate_fn_cfg(
         }
         u.classdict_names = True;
     }
-    u.varnames = fast_varnames_from_sym(sym);
+    u.set_varnames(fast_varnames_from_sym(sym));
     hloc = plan.head_loc;
     if hloc is None {
         hloc = no_loc();

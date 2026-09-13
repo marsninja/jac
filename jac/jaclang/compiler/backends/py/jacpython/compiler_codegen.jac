@@ -556,7 +556,7 @@ def compile_eval(
         filename=filename, name=name, qualname=name, firstlineno=firstlineno
     );
     if sym_top is not None {
-        u.varnames = fast_varnames_from_sym(sym_top);
+        u.set_varnames(fast_varnames_from_sym(sym_top));
         u.cellvars.extend(cellvars_from_sym(sym_top));
     }
     entry_blk = u.add_block();
@@ -1371,7 +1371,7 @@ def compile_exec(
     }
     u.interactive = interactive;
     if sym_top is not None {
-        u.varnames = fast_varnames_from_sym(sym_top);
+        u.set_varnames(fast_varnames_from_sym(sym_top));
         u.cellvars.extend(cellvars_from_sym(sym_top));
     }
     entry_blk = u.add_block();

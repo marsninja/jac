@@ -420,6 +420,7 @@ obj unverified_cfg {
         flags: int = 0,
         interactive: bool = False,
         varnames: list[str] = [],
+        varname_indices: dict[str, int] = {},
         cellvars: list[str] = [],
         freevars: list[str] = [],
         consts: list[PyObj] = [],
@@ -481,6 +482,23 @@ obj unverified_cfg {
         # enclosing handler's match span ends here when the nested try's own
         # regions carve out its body/handler coverage.
         nested_try_except_start: int = -1;
+
+    # Preserve slot order while avoiding repeated linear searches for every
+    # local load. Replace a unit's names through this method before lowering.
+    def set_varnames(names: list[str]) {
+        self.varnames = names;
+        self.varname_indices = {};
+    }
+
+    def varname_index(name: str) -> int {
+        if len(self.varname_indices) != len(self.varnames) {
+            self.varname_indices = {};
+            for (index, value) in enumerate(self.varnames) {
+                self.varname_indices[value] = index;
+            }
+        }
+        return self.varname_indices.get(name, -1);
+    }
 
     def add_block -> basicblock {
         b = basicblock(id=self.next_block_id, instrs=[]);

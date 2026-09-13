@@ -514,14 +514,7 @@ def freevars_from_sym(block: sym_block) -> list[str] {
 }
 
 def varname_index(u: unverified_cfg, name: str) -> int {
-    vi = 0;
-    while vi < len(u.varnames) {
-        if u.varnames[vi] == name {
-            return vi;
-        }
-        vi = vi + 1;
-    }
-    return -1;
+    return u.varname_index(name);
 }
 
 # Merged locals-plus index for MAKE_CELL / LOAD_DEREF / LOAD_FAST_BORROW (CPython 3.11+).
@@ -2731,14 +2724,7 @@ def fast_local_index(g: cfg_builder, name: str) -> int {
         }
     }
     name = g.scope_names.get(name, name);
-    vi = 0;
-    while vi < len(g.u.varnames) {
-        if g.u.varnames[vi] == name {
-            return vi;
-        }
-        vi = vi + 1;
-    }
-    return -1;
+    return g.u.varname_index(name);
 }
 
 # CPython 3.14 fuses two fast-local loads for binops (e.g. `return x + y`).
@@ -3780,7 +3766,7 @@ def compile_lambda_cfg(
     u.kwonlyargcount = kwonly;
     u.param_count = len(sym_fn.varnames);
     u.flags = function_code_flags(lam.args, in_class);
-    u.varnames = fast_varnames_from_sym(sym_fn);
+    u.set_varnames(fast_varnames_from_sym(sym_fn));
     if sym_fn.nested {
         u.flags = u.flags | CO_NESTED;
     }
@@ -3884,7 +3870,7 @@ def compile_genexp_cfg(
     if sym_fn.nested {
         u.flags = u.flags | CO_NESTED;
     }
-    u.varnames = fast_varnames_from_sym(sym_fn);
+    u.set_varnames(fast_varnames_from_sym(sym_fn));
     entry_blk = u.add_block();
     g = new_cfg_builder(u, entry_blk, sym_fn, private);
     protect_start = emit_function_prologue(g, sym_fn, ge.lineno, True);

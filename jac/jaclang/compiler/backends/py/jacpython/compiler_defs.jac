@@ -594,7 +594,7 @@ def compile_class_cfg(
     # survive into the class-body code object so method creation inside the
     # body can close over those cells.
     u.freevars = freevars_from_sym(sym_cls);
-    u.varnames = inline_storage_names(sym_cls);
+    u.set_varnames(inline_storage_names(sym_cls));
     u.cellvars.extend(inline_storage_names(sym_cls, True));
     # Implicit __class__ cell first (CPython compiler_unit appends it before
     # __classdict__; observed oracle order ('__class__', '__classdict__')).
@@ -767,7 +767,7 @@ def generic_definition_builder(
         firstlineno=firstlineno
     );
     u.flags = CO_OPTIMIZED | CO_NEWLOCALS | (CO_NESTED if scope.nested else 0);
-    u.varnames = fast_varnames_from_sym(scope);
+    u.set_varnames(fast_varnames_from_sym(scope));
     u.argcount = len(scope.varnames);
     u.param_count = u.argcount;
     u.classdict_names = scope.can_see_class_scope;
@@ -933,7 +933,7 @@ def compile_fn_cfg(
     } elif sym_fn.coroutine {
         u.flags = u.flags | CO_COROUTINE;
     }
-    u.varnames = fast_varnames_from_sym(sym_fn);
+    u.set_varnames(fast_varnames_from_sym(sym_fn));
     entry_blk = u.add_block();
     g = new_cfg_builder(u, entry_blk, sym_fn, private);
     protect_start = emit_function_prologue(g, sym_fn, body_firstlineno, is_suspendable);
@@ -1046,7 +1046,7 @@ def type_expression_cfg(
     if sym_v.nested {
         u.flags = u.flags | CO_NESTED;
     }
-    u.varnames = fast_varnames_from_sym(sym_v);
+    u.set_varnames(fast_varnames_from_sym(sym_v));
     u.freevars = freevars_from_sym(sym_v);
     if in_class {
         # Directly inside a class body the lazy scope closes over the class
@@ -1120,7 +1120,7 @@ def typealias_genparams_cfg(
     if sym_gp.nested {
         u.flags = u.flags | CO_NESTED;
     }
-    u.varnames = fast_varnames_from_sym(sym_gp);
+    u.set_varnames(fast_varnames_from_sym(sym_gp));
     u.freevars = freevars_from_sym(sym_gp);
     if in_class and "__classdict__" not in u.freevars {
         u.freevars.append("__classdict__");
