@@ -1,0 +1,32 @@
+"""Retained CPython object operations for native Jac module implementations.
+
+Handles borrow their arguments. Object-producing operations return a new
+reference (zero on error), released with jacpy_release or returned to Python.
+All calls require the interpreter lock; exceptions remain in CPython's thread
+state. No Python implementation of a replaced module is invoked here.
+"""
+import from c {
+    def jacpy_release(handle: u64);  def jacpy_retain(handle: u64) -> u64;  def jacpy_list_item(
+        handle: u64, index: i64
+    ) -> u64;  def jacpy_list_size(handle: u64) -> i64;  def jacpy_list_append(
+        handle: u64, value: u64
+    ) -> i64;  def jacpy_list_delete(handle: u64, start: i64, end: i64) -> i64;  def jacpy_list_exchange(
+        handle: u64, index: i64, value: u64
+    ) -> u64;  def jacpy_list_swap(handle: u64, left: i64, right: i64);  def jacpy_none -> u64;  def jacpy_int(
+        value: i64
+    ) -> u64;  def jacpy_raise_error(kind: str, message: str, size: i64);  def jacpy_object_size(
+        handle: u64
+    ) -> i64;  def jacpy_sequence_slot(handle: u64) -> u64;  def jacpy_slot_item(
+        slot: u64, handle: u64, index: i64
+    ) -> u64;  def jacpy_call_one(callable: u64, argument: u64) -> u64;  def jacpy_less(
+        left: u64, right: u64
+    ) -> i64;  def jacpy_comparison_slot(handle: u64) -> u64;  def jacpy_same_type(
+        left: u64, right: u64
+    ) -> i64;  def jacpy_slot_less(slot: u64, left: u64, right: u64) -> i64;  def jacpy_insert(
+        handle: u64, index: i64, value: u64
+    ) -> i64;  def jacpy_recursion_enter(context: str) -> i64;  def jacpy_recursion_leave;
+}
+
+def object_error(kind: str, message: str) {
+    jacpy_raise_error(kind, message, i64(len(message.encode("utf-8"))));
+}

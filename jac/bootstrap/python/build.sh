@@ -151,6 +151,9 @@ cpython() {
         cp "$recipe/compiler_bridge.c" Python/jac_compile.c
         cp "$recipe/compiler_bridge.h" Python/jac_compile.h
         cp "$recipe/compiler_runtime.c" Python/jac_runtime.c
+        cp "$recipe/object_api.c" Python/jac_objects.c
+        mkdir -p Modules/jac_modules
+        cp "$recipe/modules/"*.c Modules/jac_modules/
         cp "$work/native/jacpython.o" Python/jacpython.o
     fi
     # The shared interpreter must survive relocation into the Jac payload.
@@ -207,6 +210,13 @@ _curses
 _curses_panel
 readline
 SETUP
+    if [ -n "$host" ]; then
+        cat >> Modules/Setup.local <<'SETUP'
+*static*
+_bisect jac_modules/bisect.c
+_heapq jac_modules/heapq.c
+SETUP
+    fi
     # CPython runs the compiler itself; dependency-oriented -O2 flags above
     # must not override the release interpreter's optimization settings.
     export CFLAGS='-O3 -fPIC -fno-semantic-interposition' LLVM_AR="$AR"

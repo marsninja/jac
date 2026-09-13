@@ -70,6 +70,12 @@ def main -> int {
     );
     parser.add_argument("--module", `default="test.test_compile");
     parser.add_argument(
+        "--native-modules",
+        nargs="+",
+        `default=[],
+        help="Require these statically linked native module replacements"
+    );
+    parser.add_argument(
         "--compile-tests",
         action="store_true",
         help="Compile the test module freshly through native JacPython"
@@ -93,6 +99,13 @@ def main -> int {
         raise RuntimeError(
             "Use a current Jac binary with the native compiler bridge (version 3)"
         );
+    }
+    for name in args.native_modules {
+        replacement = importlib.import_module(name);
+        if name not in sys.builtin_module_names
+            or replacement.__spec__.origin != "built-in" {
+            raise RuntimeError(f"Expected linked native Jac replacement: {name}");
+        }
     }
     for retired in (
         "_jacpython_compile",
@@ -222,7 +235,7 @@ def run_tests(args: any, calls: list[int]) -> int {
         }
 
         def addSuccess(self: Result, test_case: any) {
-            if (calls[0] or self.compiled_test) {
+            if (calls[0] or self.compiled_test or args.native_modules) {
                 super.addSuccess(test_case);
             } else {
                 self.addSkip(test_case, "no direct call to JacPython in this test");

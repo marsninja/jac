@@ -8,8 +8,8 @@
 #
 # Commented source paths record exclusions for the JacPython replacement.
 # Counts use pinned CPython 3.14.6 source lines, including comments and blanks.
-# Excluded: 26 C files / 65,217 lines; 10 headers / 1,076 lines.
-# Total: 36 files / 66,293 source lines excluded from every shipped runtime.
+# Excluded: 28 C files / 66,512 lines; 12 headers / 1,886 lines.
+# Total: 40 files / 68,398 source lines excluded from every shipped runtime.
 # A separate build-only CPython host restores these marked entries to produce
 # the native object. The shipped JacPython runtime includes none of them.
 # Keep build dependencies and ABI adapters aligned with these exclusions.
@@ -305,7 +305,7 @@ Modules/Setup.bootstrap.in
 Modules/Setup.stdlib.in
 Modules/_abc.c
 Modules/_asynciomodule.c
-Modules/_bisectmodule.c
+# Modules/_bisectmodule.c  # removed: 484 source lines
 Modules/_bz2module.c
 Modules/_codecsmodule.c
 Modules/_collectionsmodule.c
@@ -367,7 +367,7 @@ Modules/_hacl/libintvector-shim.h
 Modules/_hacl/libintvector.h
 Modules/_hacl/python_hacl_namespaces.h
 Modules/_hashopenssl.c
-Modules/_heapqmodule.c
+# Modules/_heapqmodule.c  # removed: 811 source lines
 Modules/_interpchannelsmodule.c
 Modules/_interpqueuesmodule.c
 Modules/_interpreters_common.h
@@ -494,7 +494,7 @@ Modules/cjkcodecs/multibytecodec.c
 Modules/cjkcodecs/multibytecodec.h
 Modules/clinic/_abc.c.h
 Modules/clinic/_asynciomodule.c.h
-Modules/clinic/_bisectmodule.c.h
+# Modules/clinic/_bisectmodule.c.h  # removed: 449 source lines
 Modules/clinic/_bz2module.c.h
 Modules/clinic/_codecsmodule.c.h
 Modules/clinic/_collectionsmodule.c.h
@@ -503,7 +503,7 @@ Modules/clinic/_datetimemodule.c.h
 Modules/clinic/_elementtree.c.h
 Modules/clinic/_functoolsmodule.c.h
 Modules/clinic/_hashopenssl.c.h
-Modules/clinic/_heapqmodule.c.h
+# Modules/clinic/_heapqmodule.c.h  # removed: 361 source lines
 Modules/clinic/_localemodule.c.h
 Modules/clinic/_lsprof.c.h
 Modules/clinic/_lzmamodule.c.h

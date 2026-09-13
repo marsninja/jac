@@ -586,6 +586,11 @@ jobs:
       - name: Check JacPython native code-object boundary
         if: matrix.chunk == 'passes-native'
         run: jac run scripts/test_jacpython_native.jac
+      - name: Check native standard-library replacements against CPython
+        if: matrix.chunk == 'passes-native'
+        run: |
+          jac run scripts/run_cpython_compiler_tests.jac --module test.test_bisect --native-modules _bisect
+          jac run scripts/run_cpython_compiler_tests.jac --module test.test_heapq --native-modules _heapq
 
   # Everything except the compiler tests.
   test-runtime:

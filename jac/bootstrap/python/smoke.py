@@ -58,6 +58,20 @@ elif mode == "host":
     assert not hasattr(sys, "_jacpython_image"), "Unexpected embedded seed"
     assert not hasattr(ctypes.pythonapi, "_PyJac_CompilerBridgeVersion")
 if required_compiler is not None:
+    import _bisect
+    import _heapq
+    for replacement in (_bisect, _heapq):
+        assert replacement.__name__ in sys.builtin_module_names
+        assert replacement.__spec__.origin == "built-in"
+    assert ctypes.pythonapi.jacpy_bisect
+    assert ctypes.pythonapi.jacpy_heapify
+    assert _bisect.bisect_right([1, 2, 2, 4], 2) == 3
+    heap = [4, 1, 3, 2]
+    _heapq.heapify(heap)
+    assert [_heapq.heappop(heap) for _ in range(4)] == [1, 2, 3, 4]
+    heap = [1, 4, 2, 3]
+    _heapq.heapify_max(heap)
+    assert [_heapq.heappop_max(heap) for _ in range(4)] == [4, 3, 2, 1]
     assert required_compiler() == 1
     assert ctypes.pythonapi._PyJac_CompilerBridgeVersion() == 3
     for retired in ("_jacpython_compile", "_jacpython_symtable", "_jacpython_tokenize", "_jacpython_image", "_jacpython_code"):
