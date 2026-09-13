@@ -1,8 +1,8 @@
-#include <errno.h>
 /* CPython value/slot operations shared by native Jac standard-library modules.
  * The calling native function holds the GIL. Handles are borrowed on input;
  * object results are new references. Algorithms belong in runtime/python/. */
 #include <Python.h>
+#include <errno.h>
 #include <stdint.h>
 
 #define OBJECT(h) ((PyObject *)(uintptr_t)(h))

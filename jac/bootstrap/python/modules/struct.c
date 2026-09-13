@@ -202,9 +202,9 @@ static PyObject *struct_iter_unpack(PyObject *object, PyObject *args, PyObject *
 }
 static PyMethodDef struct_methods[] = {
     {"pack", struct_pack, METH_VARARGS, "Pack values."}, {"pack_into", struct_pack_into, METH_VARARGS, "Pack into a writable buffer."},
-    {"unpack", (PyCFunction)struct_unpack, METH_VARARGS | METH_KEYWORDS, "Unpack a buffer."},
-    {"unpack_from", (PyCFunction)struct_unpack_from, METH_VARARGS | METH_KEYWORDS, "Unpack from a buffer offset."},
-    {"iter_unpack", (PyCFunction)struct_iter_unpack, METH_VARARGS | METH_KEYWORDS, "Iterate over packed records."},
+    {"unpack", (PyCFunction)(void(*)(void))struct_unpack, METH_VARARGS | METH_KEYWORDS, "Unpack a buffer."},
+    {"unpack_from", (PyCFunction)(void(*)(void))struct_unpack_from, METH_VARARGS | METH_KEYWORDS, "Unpack from a buffer offset."},
+    {"iter_unpack", (PyCFunction)(void(*)(void))struct_iter_unpack, METH_VARARGS | METH_KEYWORDS, "Iterate over packed records."},
     {"__sizeof__", struct_sizeof, METH_NOARGS, "Memory consumed by this format."}, {NULL}
 };
 static PyGetSetDef struct_getsets[] = {{"format", struct_format, NULL, "Format string", NULL}, {"size", struct_size, NULL, "Record size", NULL}, {NULL}};
@@ -251,7 +251,7 @@ static PyObject *module_clearcache(PyObject *module, PyObject *unused) { PyDict_
 static PyMethodDef module_methods[] = {
     {"calcsize", module_calcsize, METH_O, "Calculate record size."}, {"_clearcache", module_clearcache, METH_NOARGS, "Clear cached formats."},
     {"pack", module_pack, METH_VARARGS, "Pack values."}, {"pack_into", module_pack_into, METH_VARARGS, "Pack into a buffer."},
-    {"unpack", module_unpack, METH_VARARGS, "Unpack a buffer."}, {"unpack_from", (PyCFunction)module_unpack_from, METH_VARARGS | METH_KEYWORDS, "Unpack from an offset."},
+    {"unpack", module_unpack, METH_VARARGS, "Unpack a buffer."}, {"unpack_from", (PyCFunction)(void(*)(void))module_unpack_from, METH_VARARGS | METH_KEYWORDS, "Unpack from an offset."},
     {"iter_unpack", module_iter_unpack, METH_VARARGS, "Iterate packed records."}, {NULL}
 };
 static int module_traverse(PyObject *module, visitproc visit, void *arg) {

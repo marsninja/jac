@@ -37,7 +37,7 @@ static PyMethodDef methods[] = {
     METHOD(tan), METHOD(tanh), METHOD(log10), METHOD(phase), METHOD(polar), METHOD(isfinite), METHOD(isinf), METHOD(isnan),
     {"log", cmath_log, METH_VARARGS, "log($module, z, base=None, /)\n--\n\nComplex logarithm."},
     {"rect", cmath_rect, METH_VARARGS, "rect($module, r, phi, /)\n--\n\nConvert polar to rectangular coordinates."},
-    {"isclose", (PyCFunction)cmath_isclose, METH_VARARGS | METH_KEYWORDS, "isclose($module, /, a, b, *, rel_tol=1e-09, abs_tol=0.0)\n--\n\nCompare complex values with tolerances."}, {NULL}
+    {"isclose", (PyCFunction)(void(*)(void))cmath_isclose, METH_VARARGS | METH_KEYWORDS, "isclose($module, /, a, b, *, rel_tol=1e-09, abs_tol=0.0)\n--\n\nCompare complex values with tolerances."}, {NULL}
 };
 static int add_owned(PyObject *module, const char *name, PyObject *value) {
     if (!value) return -1;
