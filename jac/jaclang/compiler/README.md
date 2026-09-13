@@ -108,6 +108,10 @@ for symbol-only selfhost dependencies covered by the compiler fingerprint.
 Their types remain available on demand; packaging requests the interface
 product explicitly through the same registry. Other bundled libraries keep
 their dependency interfaces because their sources are outside that fingerprint.
+Interface preparation, replay, and persistence share one source eligibility
+rule. Typed Python packages and type stubs remain content-fingerprinted
+dependencies; explicitly requesting an interface does not force their lazy
+imports into a recursively encoded package closure.
 Loading a dependency-validated interface also seeds the registry's encoding
 memo. A consumer that needs the source tree can still run its requested
 passes without re-encoding that unchanged interface and its dependency closure.

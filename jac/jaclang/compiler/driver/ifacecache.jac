@@ -79,6 +79,10 @@ def iface_verify_enabled -> bool {
     return os.environ.get('JAC_IFACE_VERIFY', '') in truthy;
 }
 
+def _interface_source_path(path: str) -> bool {
+    return jir_cacheable_source_path(path) and not is_stub_like_path(path);
+}
+
 def _symtab_provides -> set[AnalysisFact] {
     if not _SYMTAB_PROVIDES_MEMO {
         import from jaclang.compiler.driver.pipeline {
@@ -509,6 +513,9 @@ obj IfaceRegistry {
         path: str, compile_on_miss: bool = True
     ) -> (IfaceEntry | None) {
         resolved = os.path.realpath(path);
+        if not _interface_source_path(resolved) {
+            return None;
+        }
         ent = self.entries.get(resolved);
         if ent is not None and self._entry_fresh(ent) {
             return ent;
@@ -531,11 +538,7 @@ obj IfaceRegistry {
                 return found;
             }
         }
-        if (
-            not compile_on_miss
-            or not jir_cacheable_source_path(resolved)
-            or is_stub_like_path(resolved)
-        ) {
+        if not compile_on_miss {
             return None;
         }
         if not os.path.isfile(resolved) {
@@ -689,7 +692,7 @@ obj IfaceRegistry {
             or bool(options.default_codespace) {
             return False;
         }
-        if not jir_cacheable_source_path(resolved) or is_stub_like_path(resolved) {
+        if not _interface_source_path(resolved) {
             return False;
         }
         if compiler.stub_catalog_disabled {
@@ -903,7 +906,7 @@ obj IfaceRegistry {
     def _prepare_interface_in_context(resolved: str, mod: any) -> bool {
         if mod.parse_failed
             or mod.codespace_inferred
-            or not jir_cacheable_source_path(resolved)
+            or not _interface_source_path(resolved)
             or not os.path.isfile(resolved) {
             return False;
         }
@@ -934,7 +937,10 @@ obj IfaceRegistry {
     ) -> None {
         import json;
 
-        if mod is None or mod.parse_failed or resolved in self._incoherent {
+        if mod is None
+            or mod.parse_failed
+            or not _interface_source_path(resolved)
+            or resolved in self._incoherent {
             return;
         }
         codec = iface_codec();
