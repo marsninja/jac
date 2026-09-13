@@ -51,7 +51,9 @@ from jaclang.compiler.backends.native.na_compile_pass import (
     native_linked_ir_text, native_demoted_ir_symbols,
 )
 from jaclang.compiler.backends.native.lowering import native_lowering_issues
-from jaclang.compiler.backends.native.shared_emit import init_object_codegen, inject_shared_init
+from jaclang.compiler.backends.native.shared_emit import (
+    init_object_codegen, inject_shared_init, internalize_native_implementation,
+)
 import jaclang.compiler.backends.native.llvm.binding as llvm
 
 program = JacProgram()
@@ -71,9 +73,12 @@ issues = native_demoted_ir_symbols(ir_text)
 issues.extend(issue.symbol for issue in native_lowering_issues(ir_text))
 if issues:
     raise RuntimeError("JacPython may not demote to Python: " + ", ".join(sorted(set(issues))))
-ir_text, _ = inject_shared_init(ir_text, module.gen.interop_manifest)
+ir_text, runtime_exports = inject_shared_init(ir_text, module.gen.interop_manifest)
 init_object_codegen()
 compiled = llvm.parse_assembly(ir_text)
+internalize_native_implementation(
+    compiled, list(module.gen._exported_symbols) + runtime_exports + ["__jac_shared_init"],
+)
 compiled.verify()
 machine = llvm.Target.from_triple(triple).create_target_machine(
     opt=2, reloc="pic", codemodel="small",

@@ -37,7 +37,8 @@ import from jaclang.compiler.backends.native.linker_common {
 # tests on the production code path -- a prior divergence here let a quoted-
 # symbol glob-init bug in _inject_shared_init slip past this whole file.
 import from jaclang.compiler.backends.native.shared_emit {
-    inject_shared_init as _inject_shared_init
+    inject_shared_init as _inject_shared_init,
+    internalize_native_implementation
 }
 import jaclang.compiler.backends.native.llvm.binding as llvm;
 
@@ -72,6 +73,7 @@ def emit_shared_object(fixture: str, triple: str) -> tuple {
         llvm.initialize_all_targets();
         llvm.initialize_all_asmprinters();
         mod = llvm.parse_assembly(src);
+        internalize_native_implementation(mod, exports + ["__jac_shared_init"]);
         mod.verify();
         tm = llvm.Target.from_triple(triple).create_target_machine(
             opt=2, reloc="pic", codemodel="small"
@@ -710,4 +712,57 @@ test "jac build --native --lib resolves a CPython C-API import from the host pro
     } finally {
         shutil.rmtree(d, ignore_errors=True);
     }
+}
+
+
+test "private native helpers cannot satisfy another library's C symbols" {
+    import ctypes;
+    llvm.initialize_all_targets();
+    llvm.initialize_all_asmprinters();
+    native = llvm.parse_assembly(
+        """
+        @state = global i64 41
+        @public_state = global i64 9
+        declare i64 @foreign_operation(i64)
+        define hidden i32 @linker_support() { ret i32 0 }
+        define i64 @crc32() {
+            %value = load i64, ptr @state
+            %result = add i64 %value, 1
+            ret i64 %result
+        }
+        define i64 @native_probe() {
+            %result = call i64 @crc32()
+            ret i64 %result
+        }
+    """
+    );
+    internalize_native_implementation(native, ["native_probe", "public_state"]);
+    # Linking this second module used to collide with the implementation's
+    # global state and crc32. Dynamic linking could silently bind the wrong ABI.
+    library = llvm.parse_assembly(
+        """
+        @state = global i64 777
+        define i64 @crc32() {
+            %result = load i64, ptr @state
+            ret i64 %result
+        }
+        define i64 @library_probe() {
+            %result = call i64 @crc32()
+            ret i64 %result
+        }
+    """
+    );
+    native.link_in(library);
+    native.verify();
+    assert any(value.name == "foreign_operation" and value.is_declaration
+               for value in native.functions);
+    target = llvm.Target.from_default_triple().create_target_machine();
+    engine = llvm.create_mcjit_compiler(native, target);
+    engine.finalize_object();
+    call = ctypes.CFUNCTYPE(ctypes.c_int64);
+    assert call(engine.get_function_address("native_probe"))() == 42;
+    assert call(engine.get_function_address("library_probe"))() == 777;
+    assert engine.get_global_value_address("public_state") != 0;
+    assert engine.get_function_address("linker_support") != 0;
+    engine.close();
 }

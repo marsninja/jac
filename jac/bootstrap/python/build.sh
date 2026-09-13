@@ -303,7 +303,7 @@ else
     cp -R "$deps/include" "$work/python/build/include"
     cp "$src/certifi/certifi/cacert.pem" "$work/python/build/cacert.pem"
 fi
-step smoke "$prefix/bin/python3.14" -I "$recipe/smoke.py" "$mode"
+step smoke env PYTHONFAULTHANDLER=1 "$prefix/bin/python3.14" -X faulthandler -I "$recipe/smoke.py" "$mode"
 # No compiled test modules, docs, or configuration machinery in the runtime.
 rm -rf "$prefix/share" "$prefix/lib/python3.14/test" \
     "$prefix/lib/python3.14/idlelib" "$prefix/lib/python3.14/tkinter" \

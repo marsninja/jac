@@ -1,3 +1,30 @@
+import type from jaclang.compiler.backends.native.llvm.binding { ModuleRef }
+
+
+"""Limit a completed native artifact to its declared C ABI.
+
+Dependencies have already been linked into this module. Their Jac-visible
+helpers must not resolve unrelated C archive references or interpose on a
+dynamically loaded library. Explicitly hidden linker-support definitions
+(such as the atexit shim) remain linkable within the final artifact.
+"""
+def internalize_native_implementation(module: ModuleRef, exports: list[str]) {
+    import from jaclang.compiler.backends.native.llvm.binding.value { Visibility }
+    public = set(exports);
+    for value in list(module.functions) + list(module.global_variables) {
+        if value.is_declaration
+            or value.name in public
+            or value.name.startswith("llvm.") {
+            continue;
+        }
+        if value.visibility == Visibility.hidden {
+            continue;
+        }
+        value.linkage = "internal";
+    }
+}
+
+
 def inject_shared_init(llvm_ir_str: str, manifest: any) -> tuple[str, list[str]] {
     init_calls: list[str] = [];
     transitive_sources: list[str] = [];
@@ -272,6 +299,7 @@ def emit_shared_library(
 
     try {
         mod = llvm.parse_assembly(ir_str);
+        internalize_native_implementation(mod, exports);
         mod.verify();
     } except Exception as e {
         return (False, f"LLVM IR verification failed: {e}");

@@ -112,6 +112,8 @@ if required_compiler is not None:
     assert ctypes.pythonapi.jacpy_binascii_convert
     assert binascii.a2b_base64(binascii.b2a_base64(b"native codec")) == b"native codec"
     assert binascii.crc32(b"123456789") == 0xcbf43926
+    # Private Jac helpers must not interpose on zlib's distinct C ABI.
+    assert zlib.crc32(sample) == binascii.crc32(sample)
     buffer = bytearray(b"data")
     class ResizeDuringArgumentConversion:
         def __bool__(self):
