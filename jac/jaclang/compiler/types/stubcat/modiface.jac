@@ -1,5 +1,4 @@
 import hashlib;
-import from collections.abc { Callable }
 import from jaclang.compiler.frontend.unitree { Module }
 import from jaclang.compiler.types.stubcat.reader { StubCatalog }
 import from jaclang.compiler.types.stubcat.writer { CatalogWriter }

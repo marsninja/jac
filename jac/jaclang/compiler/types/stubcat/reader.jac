@@ -3,7 +3,6 @@ import os;
 import json;
 import struct;
 import from pathlib { Path }
-import from collections.abc { Callable }
 import from jaclang.compiler.frontend.unitree {
     Ability,
     HasVar,

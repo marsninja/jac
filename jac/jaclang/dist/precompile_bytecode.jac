@@ -8,7 +8,6 @@ import sys;
 import time;
 import zlib;
 import from contextlib { contextmanager }
-import from collections.abc { Iterator }
 
 import from pathlib { Path }
 import from jaclang.cli.console { console }
