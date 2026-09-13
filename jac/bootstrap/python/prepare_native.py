@@ -38,6 +38,8 @@ for relative in (
     "runtime/python",
 ):
     for source in sorted((root / "jaclang" / relative).rglob("*.jac")):
+        if not source.is_file() or ".jac" in source.relative_to(root / "jaclang").parts:
+            continue  # Local compiler caches are not compilation inputs.
         destination = stage / namespace / source.relative_to(root / "jaclang")
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(source.read_text().replace("jaclang.", namespace + "."))
