@@ -337,3 +337,20 @@ int64_t jacpy_list_sort(uint64_t value) { return PyList_Sort(OBJECT(value)); }
 int64_t jacpy_dict_remove(uint64_t dictionary, uint64_t key) { return PyDict_DelItem(OBJECT(dictionary), OBJECT(key)); }
 uint64_t jacpy_unicode_concat(uint64_t left, uint64_t right) { return HANDLE(PyUnicode_Concat(OBJECT(left), OBJECT(right))); }
 uint64_t jacpy_sequence_repeat(uint64_t value, int64_t count) { return HANDLE(PySequence_Repeat(OBJECT(value), count)); }
+
+/* Protocol primitives shared by native streaming and container modules. */
+int64_t jacpy_is_exact_long(uint64_t value) { return PyLong_CheckExact(OBJECT(value)); }
+int64_t jacpy_type_check(uint64_t value, uint64_t type) { return PyObject_TypeCheck(OBJECT(value), (PyTypeObject *)OBJECT(type)); }
+int64_t jacpy_long_as_int32(uint64_t value) { return PyLong_AsInt(OBJECT(value)); }
+uint64_t jacpy_getattr_string(uint64_t value, const char *name) { return HANDLE(PyObject_GetAttrString(OBJECT(value), name)); }
+uint64_t jacpy_dict_get(uint64_t dictionary, uint64_t key) {
+    PyObject *value;
+    return PyDict_GetItemRef(OBJECT(dictionary), OBJECT(key), &value) < 0 ? 0 : HANDLE(value);
+}
+uint64_t jacpy_dict_keys(uint64_t dictionary) { return HANDLE(PyDict_Keys(OBJECT(dictionary))); }
+int64_t jacpy_dict_pop_discard(uint64_t dictionary, uint64_t key) { return PyDict_Pop(OBJECT(dictionary), OBJECT(key), NULL); }
+uint64_t jacpy_iter(uint64_t value) { return HANDLE(PyObject_GetIter(OBJECT(value))); }
+uint64_t jacpy_iter_next(uint64_t value) { return HANDLE(PyIter_Next(OBJECT(value))); }
+uint64_t jacpy_number_float(uint64_t value) { return HANDLE(PyNumber_Float(OBJECT(value))); }
+int64_t jacpy_number_check(uint64_t value) { return PyNumber_Check(OBJECT(value)); }
+uint64_t jacpy_object_str(uint64_t value) { return HANDLE(PyObject_Str(OBJECT(value))); }

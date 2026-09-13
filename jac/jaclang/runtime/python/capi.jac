@@ -142,7 +142,19 @@ import from c {
         dictionary: u64, key: u64
     ) -> i64;  def jacpy_unicode_concat(left: u64, right: u64) -> u64;  def jacpy_sequence_repeat(
         value: u64, count: i64
-    ) -> u64;
+    ) -> u64;  def jacpy_is_exact_long(value: u64) -> i64;  def jacpy_type_check(
+        value: u64, type: u64
+    ) -> i64;  def jacpy_long_as_int32(value: u64) -> i64;  def jacpy_getattr_string(
+        value: u64, name: str
+    ) -> u64;  def jacpy_dict_get(dictionary: u64, key: u64) -> u64;  def jacpy_dict_keys(
+        dictionary: u64
+    ) -> u64;  def jacpy_dict_pop_discard(dictionary: u64, key: u64) -> i64;  def jacpy_iter(
+        value: u64
+    ) -> u64;  def jacpy_iter_next(value: u64) -> u64;  def jacpy_number_float(
+        value: u64
+    ) -> u64;  def jacpy_number_check(value: u64) -> i64;  def jacpy_object_str(
+        value: u64
+    ) -> u64;  def jacpy_error_is(name: str) -> i64;
 }
 
 def object_error(kind: str, message: str) {

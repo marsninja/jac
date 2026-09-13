@@ -65,9 +65,28 @@ if required_compiler is not None:
     import _operator
     import _queue
     import _json
-    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json):
+    import _csv
+    for replacement in (_bisect, _heapq, _random, binascii, _operator, _queue, _json, _csv):
         assert replacement.__name__ in sys.builtin_module_names
         assert replacement.__spec__.origin == "built-in"
+    assert ctypes.pythonapi.jacpy_csv_read
+    assert ctypes.pythonapi.jacpy_csv_write
+    from io import StringIO
+    csv_output = StringIO(newline="")
+    csv_writer = _csv.writer(csv_output, quoting=_csv.QUOTE_STRINGS)
+    csv_writer.writerow([None, "", 1.25, "comma,quote\"\nnext"])
+    csv_reader = _csv.reader(StringIO(csv_output.getvalue(), newline=""), quoting=_csv.QUOTE_STRINGS)
+    assert next(csv_reader) == [None, "", 1.25, "comma,quote\"\nnext"]
+    assert csv_reader.line_num == 2
+    previous_limit = _csv.field_size_limit(2)
+    try:
+        next(_csv.reader(["abc"]))
+    except _csv.Error as error:
+        assert "field limit (2)" in str(error)
+    else:
+        raise AssertionError("Native CSV ignored its field limit")
+    finally:
+        _csv.field_size_limit(previous_limit)
     assert ctypes.pythonapi.jacpy_json_encode
     assert ctypes.pythonapi.jacpy_json_scan
     import json

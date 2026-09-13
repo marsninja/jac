@@ -14,7 +14,8 @@ const inputs = [_][]const u8{
     "bootstrap/python/modules/heapq.c",    "bootstrap/python/modules/random.c",
     "bootstrap/python/modules/queue.c",    "bootstrap/python/modules/operator.c",
     "bootstrap/python/modules/binascii.c", "bootstrap/python/compiler_bridge.h",
-    "bootstrap/python/prepare_native.py",  "bootstrap/python/modules/json.c",
+    "bootstrap/python/modules/csv.c",      "bootstrap/python/prepare_native.py",
+    "bootstrap/python/modules/json.c",
 };
 const Source = struct { url: []const u8, sha256: []const u8, version: ?[]const u8 = null };
 const Mode = enum { host, jacpython };
