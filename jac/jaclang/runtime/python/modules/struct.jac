@@ -3,6 +3,7 @@
 The format plan owns typed Jac fields; Python values and exported buffers stay
 at the shared object boundary. Derived from CPython 3.14.6; see ../LICENSE.cpython.
 """
+import from jaclang.runtime.python.modules.binary_scalars { read_bits, write_bits, integer_from_bits }
 import from jaclang.runtime.python.capi {
     boundary_failure,
     required,
@@ -376,10 +377,7 @@ def:priv pack_field(
         return;
     }
     bits = integer_bits(value, code, size, error);
-    for i in range(size) {
-        shift = (i if plan.little else size - 1 - i) * 8;
-        jacpy_memory_set(address, i64(i), i64((bits >> i64(shift)) & u64(255)));
-    }
+    write_bits(address, size, plan.little, bits);
 }
 
 def:pub jacpy_struct_pack(
@@ -444,21 +442,7 @@ def:priv unpack_field(plan: struct_plan, field: format_field, address: u64) -> u
         pending();
         return required(jacpy_complex(real, imaginary));
     }
-    bits: u64 = 0;
-    for i in range(size) {
-        shift = (i if plan.little else size - 1 - i) * 8;
-        bits |= u64(jacpy_memory_byte(address, i64(i))) << i64(shift);
-    }
-    if chr(code) in "bhilqn" {
-        if size < 8 and bits & (u64(1) << i64(size * 8 - 1)) != 0 {
-            bits |= wrapping_shl(~u64(0), u64(size * 8));
-        }
-        signed_value = -i64(~bits) - i64(1)
-            if bits > u64(9223372036854775807)
-            else i64(bits);
-        return required(jacpy_int(signed_value));
-    }
-    return required(jacpy_uint(bits));
+    return integer_from_bits(read_bits(address, size, plan.little), size, chr(code) in "bhilqn");
 }
 
 def:pub jacpy_struct_unpack(plan: struct_plan, address: u64) -> u64 {
