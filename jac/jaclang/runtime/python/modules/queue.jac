@@ -20,28 +20,19 @@ import from jaclang.runtime.python.capi {
     object_error
 }
 
+import from jaclang.runtime.python.modules.object_ring { object_ring }
+
 obj queue_state {
     has lock: u64,
-        slots: list[u64] = [u64(0) for _ in range(8)],
-        head: int = 0,
-        count: int = 0,
+        items: object_ring = object_ring(),
         waiters: int = 0,
         notification: bool = False;
 
     def notify {
-        if self.waiters > 0 and self.count > 0 and not self.notification {
+        if self.waiters > 0 and self.items.count > 0 and not self.notification {
             self.notification = True;
             jacpy_lock_notify(self.lock);
         }
-    }
-
-    def resize(capacity: int) {
-        slots = [u64(0) for _ in range(capacity)];
-        for i in range(self.count) {
-            slots[i] = self.slots[(self.head + i) % len(self.slots)];
-        }
-        self.slots = slots;
-        self.head = 0;
     }
 }
 
@@ -50,33 +41,25 @@ def:pub jacpy_queue_new(lock: u64) -> queue_state {
 }
 
 def:pub jacpy_queue_clear(state: queue_state) {
-    slots = state.slots;
-    head = state.head;
-    count = state.count;
+    items = state.items;
     # Publish an empty queue before releasing values whose finalizers may put().
-    state.slots = [u64(0) for _ in range(8)];
-    state.head = 0;
-    state.count = 0;
-    for i in range(count) {
-        jacpy_release(slots[(head + i) % len(slots)]);
+    state.items = object_ring();
+    while items.count > 0 {
+        jacpy_release(items.pop(True));
     }
 }
 
 def:pub jacpy_queue_size(state: queue_state) -> i64 {
-    return i64(state.count);
+    return i64(state.items.count);
 }
 
 # Borrowed references: the CPython GC visitor never calls Python or releases GIL.
 def:pub jacpy_queue_borrow(state: queue_state, index: i64) -> u64 {
-    return state.slots[(state.head + int(index)) % len(state.slots)];
+    return state.items.borrow(int(index));
 }
 
 def:pub jacpy_queue_put(state: queue_state, value: u64) {
-    if state.count == len(state.slots) {
-        state.resize(len(state.slots) * 2);
-    }
-    state.slots[(state.head + state.count) % len(state.slots)] = jacpy_retain(value);
-    state.count += 1;
+    state.items.push(jacpy_retain(value));
     state.notify();
 }
 
@@ -96,14 +79,8 @@ def:pub jacpy_queue_get(
         deadline = jacpy_deadline(nanoseconds);
     }
     while True {
-        if state.count > 0 {
-            value = state.slots[state.head];
-            state.slots[state.head] = u64(0);
-            state.head = (state.head + 1) % len(state.slots);
-            state.count -= 1;
-            if len(state.slots) > 8 and state.count < len(state.slots) // 4 {
-                state.resize(len(state.slots) // 2);
-            }
+        if state.items.count > 0 {
+            value = state.items.pop(True);
             state.notify();
             return value;
         }
