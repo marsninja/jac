@@ -43,7 +43,8 @@ def application_edges(
             if man is None {
                 continue;
             }
-            if not man.app_edges and not (man.walker_access or man.func_access) {
+            if not man.app_edges
+                and not (man.surface or man.walker_access or man.func_access) {
                 try {
                     require_product(prog, mod, CompilationProduct.BOUNDARIES);
                     man = mod.gen.interop_manifest;

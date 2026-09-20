@@ -37,7 +37,13 @@ test "sealing retains each colocated service's access metadata" {
             assert modules['main.jac']['app'] == 'web';
             assert modules['scoring.jac']['app'] == 'scoring';
             assert modules['scoring.jac']['walker_access']['Score'] is False;
-            assert modules['scoring.jac']['func_access']['private_score'] is True;
+            assert 'private_score' not in modules['scoring.jac']['func_access'] , (
+                "a plain def is private: it is not an endpoint"
+            );
+            assert modules['scoring.jac']['surface']['Score']['exposure'] == 'public';
+            assert 'private_score' not in modules['scoring.jac']['surface'] , (
+                "the served surface lists only exposed declarations"
+            );
         } finally {
             forget(str(path));
         }
@@ -182,7 +188,9 @@ test "source changes invalidate a prepared revision and replace its access metad
         prepare_application(str(path), JacProgram(), tmp);
         path.write_text("def hello -> str { return 'changed'; }\n");
         updated = prepare_application(str(path), JacProgram(), tmp);
-        assert updated.manifests[str(path)]['func_access']['hello'] is True;
+        assert 'hello' not in updated.manifests[str(path)]['func_access'] , (
+            "dropping :pub makes hello private, so it leaves the endpoint table"
+        );
         assert prepared_manifest(str(path)) == updated.manifests[str(path)];
     } finally {
         forget(str(Path(tmp) / 'main.jac'));

@@ -133,7 +133,10 @@ def _manifest(program: any, path: any, `root: any, mod: any = None) -> dict[str,
     import from jaclang.compiler.driver.pipeline { require_product, CompilationProduct }
     for source in sources {
         manifest = source.gen.interop_manifest;
-        if (manifest and not (manifest.func_access or manifest.walker_access)) {
+        if (
+            manifest
+            and not (manifest.surface or manifest.func_access or manifest.walker_access)
+        ) {
             require_product(program, source, CompilationProduct.BOUNDARIES);
             manifest = source.gen.interop_manifest;
         }
@@ -143,6 +146,44 @@ def _manifest(program: any, path: any, `root: any, mod: any = None) -> dict[str,
             }
             for (name, access) in manifest.walker_access.items() {
                 walkers.setdefault(name, access);
+            }
+        }
+    }
+    import from jaclang.compiler.frontend.codeinfo {
+        entry_is_served,
+        entry_requires_auth
+    }
+    surface: dict[str, dict[str, any]] = {};
+    own_app = mod.app or '';
+    ordered = list(sources)
+        + [
+            m
+            for m in _project_modules(program, `root).values()
+            if m not in sources
+        ];
+    for source in ordered {
+        manifest = source.gen.interop_manifest;
+        if not (manifest and manifest.surface) {
+            continue;
+        }
+        if (source.app or '') != own_app {
+            continue;
+        }
+        src_path = source.loc.mod_path if source.loc else '';
+        if not src_path {
+            continue;
+        }
+        rel = os.path.relpath(os.path.realpath(src_path), `root).replace(os.sep, '/');
+        for (name, rec) in manifest.surface.items() {
+            if name in surface or not entry_is_served(rec) {
+                continue;
+            }
+            surface[name] = {** rec, 'src': rel};
+            auth = entry_requires_auth(rec);
+            if rec.get('kind') == 'walker' {
+                walkers.setdefault(name, auth);
+            } else {
+                funcs.setdefault(name, auth);
             }
         }
     }
@@ -190,6 +231,7 @@ def _manifest(program: any, path: any, `root: any, mod: any = None) -> dict[str,
             else {},
         func_access=funcs,
         walker_access=walkers,
+        surface=surface,
         endpoint_effects=effects,
         cross_bindings=cross
     );
@@ -256,6 +298,13 @@ def _prepare_sealed(
         os.path.realpath(os.path.join(image_root, binding['src']))
         for binding in manifest.get('cross_bindings', [])
     );
+    for metadata in list(manifest['module_manifests'].values()) + [manifest] {
+        for rec in (metadata.get('surface') or {}).values() {
+            if rec.get('src') {
+                pending.add(os.path.realpath(os.path.join(image_root, rec['src'])));
+            }
+        }
+    }
     for path in list(pending) {
         parent = Path(path).parent;
         while parent.is_relative_to(image_root) {
@@ -553,6 +602,11 @@ def _prepare(
     for manifest in revision.manifests.values() {
         for binding in manifest['cross_bindings'] {
             pending.add(os.path.realpath(os.path.join(`root, binding['src'])));
+        }
+        for rec in (manifest.get('surface') or {}).values() {
+            if rec.get('src') {
+                pending.add(os.path.realpath(os.path.join(`root, rec['src'])));
+            }
         }
     }
     while pending {

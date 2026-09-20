@@ -199,11 +199,7 @@ impl BoundaryAnalysisPass.enter_import with Import entry {
                 self._register_sv_import(here, sv_module_name, InteropContext.SERVER);
             }
             if here.items and not is_sv {
-                if (facts and facts.pinned_server) {
-                    self._register_sv_import(
-                        here, from_loc.base_module_name, InteropContext.CLIENT
-                    );
-                } elif (facts and facts.client_native_edge) {
+                if (facts and facts.client_native_edge) {
                     self._register_na_client_import(here);
                 } else {
                     self._register_client_bridged_import(here);
@@ -317,6 +313,7 @@ impl BoundaryAnalysisPass._register_sv_import(
             }
         }
         if walker_node is not None {
+            self._check_provider_pub(nd, item);
             walker_mod = walker_node.find_parent_of_type(Module);
             self._collect_boundary_type(walker_node.sym_name, walker_mod);
             (param_names, param_types) = self._extract_walker_has_fields(walker_node);
@@ -690,10 +687,6 @@ impl BoundaryAnalysisPass._check_provider_pub(nd: Import, item: ModuleItem) -> N
         module_app,
         import_provider_app
     }
-    import from jaclang.compiler.symbol_utils {
-        decl_has_access,
-        import_target_pinned_server
-    }
     import from jaclang.compiler.frontend.diagnostics { E5106 }
     provider_mod = self._provider_module_of(nd);
     if provider_mod is None {
@@ -707,9 +700,6 @@ impl BoundaryAnalysisPass._check_provider_pub(nd: Import, item: ModuleItem) -> N
         }
     }
     if verdict != ClientImportVerdict.DEAD {
-        return;
-    }
-    if import_target_pinned_server(nd) and decl_has_access(provider_mod, item) {
         return;
     }
     consumer = module_app(self.module) or self.module.name;
@@ -1501,16 +1491,21 @@ impl BoundaryAnalysisPass._record_access_levels(manifest: any) -> None {
     if not (self.module and self.module.body) {
         return;
     }
-    for item in self.module.body {
-        if isinstance(item, Ability) and item?.sym_name {
-            is_pub = item.access is not None and item.access.tag.name == Tok.KW_PUB;
-            manifest.func_access[item.sym_name] = not is_pub;
-        } elif isinstance(item, Archetype) and item?.sym_name {
-            is_walker = bool(item?.arch_type) and item.arch_type?.name == Tok.KW_WALKER;
-            if is_walker {
-                is_pub = item.access is not None and item.access.tag.name == Tok.KW_PUB;
-                manifest.walker_access[item.sym_name] = not is_pub;
-            }
+    import from jaclang.compiler.frontend.codeinfo {
+        declared_surface,
+        entry_is_exposed,
+        entry_requires_auth
+    }
+    for (name, spec) in declared_surface(self.module).items() {
+        record = spec.to_dict();
+        manifest.surface[name] = record;
+        if not entry_is_exposed(record) {
+            continue;
+        }
+        if spec.kind == "walker" {
+            manifest.walker_access[name] = entry_requires_auth(record);
+        } else {
+            manifest.func_access[name] = entry_requires_auth(record);
         }
     }
 }

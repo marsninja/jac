@@ -2,9 +2,11 @@ import hashlib;
 import from collections.abc { Sequence }
 import from contextvars { ContextVar }
 import from jaclang.compiler.frontend.constant {
+    CodeContext,
     NATIVE_ERASED_ANNOTATIONS,
     NATIVE_ERASED_TYPE_MARKERS,
-    TYPE_PARAM_CONSTRUCTORS
+    TYPE_PARAM_CONSTRUCTORS,
+    Tokens as Tok
 }
 import from jaclang.compiler.frontend.srcloc { CodeLocInfo }
 import type from jaclang.compiler.backends.es.estree { IndexInfo, SliceInfo }
@@ -755,6 +757,7 @@ obj InteropManifest {
         endpoint_effects: dict[(str, dict[str, any])] = {},
         func_access: dict[(str, bool)] = {},
         walker_access: dict[(str, bool)] = {},
+        surface: dict[(str, dict[(str, str)])] = {},
         app_edges: list[tuple[(str, str)]] = [],
         provider_routes: dict[(str, str)] = {},
         native_module_imports: dict[(str, NativeModuleInfo)] = {},
@@ -836,4 +839,119 @@ def endpoint_key(module: any, kind: str, name: str) -> str {
     return "["
         + ",".join([json.dumps(part) for part in [d["app"], d["module"], kind, name]])
         + "]";
+}
+
+enum Exposure: str { PRIVATE = "private", PROTECTED = "protected", PUBLIC = "public" }
+
+obj SurfaceEntry {
+    has name: str,
+        kind: str,
+        exposure: str = "private",
+        placement: str = "server",
+        module: str = "";
+
+    def to_dict -> dict[str, str] {
+        return {
+            "kind": self.kind,
+            "exposure": self.exposure,
+            "placement": self.placement,
+            "module": self.module
+        };
+    }
+}
+
+def exposure_of(decl: any) -> Exposure {
+    access = decl?.access if decl is not None else None;
+    if access is None {
+        return Exposure.PRIVATE;
+    }
+    tag = getattr(access?.tag, 'name', '');
+    if tag == Tok.KW_PUB {
+        return Exposure.PUBLIC;
+    }
+    if tag == Tok.KW_PROT {
+        return Exposure.PROTECTED;
+    }
+    return Exposure.PRIVATE;
+}
+
+def is_exposed(decl: any) -> bool {
+    return exposure_of(decl) != Exposure.PRIVATE;
+}
+
+def bridge_requires_auth(decl: any) -> bool {
+    return exposure_of(decl) == Exposure.PROTECTED;
+}
+
+def is_walker_decl(decl: any) -> bool {
+    arch_type = decl?.arch_type;
+    return arch_type is not None and getattr(arch_type, 'name', '') == Tok.KW_WALKER;
+}
+
+def surface_kind(decl: any) -> str {
+    if decl is None {
+        return "";
+    }
+    if type(decl).__name__ == 'Ability' {
+        return "" if getattr(decl, 'is_method', False) else "function";
+    }
+    if is_walker_decl(decl) {
+        return "walker";
+    }
+    return "";
+}
+
+def placement_of(decl: any) -> str {
+    if getattr(decl, 'codespace_dual', False) {
+        return "dual";
+    }
+    ctx = decl?.code_context;
+    if ctx == CodeContext.CLIENT {
+        return "client";
+    }
+    if ctx == CodeContext.NATIVE {
+        return "native";
+    }
+    return "server";
+}
+
+def surface_entry_of(decl: any, module: any = None) -> (SurfaceEntry | None) {
+    kind = surface_kind(decl);
+    name = getattr(decl, 'sym_name', '') or '';
+    if not kind or not name {
+        return None;
+    }
+    loc = module?.loc if module is not None else None;
+    mod_path = getattr(loc, 'mod_path', '') if loc is not None else '';
+    return SurfaceEntry(
+        name=str(name),
+        kind=kind,
+        exposure=exposure_of(decl).value,
+        placement=placement_of(decl),
+        module=str(mod_path or '')
+    );
+}
+
+def declared_surface(module: any) -> dict[str, SurfaceEntry] {
+    out: dict[str, SurfaceEntry] = {};
+    body = module?.body or [];
+    for item in body {
+        rec = surface_entry_of(item, module);
+        if rec is not None {
+            out[rec.name] = rec;
+        }
+    }
+    return out;
+}
+
+def entry_is_exposed(rec: dict[str, any]) -> bool {
+    return str(rec.get("exposure", "private")) != Exposure.PRIVATE.value;
+}
+
+def entry_requires_auth(rec: dict[str, any]) -> bool {
+    return str(rec.get("exposure", "private")) != Exposure.PUBLIC.value;
+}
+
+def entry_is_served(rec: dict[str, any]) -> bool {
+    return entry_is_exposed(rec) and str(rec.get("placement", "server")) != "client";
 }

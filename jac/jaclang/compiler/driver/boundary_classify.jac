@@ -435,25 +435,17 @@ def classify_client_import_item(
     if owner.code_context == CodeContext.CLIENT {
         return ClientImportVerdict.CLIENT;
     }
+    import from jaclang.compiler.frontend.codeinfo { is_exposed, is_walker_decl }
     if isinstance(owner, uni.Ability) {
-        consumer = item.find_parent_of_type(uni.Module);
-        provider_app = module_app(source_mod);
-        authenticated_endpoint = (
-            owner.access is not None
-            and owner.access.tag.name in (Tok.KW_PRIV, Tok.KW_PROT)
-            and consumer is not None
-            and bool(provider_app)
-            and module_app(consumer) == provider_app
-            and same_workspace(consumer.loc.mod_path, source_mod.loc.mod_path)
-        );
-        if (
-            not owner.is_method
-            and owner.access is not None
-            and (owner.access.tag.name == Tok.KW_PUB or authenticated_endpoint)
-        ) {
+        if not owner.is_method and is_exposed(owner) {
             return ClientImportVerdict.BRIDGED;
         }
         return ClientImportVerdict.DEAD;
+    }
+    if is_walker_decl(owner) {
+        return ClientImportVerdict.BRIDGED
+            if is_exposed(owner)
+            else ClientImportVerdict.DEAD;
     }
     if isinstance(owner, (uni.Archetype, uni.Enum, uni.TypeAlias)) {
         return ClientImportVerdict.BRIDGED;

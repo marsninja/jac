@@ -610,7 +610,13 @@ impl EsastGenPass.exit_dict_val with uni.DictVal exit {
                 or self.sync_loc(es.Literal(value=None), jac_node=kv_pair.value)
         );
         prop = self.sync_loc(
-            es.Property(key=key, value=value, kind='init'), jac_node=kv_pair
+            es.Property(
+                key=key,
+                value=value,
+                kind='init',
+                computed=not isinstance(key, es.Literal)
+            ),
+            jac_node=kv_pair
         );
         properties.append(prop);
     }

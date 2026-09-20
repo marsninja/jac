@@ -491,6 +491,65 @@ impl ModuleIntrospector._extract_access_levels -> None {
     }
     self._function_access = dict(manifest.get('func_access', {}) or {});
     self._walker_access = dict(manifest.get('walker_access', {}) or {});
+    self._surface = dict(manifest.get('surface', {}) or {});
+    self._manifest_root = str(manifest.get('root') or '');
+}
+
+impl ModuleIntrospector._resolve_declared(rel: str, name: str) -> any {
+    import from jaclang.runtime.runtime { JacRuntime as Jac }
+    import from jaclang.server.sealed_serve { sealed_root_for }
+    own_file: str = getattr(self._module, '__file__', '') if self._module else '';
+    img_root = self._manifest_root
+        or (sealed_root_for(own_file) if own_file else '')
+        or '';
+    src_path = os.path.join(img_root, rel)
+        if (img_root and not os.path.isabs(rel))
+        else rel;
+    import from jaclang.runtime.prepared { application_for, source_for_origin }
+    application = application_for(own_file, self._module.__name__)
+        if self._module is not None
+        else None;
+    if application is not None {
+        try {
+            src_path = source_for_origin(application, rel);
+        } except Exception {}
+    }
+    if own_file and os.path.abspath(src_path) == os.path.abspath(own_file) {
+        return getattr(self._module, name, None);
+    }
+    for loaded in list(Jac.loaded_modules.values()) {
+        f = loaded?.__file__;
+        if f and os.path.abspath(f) == os.path.abspath(src_path) {
+            sym = getattr(loaded, name, None);
+            if sym is not None {
+                return sym;
+            }
+        }
+    }
+    import from jaclang.runtime.prepared { load_prepared_module }
+    module = load_prepared_module(src_path);
+    return getattr(module, name, None);
+}
+
+impl ModuleIntrospector.scheduled_members -> list[tuple[str, any, bool]] {
+    import from jaclang.runtime.constructs { WalkerArchetype }
+    import from jaclang.server.task_scheduler { ScheduleSpec }
+    found: list[tuple[str, any, bool]] = [];
+    if not self._module {
+        return found;
+    }
+    for (name, member) in inspect.getmembers(self._module) {
+        spec = member?.schedule_spec;
+        if not isinstance(spec, ScheduleSpec) {
+            continue;
+        }
+        if isinstance(member, type) and issubclass(member, WalkerArchetype) {
+            found.append((name, member, True));
+        } elif inspect.isfunction(member) {
+            found.append((name, member, False));
+        }
+    }
+    return found;
 }
 
 
@@ -551,7 +610,7 @@ impl ModuleIntrospector._register_prepared_bindings(
 }
 
 impl ModuleIntrospector._collect_cross_boundary_endpoints -> None {
-    if not (self.discover_endpoints and self._module) {
+    if not (self.discover_endpoints and self._module) or self._surface {
         return;
     }
     import from jaclang.server.sealed_serve { serve_manifest_for, sealed_root_for }
@@ -572,6 +631,32 @@ impl ModuleIntrospector._collect_functions -> dict[str, Callable[(..., any)]] {
     }
     functions: dict[(str, Callable[(..., any)])] = {};
     export_names = set(self._client_manifest.get('exports', []));
+    if self._surface {
+        import from jaclang.compiler.frontend.codeinfo { entry_is_served }
+        for (name, rec) in self._surface.items() {
+            if rec.get('kind') != 'function' or not entry_is_served(rec) {
+                continue;
+            }
+            try {
+                target = self._resolve_declared(str(rec.get('src') or ''), name);
+            } except Exception {
+                logger.exception(
+                    'Could not load endpoint %s from %s', name, rec.get('src')
+                );
+                continue;
+            }
+            if callable(target) {
+                functions[name] = target;
+                self._function_access[name] = rec.get('exposure') != 'public';
+            }
+        }
+        for (name, `obj) in inspect.getmembers(self._module) {
+            if (name in export_names and callable(`obj)) {
+                self._client_functions[name] = `obj;
+            }
+        }
+        return functions;
+    }
     for (name, `obj) in inspect.getmembers(self._module) {
         if (inspect.isfunction(`obj) and not name.startswith('_')) {
             if getattr(`obj, '__module__', '').startswith('jaclang.') {
@@ -600,6 +685,27 @@ impl ModuleIntrospector._collect_walkers -> dict[str, type[WalkerArchetype]] {
         return {};
     }
     walkers: dict[(str, type[WalkerArchetype])] = {};
+    if self._surface {
+        import from jaclang.compiler.frontend.codeinfo { entry_is_served }
+        for (name, rec) in self._surface.items() {
+            if rec.get('kind') != 'walker' or not entry_is_served(rec) {
+                continue;
+            }
+            try {
+                target = self._resolve_declared(str(rec.get('src') or ''), name);
+            } except Exception {
+                logger.exception(
+                    'Could not load walker %s from %s', name, rec.get('src')
+                );
+                continue;
+            }
+            if isinstance(target, type) and issubclass(target, WalkerArchetype) {
+                walkers[name] = target;
+                self._walker_access[name] = rec.get('exposure') != 'public';
+            }
+        }
+        return walkers;
+    }
     for (name, `obj) in inspect.getmembers(self._module) {
         if (
             isinstance(`obj, type)
@@ -1406,13 +1512,22 @@ impl JacAPIServer._ensure_internal_users -> None {
 impl JacAPIServer._scheduled_targets -> list[tuple[str, any, bool]] {
     import from jaclang.server.task_scheduler { ScheduleSpec }
     found: list[tuple[str, any, bool]] = [];
+    seen: set[str] = set();
+    for (name, member, is_walker) in self.introspector.scheduled_members() {
+        spec = member?.schedule_spec;
+        if isinstance(spec, ScheduleSpec) {
+            seen.add(name);
+            found.append((name, spec, is_walker));
+        }
+    }
     for (registry, is_walker) in [
         (dict(self.introspector._walkers), True),
         (dict(self.introspector._functions), False)
     ] {
         for (name, item) in registry.items() {
             spec = item?.schedule_spec;
-            if isinstance(spec, ScheduleSpec) {
+            if isinstance(spec, ScheduleSpec) and name not in seen {
+                seen.add(name);
                 found.append((name, spec, is_walker));
             }
         }

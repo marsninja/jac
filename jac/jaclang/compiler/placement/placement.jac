@@ -198,6 +198,16 @@ def _is_pub_element(stmt: uni.UniNode) -> bool {
     );
 }
 
+def _is_protect_endpoint(stmt: uni.UniNode) -> bool {
+    is_fn = isinstance(stmt, uni.Ability);
+    is_walker = isinstance(stmt, uni.Archetype)
+        and stmt.arch_type.name == Tok.KW_WALKER;
+    if not (is_fn or is_walker) {
+        return False;
+    }
+    return stmt.access is not None and stmt.access.tag.name == Tok.KW_PROT;
+}
+
 def project_kind_name(module: (uni.Module | None)) -> str {
     if module is None {
         return '';
@@ -330,6 +340,9 @@ def _element_reqs(stmt: uni.UniNode) -> list[list[str]] {
     if _is_pub_element(stmt)
         and project_has_server(stmt.find_parent_of_type(uni.Module)) {
         reqs.append(['ENDPOINT', 'pub access']);
+    } elif _is_protect_endpoint(stmt)
+        and project_has_server(stmt.find_parent_of_type(uni.Module)) {
+        reqs.append(['ENDPOINT', 'protect access']);
     }
     return reqs;
 }
@@ -612,6 +625,9 @@ def scan_native_blockers(
 
         if not allow_pub and _is_pub_element(stmt) {
             return ("pub access", deps);
+        }
+        if not allow_pub and _is_protect_endpoint(stmt) {
+            return ("protect access", deps);
         }
     }
     for imp in module.get_all_sub_nodes(uni.Import) {
