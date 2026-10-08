@@ -1318,7 +1318,10 @@ impl serve(
                 [svc.entry_path(project_root) for svc in services],
                 not no_client
                     and not faux
-                    and (served is None or served.kind == "web-app"),
+                    and _serves_web_client(
+                        served.kind if served is not None else None,
+                        platform or (served.platform if served is not None else "")
+                    ),
                 dev
             );
             console.print("Initializing application...", style="bold");
@@ -1566,6 +1569,13 @@ def _get_network_ips -> list[str] {
         }
     } except Exception {}
     return ips;
+}
+
+def _serves_web_client(kind: (str | None), platform: (str | None)) -> bool {
+    if kind is None or kind == "web-app" {
+        return True;
+    }
+    return kind == "mobile" and (platform or "").strip().lower() == "web";
 }
 
 def _count_jac_files(directory: str) -> int {
