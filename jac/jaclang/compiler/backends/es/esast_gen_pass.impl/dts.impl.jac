@@ -706,8 +706,7 @@ impl EsastGenPass._boundary_type_name(info: BoundaryTypeInfo) -> str {
     bound_type = manifest.boundary_types_for(binding.type_scope).get(binding.ret_type)
         if binding is not None and binding.kind == 'type'
         else None;
-    shadowed = binding is None
-        and self.module.lookup(info.name, deep=False) is not None;
+    shadowed = binding is None and self._import_item_named(info.name) is not None;
     if len(matches) == 1 and (binding is None or bound_type == info) and not shadowed {
         return info.name;
     }
