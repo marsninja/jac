@@ -6469,7 +6469,7 @@ impl NativeBuiltinEmitter.emit_set(
     }
     _ctx3 = ctx.__class__(pass_ref=p, type_key=ctx.type_key);
     drained = self.emit_set(_ctx3, [listed]);
-    p._release_owned_args([p._mark_owned(listed)], op="set_iter");
+    p._release_owned_args([p._mark_owned(listed)]);
     return drained;
 }
 
