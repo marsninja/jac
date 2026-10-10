@@ -170,10 +170,6 @@ impl NaIRGenPass._codegen_tuple_unpack(
                 if slot_type == self.jacval_type
                 else self._coerce_type(elem_val, slot_type);
         } else {
-            # A reference that travelled erased (an element of a list of
-            # lists, yielded through an iterator adapter) takes the type its
-            # name was checked at: consumers such as `len` pick their
-            # lowering by the slot's type, and an untyped pointer is a `str`.
             _i8p = ir.IntType(8).as_pointer();
             _want = self._lower_type(target.type)
                 if isinstance(target, uni.Expr)
