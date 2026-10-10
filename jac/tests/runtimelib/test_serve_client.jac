@@ -30,6 +30,27 @@ def _as_any(v: any) -> any {
     return v;
 }
 
+"""Run one execution-manager call the way a transport does: inside a request
+scope of its own, on the database the process context uses."""
+async def _in_request_scope(call: any) -> any {
+    import from jaclang.runtime.runtime { JacRuntime as Jac }
+    import from jaclang.server.request_scope { RequestScope }
+    ambient = Jac.get_context();
+    with RequestScope.open(ambient.base_path_dir, ambient.full_target_path) {
+        return await call;
+    }
+}
+
+"""Persist the system root the way server start-up does. A bare
+ExecutionManager skips that step, and concurrent first calls on sessions of
+their own would otherwise each try to create it."""
+def _persist_system_root {
+    import from jaclang.runtime.runtime { JacRuntime as Jac }
+    ambient = Jac.get_context();
+    assert ambient.system_root is not None;
+    ambient.mem.commit();
+}
+
 """Skip a test unless client integration is explicitly enabled.
 
 Rendering a client page now runs the real Vite/Bun pipeline (bun + npm install
@@ -1727,20 +1748,20 @@ test "serve sync skips write access check on unchanged anchors" {
         # so a subsequent sync() should detect no drift and skip the
         # write-access check.
         import from typing { cast }
-        import from jaclang.server.session { Session }
+        import from jaclang.server.session { RowState, Session }
         serialized = cast(dict, Serializer.serialize(sys_root, include_type=True));
         sys_root_copy = Serializer.deserialize(serialized);
         if sys_root_copy is not None {
             sys_root.__dict__.update(sys_root_copy.__dict__);
         }
         sys_root.persistent = True;
-        sys_root.hash = Serializer._compute_hash(sys_root);
+        sys_root.hash = Serializer.stored_hash(sys_root);
         # Seed the session exactly as a load would: identity-mapped, flushed
         # hash recorded, not dirty -- i.e. an unchanged anchor.
         sess = cast(Session, ctx.mem);
         sys_root_id = sys_root.ensure_id();
         sess.__mem__[sys_root_id] = sys_root;
-        sess._flushed_hash[sys_root_id] = sys_root.hash;
+        sess._rows.loaded(sys_root_id, RowState(hash=sys_root.hash, version=0));
         sess._dirty.pop(sys_root_id, None);
         # Capture logs
         logger = logging.getLogger("jaclang.runtime.runtime");
@@ -1786,14 +1807,16 @@ test "serve blocking sync walkers run concurrently via to_thread" {
         exec_mgr = ExecutionManager(base_path=tmpdir, user_manager=user_mgr);
         # Create a test user so spawn_walker can resolve a root
         user_mgr.create_user("testuser", "testpass");
+        _persist_system_root();
         # Each walker sleeps for 1 second. Launch 3 concurrently.
         # If they run in threads (concurrent): ~1s total.
         # If they run serially on event loop: ~3s total.
         async def run_concurrent_walkers -> float {
             start = time();
             tasks = [
-                exec_mgr.spawn_walker(walker_cls, {"duration": 1.0}, "testuser")
-                for _ in range(3)
+                _in_request_scope(
+                    exec_mgr.spawn_walker(walker_cls, {"duration": 1.0}, "testuser")
+                ) for _ in range(3)
             ];
             results = await asyncio.gather(*tasks);
             elapsed = time() - start;
@@ -1860,12 +1883,16 @@ test "spawn_walker_sync and spawn_walker_async dispatch to explicit paths" {
         user_mgr = UserManager(base_path=tmpdir);
         exec_mgr = ExecutionManager(base_path=tmpdir, user_manager=user_mgr);
         user_mgr.create_user("testuser", "testpass");
+        _persist_system_root();
         async def run -> tuple[any, ...] {
             # Explicit sync path: must still run concurrently via to_thread.
             start = time();
             tasks = [
-                exec_mgr.spawn_walker_sync(walker_cls, {"duration": 0.5}, "testuser")
-                for _ in range(3)
+                _in_request_scope(
+                    exec_mgr.spawn_walker_sync(
+                        walker_cls, {"duration": 0.5}, "testuser"
+                    )
+                ) for _ in range(3)
             ];
             results = await asyncio.gather(*tasks);
             sync_elapsed = time() - start;
@@ -1906,11 +1933,15 @@ test "concurrent async walkers run concurrently end-to-end" {
         user_mgr = UserManager(base_path=tmpdir);
         exec_mgr = ExecutionManager(base_path=tmpdir, user_manager=user_mgr);
         user_mgr.create_user("testuser", "testpass");
+        _persist_system_root();
         async def run -> float {
             start = time();
             tasks = [
-                exec_mgr.spawn_walker_async(walker_cls, {"duration": 0.5}, "testuser")
-                for _ in range(3)
+                _in_request_scope(
+                    exec_mgr.spawn_walker_async(
+                        walker_cls, {"duration": 0.5}, "testuser"
+                    )
+                ) for _ in range(3)
             ];
             results = await asyncio.gather(*tasks);
             for r in results {
@@ -2130,10 +2161,12 @@ test "concurrent multi-user requests do not race on ctx.user_root" {
         }
         # Sanity: each user got a unique root.
         assert len(set(root_ids.values())) == 3;
+        _persist_system_root();
         async def run_probe(walker_cls: any) -> list[any] {
             tasks = [
-                exec_mgr.spawn_walker(walker_cls, {"sleep_s": 0.1}, uname)
-                for uname in users
+                _in_request_scope(
+                    exec_mgr.spawn_walker(walker_cls, {"sleep_s": 0.1}, uname)
+                ) for uname in users
             ];
             gathered = await asyncio.gather(*tasks);
             return _as_any(gathered);
@@ -3032,5 +3065,113 @@ test "sv_client: a walker spawn without a stub class is refused before the provi
         assert stub.calls == [] , "the provider must not have been asked to run the walker";
     } finally {
         _reset_bridge_state();
+    }
+}
+
+import from jaclang.client.client_bundle { ClientBundle, ClientBundleBuilder }
+
+"""A real builder whose bundler step only counts its runs."""
+obj _CountingBundleBuilder(ClientBundleBuilder) {
+    has bundles: int = 0;
+
+    def _compile_bundle(module: types.ModuleType, module_path: Path) -> ClientBundle {
+        self.bundles += 1;
+        return ClientBundle(
+            module_name=module.__name__,
+            code=f"export const build = {self.bundles};",
+            client_functions=[],
+            client_globals=[],
+            hash=f"hash-{self.bundles}"
+        );
+    }
+}
+
+test "client bundles are rebuilt by content, not by timestamp" {
+    import time;
+    with TemporaryDirectory() as tmp {
+        base = Path(tmp).resolve();
+        (base / "jac.toml").write_text('[project]\nname = "sig"\nkind = "web-app"\n');
+        page = base / "page.jac";
+        annex = base / "page.impl.jac";
+        page.write_text(
+            'def label -> str;\n\n'
+            'def:pub App -> any {\n    return <div>{label()}</div>;\n}\n'
+        );
+        annex.write_text('impl label -> str {\n    return "one";\n}\n');
+        module = types.ModuleType("sig_page");
+        module.__file__ = str(page);
+        builder = _CountingBundleBuilder();
+        builder.build(module);
+        moved = time.time_ns() - 3_600_000_000_000;
+        for source in (page, annex) {
+            os.utime(source, ns=(moved, moved));
+        }
+        builder.build(module);
+        assert builder.bundles == 1 , "identical bytes under a new timestamp rebuilt the bundle";
+        page.write_text(
+            page.read_text().replace("<div>", "<p>").replace("</div>", "</p>")
+        );
+        builder.build(module);
+        assert builder.bundles == 2 , "a content change reused the stale bundle";
+        annex.unlink();
+        builder.build(module);
+        assert builder.bundles == 3 , "an annex deletion reused the stale bundle";
+    }
+}
+
+"""Boot used to resolve every served walker class only to read its `@restspec`,
+so readiness grew with the program instead of the route count. Routes now come
+from the surface manifest: boot resolves only targets whose decorator arguments
+are not literals, and a walker class is resolved on the first request to it."""
+test "routes come from the manifest and a walker resolves on its first request" {
+    import sys;
+    with TemporaryDirectory() as tmp {
+        app = os.path.join(tmp, "main.jac");
+        walkers = ''.join(
+            f'walker:pub w{i} {{\n    can go with Root entry {{\n        report {i};\n    }}\n}}\n\n'
+            for i in range(20)
+        );
+        Path(app).write_text(
+            'import from http { HTTPMethod }\n\n'
+                + 'glob DYNAMIC_PATH = "/dynamic";\n\n'
+                + walkers
+                + '@restspec(method=HTTPMethod.GET, path="/hello")\n'
+                + 'walker:pub Hello {\n    can go with Root entry {\n        report "hi";\n    }\n}\n\n'
+                + '@restspec(path=DYNAMIC_PATH)\n'
+                + 'walker:pub Dynamic {\n    can go with Root entry {\n        report "dyn";\n    }\n}\n'
+        );
+        resolved: list[str] = [];
+        def tally(frame: any, event: str, arg: any) {
+            if event == 'call' and frame.f_code.co_name == '_resolve_declared' {
+                resolved.append(str(frame.f_locals.get('name')));
+            }
+        }
+        client = JacTestClient.from_file(app, base_path=tmp);
+        sys.setprofile(tally);
+        try {
+            client.server;
+        } finally {
+            sys.setprofile(None);
+        }
+        try {
+            assert resolved == ['Dynamic'] , f"boot resolved {resolved}";
+            resolved.clear();
+            sys.setprofile(tally);
+            try {
+                response = client.post("/walker/w3", json={});
+            } finally {
+                sys.setprofile(None);
+            }
+            assert response.status_code == 200 , response.text;
+            assert set(resolved) == {'w3'} , f"the first request resolved {resolved}";
+            hello = client.get("/hello");
+            assert hello.status_code == 200 , hello.text;
+            assert "hi" in hello.text;
+            dynamic = client.post("/dynamic", json={});
+            assert dynamic.status_code == 200 , dynamic.text;
+            assert "dyn" in dynamic.text;
+        } finally {
+            client.close();
+        }
     }
 }
