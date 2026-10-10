@@ -5069,14 +5069,14 @@ impl NaIRGenPass._report_unreachable_overrides -> None {
     home = os.path.realpath(self.module.loc.mod_path);
     reg = get_layout_registry(self.module, self.prog);
     for arch in self._native_archetypes(self.module) {
-        if arch.body is None or arch.loc is None {
+        if arch.loc is None {
             continue;
         }
         if os.path.realpath(arch.loc.mod_path) != home {
             continue;
         }
         overrides: dict[str, uni.Ability] = {};
-        for stmt in arch.body {
+        for stmt in (ModuleFacts.unwrap_body(arch) or []) {
             if isinstance(stmt, uni.Ability)
                 and not stmt.is_abstract
                 and stmt.name_ref is not None {
@@ -5116,7 +5116,7 @@ impl NaIRGenPass._report_unreachable_overrides -> None {
             if not base_lay.decl_mod or base_lay.decl_mod == home {
                 continue;
             }
-            for caller in (base_arch.body or []) {
+            for caller in (ModuleFacts.unwrap_body(base_arch) or []) {
                 if not isinstance(caller, uni.Ability) or caller.name_ref is None {
                     continue;
                 }

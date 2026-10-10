@@ -39,6 +39,7 @@ glob FIXTURES = os.path.join(
      ),
      FLAT_FIXTURE = "xmod_flat_override_main.jac",
      OPEN_FIXTURE = "xmod_open_override_main.jac",
+     SPLIT_FIXTURE = "xmod_flat_split_override_main.jac",
      _RUN_MEMO: dict[(str, str)] = {};
 
 """Build a fixture natively: the compiler's exit code and everything it
@@ -107,6 +108,17 @@ test "overriding a flat imported base's method is refused with E5113" {
     assert "TreeSource.label" not in log and "TreeSource.name" not in log , (
         f"overrides no base body dispatches to must not be reported: {log[-900:]}"
     );
+}
+
+test "the refusal reads classes whose members live in impl blocks" {
+    # The same pair with every member declared in an `impl`: the class body
+    # is then an impl node, not a statement list, on both sides of the check.
+    assert run_lines(SPLIT_FIXTURE, False) == ["spot=8"];
+    (code, log, _) = na_build(SPLIT_FIXTURE);
+    assert code != 0 , f"the build must refuse the lost override; got: {log[-900:]}";
+    assert "E5113" in log , f"the refusal must be E5113, got: {log[-900:]}";
+    assert "'SplitTree.trace' overrides 'SplitSource.trace'" in log , log[-900:];
+    assert "'SplitSource.spot' calls" in log , log[-900:];
 }
 
 test "an abstract base method dispatches to the importer's override" {
