@@ -3080,11 +3080,7 @@ impl NaIRGenPass._codegen_assignment(nd: uni.Assignment) -> None {
                 var_name in self.closure_cell_vars
                 and var_name not in self.closure_cell_handles
             );
-            if _mk_cell {
-                alloca = self._emit_closure_cell(var_name, var_type);
-            } else {
-                alloca = self._entry_alloca(var_type, var_name);
-            }
+            alloca = self._binding_slot(var_type, var_name);
             _in_gen_frame = (
                 self._gen_ctx is not None
                 and self.builder.function is self._gen_ctx.resume_fn
@@ -4451,7 +4447,7 @@ impl NaIRGenPass._codegen_for_indexed(
 
     if kind == "range" {
         len_val = collection_val;
-        idx_alloca = self._loop_target_slot(i64, var_names[0]);
+        idx_alloca = self._binding_slot(i64, var_names[0]);
         self.builder.store(range_start, idx_alloca);
         self.local_vars[var_names[0]] = idx_alloca;
         allocas = [idx_alloca];
@@ -4486,7 +4482,7 @@ impl NaIRGenPass._codegen_for_indexed(
                 and isinstance(_existing.type, ir.PointerType)
                 and _existing.type.pointee == vtype
             );
-            alloca = _existing if _reuse else self._loop_target_slot(vtype, vname);
+            alloca = _existing if _reuse else self._binding_slot(vtype, vname);
             assert alloca is not None;
             _in_resume_fn = (
                 self._gen_ctx is not None

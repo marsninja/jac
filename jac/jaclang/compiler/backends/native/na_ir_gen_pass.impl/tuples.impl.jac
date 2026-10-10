@@ -170,7 +170,7 @@ impl NaIRGenPass._codegen_tuple_unpack(
                 if slot_type == self.jacval_type
                 else self._coerce_type(elem_val, slot_type);
         } else {
-            alloca = self._entry_alloca(elem_val.type, var_name);
+            alloca = self._binding_slot(elem_val.type, var_name);
             self.local_vars[var_name] = alloca;
             stored = elem_val;
         }

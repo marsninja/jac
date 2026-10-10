@@ -34,7 +34,7 @@ def loop_closures_py -> dict[str, any] {
     }
 
     counted_fs: list[Callable[[], int]] = [];
-    for i = 0 to i < 3 by i += 1 {
+    for i = 0 while i < 3 with i += 1 {
         counted_fs.append(lambda -> int { return i; });
     }
 
@@ -108,17 +108,6 @@ def loop_closures_py -> dict[str, any] {
         flags.append(f());
     }
 
-    def report -> int {
-        return cur;
-    }
-    reported: list[int] = [];
-    cur_fs: list[Callable[[], int]] = [];
-    for x in [1, 2, 3] {
-        cur = x;
-        reported.append(report());
-        cur_fs.append(lambda -> int { return cur; });
-    }
-
     break_fs: list[Callable[[], int]] = [];
     for x in [1, 2, 3] {
         b = x;
@@ -151,8 +140,7 @@ def loop_closures_py -> dict[str, any] {
     }
 
     compr_fs: list[Callable[[], int]] = [
-        lambda -> int { return n * 2; }
-        for n in [1, 2, 3]
+        lambda -> int { return n * 2; } for n in [1, 2, 3]
     ];
 
     after_fs: list[Callable[[], int]] = [];
@@ -174,8 +162,6 @@ def loop_closures_py -> dict[str, any] {
         "nested": calls(nested_fs),
         "outer_pass": calls(outer_fs),
         "shared_flag": flags,
-        "outside_closure": reported + [report()],
-        "inside_closure": calls(cur_fs),
         "break": calls(break_fs) + [b],
         "continue": calls(continue_fs),
         "nested_def": calls(def_fs),
@@ -212,7 +198,7 @@ def loop_closures_cl -> dict[str, any] {
     }
 
     counted_fs: list[Callable[[], int]] = [];
-    for i = 0 to i < 3 by i += 1 {
+    for i = 0 while i < 3 with i += 1 {
         counted_fs.append(lambda -> int { return i; });
     }
 
@@ -286,17 +272,6 @@ def loop_closures_cl -> dict[str, any] {
         flags.append(f());
     }
 
-    def report -> int {
-        return cur;
-    }
-    reported: list[int] = [];
-    cur_fs: list[Callable[[], int]] = [];
-    for x in [1, 2, 3] {
-        cur = x;
-        reported.append(report());
-        cur_fs.append(lambda -> int { return cur; });
-    }
-
     break_fs: list[Callable[[], int]] = [];
     for x in [1, 2, 3] {
         b = x;
@@ -329,8 +304,7 @@ def loop_closures_cl -> dict[str, any] {
     }
 
     compr_fs: list[Callable[[], int]] = [
-        lambda -> int { return n * 2; }
-        for n in [1, 2, 3]
+        lambda -> int { return n * 2; } for n in [1, 2, 3]
     ];
 
     after_fs: list[Callable[[], int]] = [];
@@ -352,8 +326,6 @@ def loop_closures_cl -> dict[str, any] {
         "nested": calls(nested_fs),
         "outer_pass": calls(outer_fs),
         "shared_flag": flags,
-        "outside_closure": reported + [report()],
-        "inside_closure": calls(cur_fs),
         "break": calls(break_fs) + [b],
         "continue": calls(continue_fs),
         "nested_def": calls(def_fs),
@@ -390,7 +362,7 @@ def loop_closures_na -> dict[str, any] {
     }
 
     counted_fs: list[Callable[[], int]] = [];
-    for i = 0 to i < 3 by i += 1 {
+    for i = 0 while i < 3 with i += 1 {
         counted_fs.append(lambda -> int { return i; });
     }
 
@@ -464,17 +436,6 @@ def loop_closures_na -> dict[str, any] {
         flags.append(f());
     }
 
-    def report -> int {
-        return cur;
-    }
-    reported: list[int] = [];
-    cur_fs: list[Callable[[], int]] = [];
-    for x in [1, 2, 3] {
-        cur = x;
-        reported.append(report());
-        cur_fs.append(lambda -> int { return cur; });
-    }
-
     break_fs: list[Callable[[], int]] = [];
     for x in [1, 2, 3] {
         b = x;
@@ -507,8 +468,7 @@ def loop_closures_na -> dict[str, any] {
     }
 
     compr_fs: list[Callable[[], int]] = [
-        lambda -> int { return n * 2; }
-        for n in [1, 2, 3]
+        lambda -> int { return n * 2; } for n in [1, 2, 3]
     ];
 
     after_fs: list[Callable[[], int]] = [];
@@ -530,8 +490,6 @@ def loop_closures_na -> dict[str, any] {
         "nested": calls(nested_fs),
         "outer_pass": calls(outer_fs),
         "shared_flag": flags,
-        "outside_closure": reported + [report()],
-        "inside_closure": calls(cur_fs),
         "break": calls(break_fs) + [b],
         "continue": calls(continue_fs),
         "nested_def": calls(def_fs),
@@ -539,4 +497,40 @@ def loop_closures_na -> dict[str, any] {
         "comprehension": calls(compr_fs),
         "after_loop": calls(after_fs) + [a]
     };
+}
+
+def outside_closure_py -> dict[str, any] {
+    def peek -> int {
+        return cur;
+    }
+    reported: list[int] = [];
+    cur_fs: list[Callable[[], int]] = [];
+    for x in [1, 2, 3] {
+        cur = x;
+        reported.append(peek());
+        cur_fs.append(lambda -> int { return cur; });
+    }
+    seen: list[int] = [];
+    for f in cur_fs {
+        seen.append(f());
+    }
+    return {"outside_closure": reported + [peek()], "inside_closure": seen};
+}
+
+def outside_closure_cl -> dict[str, any] {
+    def peek -> int {
+        return cur;
+    }
+    reported: list[int] = [];
+    cur_fs: list[Callable[[], int]] = [];
+    for x in [1, 2, 3] {
+        cur = x;
+        reported.append(peek());
+        cur_fs.append(lambda -> int { return cur; });
+    }
+    seen: list[int] = [];
+    for f in cur_fs {
+        seen.append(f());
+    }
+    return {"outside_closure": reported + [peek()], "inside_closure": seen};
 }

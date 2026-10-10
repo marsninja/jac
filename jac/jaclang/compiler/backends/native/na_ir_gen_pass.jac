@@ -1052,7 +1052,7 @@ walker NaIRGenPass(CompilerPass) {
     def _current_pass_link(link: PassLink) -> (ir.Value | None);
     def _emit_pass_link_detaches(loop: (LoopStmt | None)) -> None;
     def _codegen_pass_body(loop: LoopStmt) -> None;
-    def _loop_target_slot(var_type: ir.Type, var_name: str) -> ir.Value;
+    def _binding_slot(var_type: ir.Type, var_name: str) -> ir.Value;
     def _emit_closure_thunk(
         target_fn: ir.Function,
         declared_count: int,

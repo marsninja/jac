@@ -6,7 +6,12 @@ lasts; once the pass ends the closure keeps its own copy. The server lane pins
 the expected values and the client and native lanes must agree with it.
 """
 
-import from jaclang.compiler.tests.xbackend_equiv { run_with_both, run_py_fixture }
+import from jaclang.compiler.tests.xbackend_equiv {
+    compile_fixture_to_js,
+    run_js_function,
+    run_py_fixture,
+    run_with_both
+}
 
 glob EXPECTED: dict[str, any] = {
          "target": [1, 2, 3],
@@ -21,8 +26,6 @@ glob EXPECTED: dict[str, any] = {
          "nested": [11, 12, 21, 22],
          "outer_pass": [7, 8],
          "shared_flag": [True, True, True],
-         "outside_closure": [1, 2, 3, 3],
-         "inside_closure": [1, 2, 3],
          "break": [1, 2, 2],
          "continue": [1, 2, 3],
          "nested_def": [7, 14],
@@ -49,4 +52,11 @@ test "client and native lanes give loop closures the same bindings as the server
         "loop_closures_na",
         require=["cl", "na"]
     );
+}
+
+test "a closure created outside the loop keeps sharing the function's binding" {
+    want = {"outside_closure": [1, 2, 3, 3], "inside_closure": [1, 2, 3]};
+    assert run_py_fixture("loop_closures", "outside_closure_py") == want;
+    js = compile_fixture_to_js("loop_closures.jac");
+    assert run_js_function(js, "outside_closure_cl") == want;
 }

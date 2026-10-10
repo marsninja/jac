@@ -665,7 +665,7 @@ impl NaIRGenPass._codegen_pass_body(loop: LoopStmt) -> None {
     self._emit_pass_link_detaches(loop);
 }
 
-impl NaIRGenPass._loop_target_slot(var_type: ir.Type, var_name: str) -> ir.Value {
+impl NaIRGenPass._binding_slot(var_type: ir.Type, var_name: str) -> ir.Value {
     if var_name in self.closure_cell_vars
         and var_name not in self.closure_cell_handles {
         return self._emit_closure_cell(var_name, var_type);
