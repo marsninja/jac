@@ -295,11 +295,18 @@ test "a python importer binds a C struct re-exported by an inferred-native modul
 `embed_user` declares `Outer`, which holds an `Inner` by value, and names
 `Outer` (never `Inner`) in code its Python side emits; `main` is pinned to
 the server, so it reaches `embed_user` through that Python side."""
-def _embed_project(proj: str) {
+def _embed_project(proj: str, alias: str = "") {
+    user = EMBED_USER;
+    if alias {
+        user = user.replace("{ Inner }", f"{{ Inner as {alias} }}").replace(
+            "inner: Inner", f"inner: {alias}"
+        );
+        assert user != EMBED_USER;
+    }
     files = {
         "jac.toml": '[project]\nname = "embed"\n\n[placement.pins]\nmain = "server"\n',
         "embed_decl.jac": EMBED_DECL,
-        "embed_user.jac": EMBED_USER,
+        "embed_user.jac": user,
         "main.jac": EMBED_MAIN
     };
     for (name, text) in files.items() {
@@ -345,6 +352,17 @@ test "a python caller binds a C record that embeds another module's record" {
         proj = os.path.realpath(tmp);
         _embed_project(proj);
         # Holder().n + llabs(-4) + labs(7 - 2).
+        assert _run_anchor_main(proj) == "12";
+    }
+}
+
+test "a python caller binds an embedded C record imported under another name" {
+    with tempfile.TemporaryDirectory() as tmp {
+        proj = os.path.realpath(tmp);
+        # `import from embed_decl { Inner as Held }` binds only `Held` on the
+        # Python side, so the record's descriptor has to name its field's
+        # type the way the module spells it.
+        _embed_project(proj, alias="Held");
         assert _run_anchor_main(proj) == "12";
     }
 }
