@@ -5087,6 +5087,7 @@ impl NaIRGenPass._report_unreachable_overrides -> None {
             continue;
         }
         reported: set[str] = set();
+        shadowed: set[str] = set();
         seen: set[str] = set();
         queue: list[uni.Expr] = list(arch.base_classes or []);
         while queue {
@@ -5094,6 +5095,10 @@ impl NaIRGenPass._report_unreachable_overrides -> None {
             if isinstance(base_expr, uni.AtomTrailer)
                 and isinstance(base_expr.right, uni.IndexSlice) {
                 base_expr = base_expr.target;
+            }
+            if isinstance(base_expr, uni.AtomTrailer)
+                and isinstance(base_expr.right, uni.Name) {
+                base_expr = base_expr.right;
             }
             bname = self._get_name(base_expr);
             if bname is None or bname in seen {
@@ -5109,6 +5114,20 @@ impl NaIRGenPass._report_unreachable_overrides -> None {
                 continue;
             }
             queue.extend(base_arch.base_classes or []);
+            members = ModuleFacts.unwrap_body(base_arch) or [];
+            inherited: list[uni.UniNode] = [];
+            for member in members {
+                if isinstance(member, uni.Ability)
+                    and member.name_ref is not None
+                    and member.name_ref.sym_name not in shadowed {
+                    inherited.append(member);
+                }
+            }
+            for member in members {
+                if isinstance(member, uni.Ability) and member.name_ref is not None {
+                    shadowed.add(member.name_ref.sym_name);
+                }
+            }
             base_lay = reg.get_layout(self._arch_key(base_arch));
             if base_lay is None or base_lay.has_vtable or base_lay.is_osp {
                 continue;
@@ -5116,7 +5135,7 @@ impl NaIRGenPass._report_unreachable_overrides -> None {
             if not base_lay.decl_mod or base_lay.decl_mod == home {
                 continue;
             }
-            for caller in (ModuleFacts.unwrap_body(base_arch) or []) {
+            for caller in inherited {
                 if not isinstance(caller, uni.Ability) or caller.name_ref is None {
                     continue;
                 }

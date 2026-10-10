@@ -40,6 +40,7 @@ glob FIXTURES = os.path.join(
      FLAT_FIXTURE = "xmod_flat_override_main.jac",
      OPEN_FIXTURE = "xmod_open_override_main.jac",
      SPLIT_FIXTURE = "xmod_flat_split_override_main.jac",
+     QUALIFIED_FIXTURE = "xmod_flat_qualified_main.jac",
      _RUN_MEMO: dict[(str, str)] = {};
 
 """Build a fixture natively: the compiler's exit code and everything it
@@ -121,6 +122,16 @@ test "the refusal reads classes whose members live in impl blocks" {
     assert "'SplitSource.spot' calls" in log , log[-900:];
 }
 
+test "the refusal reaches a base named through its module" {
+    # `obj QualTree(xmod_flat_base.FlatSource)`: the same base, written as a
+    # qualified name instead of an imported one.
+    (code, log, _) = na_build(QUALIFIED_FIXTURE);
+    assert code != 0 , f"the build must refuse the lost override; got: {log[-900:]}";
+    assert "E5113" in log , f"the refusal must be E5113, got: {log[-900:]}";
+    assert "'QualTree.trace' overrides 'FlatSource.trace'" in log , log[-900:];
+    assert "'FlatSource.spot' calls" in log , log[-900:];
+}
+
 test "an abstract base method dispatches to the importer's override" {
     na = run_lines(OPEN_FIXTURE, True);
     assert "spot=8" in na and "held=9" in na , (
@@ -130,6 +141,10 @@ test "an abstract base method dispatches to the importer's override" {
     assert "flat=-1 extended" in na , (
         f"extending a flat base without overriding stays unreported and runs "
         f"the base body; got {na}"
+    );
+    assert "leaf=101 8" in na , (
+        f"a base body an intermediate class replaces is not inherited below "
+        f"it, so overriding what it calls is not refused; got {na}"
     );
     assert run_lines(OPEN_FIXTURE, False) == na , "the binary and the server pathway must agree";
 }
