@@ -321,11 +321,6 @@ def import_bound_names(nd: uni.Import) -> list[str] {
     return bound;
 }
 
-"""The names a C block's declarations are typed by: its records' field types
-and its functions' parameter and return types. A block kept on the Python
-side resolves them there, records as the block binds and functions as they
-are called.
-"""
 def clib_decl_type_names(nd: uni.Import) -> set[str] {
     names: set[str] = set();
     for decl in nd.clib_decls or [] {

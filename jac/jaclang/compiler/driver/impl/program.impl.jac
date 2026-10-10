@@ -696,8 +696,7 @@ impl JacProgram.stamp_native_import_facts(self: JacProgram, mod: uni.Module) -> 
         }
         imp.native_only_drop = drop;
     }
-    # A C block that stays binds on the Python side, so what its declarations
-    # are typed by stays with it; one kept block can call for another.
+
     settled = False;
     while not settled {
         settled = True;

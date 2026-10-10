@@ -1910,14 +1910,6 @@ impl NaIRGenPass._define_clib_struct(decl: uni.Archetype) -> None {
     }
 }
 
-"""The C record a field's type names, laid out now if it is not yet.
-
-A unit lays out its own C records before the records of the modules it
-imports, and imported modules are walked in no particular order, so a
-record that embeds one declared elsewhere can be reached first. Its
-embedded record is declared and defined here on demand; the walk that
-reaches the declaring import later finds it already done.
-"""
 impl NaIRGenPass._ensure_clib_struct(t: any) -> (str | None) {
     import from jaclang.compiler.c_interop { foreign_struct_of_type }
     arch = foreign_struct_of_type(t);
