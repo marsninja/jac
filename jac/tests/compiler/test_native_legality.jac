@@ -88,8 +88,8 @@ glob PIN_FIXTURE_DIR = os.path.join(
          "def pretty(x: dict[str, int]) -> str {\n"
          "    return json.dumps(x, indent=2);\n"
          "}\n\n"
-         "def plain(n: int) -> str {\n"
-         "    return json.dumps([n, n + 1]);\n"
+         "def plain(n: int) -> int {\n"
+         "    return len(json.dumps([n, n + 1]));\n"
          "}\n\n"
          "with entry {\n"
          "    print(plain(1));\n"
@@ -192,8 +192,9 @@ test "placement is per element: what cannot be native stays in Python, the rest 
     placed = placed_by_name(mod);
     assert placed["helper"] == 'server' , placed;
     assert placed["other"] == 'native' , placed;
-    assert placed["mid"] == 'native' , (
-        f"`mid` calls `helper` with an int and gets a str back, and both cross: {placed}"
+    assert placed["mid"] == 'server' , (
+        f"`mid` gets a str back from `helper`, and the call bridge does not "
+        f"convert a str: {placed}"
     );
     assert placed["entry"] == 'server' , (
         f"a module with Python elements runs its entry block in Python: {placed}"

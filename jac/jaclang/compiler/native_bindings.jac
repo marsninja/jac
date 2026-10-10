@@ -550,6 +550,11 @@ impl interface_module_name(home: Module) -> str {
     return rel.replace("/", ".");
 }
 
+def is_owning_scope(scope: UniScopeNode) -> bool {
+    import from jaclang.compiler.types.stubcat.reader { CatScope }
+    return UniScopeNode.is_python_scoping(scope) or isinstance(scope, CatScope);
+}
+
 impl binding_gaps(prog: JacProgram, nm: Name, base_dir: str) -> list[str] {
     """What the native library lacks for a name the checker typed from a
     Python interface: its module-level function or class, a member of its
@@ -567,7 +572,7 @@ impl binding_gaps(prog: JacProgram, nm: Name, base_dir: str) -> list[str] {
     owner: (UniScopeNode | None) = None;
     home: (UniScopeNode | None) = declared.parent_tab;
     while home is not None and not isinstance(home, Module) {
-        if owner is None and UniScopeNode.is_python_scoping(home) {
+        if owner is None and is_owning_scope(home) {
             owner = home;
         }
         home = home.parent_scope;

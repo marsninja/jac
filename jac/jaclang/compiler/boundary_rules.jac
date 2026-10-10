@@ -68,7 +68,7 @@ def python_native_wire -> set[str] {
 }
 
 def crossing_refusal(
-    type_name: str, src: str, dst: str, is_return: bool = False
+    type_name: str, src: str, dst: str, is_return: bool = False, placing: bool = False
 ) -> (str | None) {
     if src == dst or TARGET_NATIVE not in (src, dst) {
         return None;
@@ -76,6 +76,10 @@ def crossing_refusal(
     spelled = type_name.strip();
     if is_return and spelled in ('None', 'NoneType', '') {
         return None;
+    }
+    if placing and spelled == 'str' {
+        return "a 'str' is not converted by the call bridge between native and "
+        "Python code, so a call that passes one is not placed across it";
     }
     if spelled in python_native_wire() {
         return None;
@@ -85,17 +89,22 @@ def crossing_refusal(
 }
 
 def signature_crossings(
-    param_names: list[str], param_types: list[str], ret_type: str, src: str, dst: str
+    param_names: list[str],
+    param_types: list[str],
+    ret_type: str,
+    src: str,
+    dst: str,
+    placing: bool = False
 ) -> list[tuple[str, str, str]] {
     out: list[tuple[str, str, str]] = [];
     for (index, spelled) in enumerate(param_types) {
-        why = crossing_refusal(spelled, src, dst);
+        why = crossing_refusal(spelled, src, dst, False, placing);
         if why is not None {
             pname = param_names[index] if index < len(param_names) else str(index);
             out.append((f"parameter '{pname}'", spelled, why));
         }
     }
-    why = crossing_refusal(ret_type, src, dst, True);
+    why = crossing_refusal(ret_type, src, dst, True, placing);
     if why is not None {
         out.append(("the return", ret_type, why));
     }
@@ -284,7 +293,7 @@ def json_refusal(
 }
 
 def signature_refusals(
-    decl: Ability, src: str, dst: str
+    decl: Ability, src: str, dst: str, placing: bool = False
 ) -> list[tuple[str, str, str]] {
     import from jaclang.compiler.frontend.unparse { unparse_node }
     out: list[tuple[str, str, str]] = [];
@@ -303,7 +312,12 @@ def signature_refusals(
             spelled.append(unparse_node(tag) if tag is not None else 'any');
         }
         return signature_crossings(
-            names, spelled, unparse_node(ret) if ret is not None else 'None', src, dst
+            names,
+            spelled,
+            unparse_node(ret) if ret is not None else 'None',
+            src,
+            dst,
+            placing
         );
     }
     callee_is_server = dst == TARGET_SERVER;
@@ -346,7 +360,7 @@ def ability_crossing(decl: Ability, src: str, dst: str) -> (str | None) {
     if not isinstance(sig, FuncSignature) or decl.method_owner is not None {
         return "only a module-level function can be called across codespaces";
     }
-    found = signature_refusals(decl, src, dst);
+    found = signature_refusals(decl, src, dst, True);
     if found {
         (what, _spelled, why) = found[0];
         return f"{what}: {why}";

@@ -56,6 +56,9 @@ glob WIRE_SRC = (
          "}\n\n"
          "def listy(xs: list[int]) -> int {\n"
          "    return len(xs);\n"
+         "}\n\n"
+         "def texty(s: str) -> str {\n"
+         "    return s;\n"
          "}\n"
      );
 
@@ -133,4 +136,14 @@ test "between native and Python code only the scalars cross" {
     );
     assert [what for (what, _spelled, _why) in found] == ["parameter 'xs'"] , found;
     assert signature_refusals(scalar, TARGET_SERVER, TARGET_SERVER) == [];
+}
+
+test "placement does not put a str call across the native boundary" {
+    mod = typed_module();
+    texty = function_named(mod, "texty");
+    assert signature_refusals(texty, TARGET_NATIVE, TARGET_SERVER) == [] , (
+        "the boundary diagnostic accepts a str, as main does"
+    );
+    found = signature_refusals(texty, TARGET_NATIVE, TARGET_SERVER, True);
+    assert [what for (what, _spelled, _why) in found] == ["parameter 's'", "the return"] , found;
 }
