@@ -1728,7 +1728,7 @@ def run_precompile(
                 jac_files.append(unit);
             }
         }
-        if pkg_name == "jaclang" and _kernel_omitted() {
+        if pkg_name == "jaclang" {
             kernel_only = _compiler_kernel_units();
             dropped = {
                 u
@@ -1738,8 +1738,12 @@ def run_precompile(
             native_units_set = native_units_set - dropped;
             if dropped {
                 console.print(
-                    "  Compiler kernel: omitted from this pull-request kit; "
-                    f"{len(dropped)} unit(s) left unlowered"
+                    f"  Compiler kernel: {len(dropped)} unit(s) "
+                        + (
+                            "left unlowered; this pull-request kit omits the kernel"
+                                if _kernel_omitted()
+                                else "left to the native seal; lowering the units programs link"
+                        )
                 );
             }
         }
@@ -1897,7 +1901,7 @@ def run_precompile(
     if use_pool and native_units_set {
         prebuild_native_units(
             sorted(native_units_set)
-                if pkg_name == "jaclang" and _kernel_omitted()
+                if pkg_name == "jaclang"
                 else native_roots(pkg_name, sorted(native_units_set))
         );
     }
