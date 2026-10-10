@@ -31,4 +31,10 @@ with entry {
     print(
         array_total(grow), sum(grow, 1), sum(bytearray()), sum(bytearray(b"\x80"), 0.25)
     );
+    print(
+        sum(b"\x01\x01", 1e16),
+        sum(bytearray(b"\xff\x01"), 1e16),
+        sum(b"\x01\x01", -1e16),
+        sum(b"", 1e16)
+    );
 }

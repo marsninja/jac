@@ -20,4 +20,6 @@ test "native sum over bytes and bytearray agrees with Python" {
     assert lines[2] == "127.16666666666667 763.5" , out;
     assert lines[3] == "752 166" , out;
     assert lines[4] == "655 656 0 128.25" , out;
+    assert lines[5]
+        == "1.0000000000000002e+16 1.0000000000000256e+16 -9999999999999998.0 1e+16" , out;
 }

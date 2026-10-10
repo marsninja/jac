@@ -5430,7 +5430,7 @@ impl NativeBuiltinEmitter.emit_sum(
     byte_src = p._bytearray_src_of(list_val);
     if byte_src is not None {
         (data, count) = byte_src;
-        return _sum_bytes(b, data, count, args);
+        return _sum_bytes(p, data, count, args);
     }
 
     helpers: (dict[str, any] | None) = None;
@@ -5479,28 +5479,79 @@ impl NativeBuiltinEmitter.emit_sum(
     b.position_at_start(loop_bb);
     idx = b.phi(i64, name="sum.idx");
     acc = b.phi(acc_ty, name="sum.acc");
+    comp = b.phi(f64, name="sum.comp") if use_float else None;
     idx.add_incoming(ir.Constant(i64, 0), entry_bb);
     acc.add_incoming(initial, entry_bb);
+    if comp is not None {
+        comp.add_incoming(ir.Constant(f64, 0.0), entry_bb);
+    }
     at_end = b.icmp_unsigned(">=", idx, list_len, name="sum.atend");
     b.cbranch(at_end, done_bb, body_bb);
     b.position_at_start(body_bb);
     elem = b.call(helpers["get"], [list_val, idx], name="sum.elem");
     value = _sum_operand(b, elem, use_float);
-    new_acc = b.fadd(acc, value, name="sum.add")
-        if use_float
-        else b.add(acc, value, name="sum.add");
+    new_acc: ir.Value;
+    if comp is None {
+        new_acc = b.add(acc, value, name="sum.add");
+    } else {
+        (new_acc, lost) = _sum_compensated_add(p, acc, value);
+        if not start_float {
+            lost = b.select(
+                b.icmp_unsigned("==", idx, ir.Constant(i64, 0), name="sum.first"),
+                ir.Constant(f64, 0.0),
+                lost,
+                name="sum.lost.kept"
+            );
+        }
+        comp.add_incoming(b.fadd(comp, lost, name="sum.comp.next"), b.basic_block);
+    }
     next_idx = b.add(idx, ir.Constant(i64, 1), name="sum.next");
     body_end = b.basic_block;
     idx.add_incoming(next_idx, body_end);
     acc.add_incoming(new_acc, body_end);
     b.branch(loop_bb);
     b.position_at_start(done_bb);
+    if comp is not None {
+        return _sum_compensated_result(p, acc, comp);
+    }
     return acc;
 }
 
+def _sum_compensated_add(
+    p: NaIRGenPass, acc: ir.Value, value: ir.Value
+) -> tuple[ir.Value, ir.Value] {
+    b = get_builder(p);
+    total = b.fadd(acc, value, name="sum.add");
+    acc_larger = b.fcmp_ordered(
+        ">=", p._fp_fabs(acc), p._fp_fabs(value), name="sum.acc.larger"
+    );
+    lost = b.select(
+        acc_larger,
+        b.fadd(b.fsub(acc, total, name="sum.lost.acc"), value, name="sum.lost.a"),
+        b.fadd(b.fsub(value, total, name="sum.lost.value"), acc, name="sum.lost.b"),
+        name="sum.lost"
+    );
+    return (total, lost);
+}
+
+def _sum_compensated_result(p: NaIRGenPass, acc: ir.Value, comp: ir.Value) -> ir.Value {
+    b = get_builder(p);
+    usable = b.and_(
+        b.fcmp_unordered(
+            "!=", comp, ir.Constant(ir.DoubleType(), 0.0), name="sum.comp.nonzero"
+        ),
+        p._fp_isfinite(comp),
+        name="sum.comp.usable"
+    );
+    return b.select(
+        usable, b.fadd(acc, comp, name="sum.comp.add"), acc, name="sum.result"
+    );
+}
+
 def _sum_bytes(
-    b: ir.IRBuilder, data: ir.Value, count: ir.Value, args: list[ir.Value]
+    p: NaIRGenPass, data: ir.Value, count: ir.Value, args: list[ir.Value]
 ) -> (ir.Value | None) {
+    b = get_builder(p);
     i64 = ir.IntType(64);
     f64 = ir.DoubleType();
     start = args[1] if len(args) == 2 else None;
@@ -5525,22 +5576,33 @@ def _sum_bytes(
     b.position_at_start(loop_bb);
     idx = b.phi(i64, name="sumb.idx");
     acc = b.phi(acc_ty, name="sumb.acc");
+    comp = b.phi(f64, name="sumb.comp") if use_float else None;
     idx.add_incoming(ir.Constant(i64, 0), entry_bb);
     acc.add_incoming(initial, entry_bb);
+    if comp is not None {
+        comp.add_incoming(ir.Constant(f64, 0.0), entry_bb);
+    }
     at_end = b.icmp_unsigned(">=", idx, count, name="sumb.atend");
     b.cbranch(at_end, done_bb, body_bb);
     b.position_at_start(body_bb);
     byte = b.load(b.gep(data, [idx], name="sumb.at"), name="sumb.byte");
     value = _sum_operand(b, b.zext(byte, i64, name="sumb.wide"), use_float);
-    new_acc = b.fadd(acc, value, name="sumb.add")
-        if use_float
-        else b.add(acc, value, name="sumb.add");
+    new_acc: ir.Value;
+    if comp is None {
+        new_acc = b.add(acc, value, name="sumb.add");
+    } else {
+        (new_acc, lost) = _sum_compensated_add(p, acc, value);
+        comp.add_incoming(b.fadd(comp, lost, name="sumb.comp.next"), b.basic_block);
+    }
     next_idx = b.add(idx, ir.Constant(i64, 1), name="sumb.next");
     body_end = b.basic_block;
     idx.add_incoming(next_idx, body_end);
     acc.add_incoming(new_acc, body_end);
     b.branch(loop_bb);
     b.position_at_start(done_bb);
+    if comp is not None {
+        return _sum_compensated_result(p, acc, comp);
+    }
     return acc;
 }
 
