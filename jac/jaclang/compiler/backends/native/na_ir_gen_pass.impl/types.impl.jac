@@ -4208,8 +4208,16 @@ impl NaIRGenPass._emit_mixed_jacval_comparison(
 }
 
 impl NaIRGenPass._emit_mixed_list_eq(
-    left: ir.Value, right: ir.Value
+    left: ir.Value,
+    right: ir.Value,
+    left_ty: (TypeBase | None),
+    right_ty: (TypeBase | None)
 ) -> (ir.Value | None) {
+    if not isinstance(left.type, ir.PointerType)
+        or not isinstance(right.type, ir.PointerType)
+        or left.type == right.type {
+        return None;
+    }
     left_key: (str | None) = None;
     right_key: (str | None) = None;
     for (lkey, ltype) in self.list_types.items() {
@@ -4230,22 +4238,26 @@ impl NaIRGenPass._emit_mixed_list_eq(
     }
     left_et = left_h["elem_type"];
     right_et = right_h["elem_type"];
-    left_float = isinstance(left_et, (ir.DoubleType, ir.FloatType));
-    right_float = isinstance(right_et, (ir.DoubleType, ir.FloatType));
-    tagged = False;
-    if self.jacval_type is not None {
-        peer_et = right_et if left_et == self.jacval_type else left_et;
-        tagged = (left_et == self.jacval_type or right_et == self.jacval_type)
-            and isinstance(peer_et, (ir.IntType, ir.DoubleType, ir.PointerType));
+    left_elem = self._checked_list_elem(left, left_ty);
+    right_elem = self._checked_list_elem(right, right_ty);
+    left_boxed = self._is_jacval_ty(left_et);
+    right_boxed = self._is_jacval_ty(right_et);
+    left_num = self._is_number_slot(left_et, left_elem);
+    right_num = self._is_number_slot(right_et, right_elem);
+    left_view: (ir.Type | None) = None;
+    right_view: (ir.Type | None) = None;
+    if right_boxed and isinstance(left_et, ir.PointerType) {
+        left_view = self._erased_elem_view(left_elem);
     }
-    if not tagged
-        and (
-            (not left_float and not isinstance(left_et, ir.IntType))
-            or (not right_float and not isinstance(right_et, ir.IntType))
-        ) {
+    if left_boxed and isinstance(right_et, ir.PointerType) {
+        right_view = self._erased_elem_view(right_elem);
+    }
+    if not (left_boxed or left_num or left_view is not None)
+        or not (right_boxed or right_num or right_view is not None) {
         return None;
     }
-    as_float = left_float or right_float;
+    left_unsigned = left_num and self._key_elem_unsigned(left_elem);
+    right_unsigned = right_num and self._key_elem_unsigned(right_elem);
     i64 = ir.IntType(64);
     i1_t = ir.IntType(1);
     b = self.builder;
@@ -4269,24 +4281,39 @@ impl NaIRGenPass._emit_mixed_list_eq(
     b.position_at_start(body_bb);
     left_e: ir.Value = b.call(left_h["get"], [left, index], name="lmix.ea");
     right_e: ir.Value = b.call(right_h["get"], [right, index], name="lmix.eb");
-    differ: ir.Value;
-    if tagged {
-        differ = b.not_(
-            self._emit_jacval_eq(
-                self._box_to_jacval(left_e), self._box_to_jacval(right_e)
-            ),
-            name="lmix.ene"
+    same: ir.Value;
+    if left_boxed and right_num {
+        same = self._emit_jacval_number_eq(left_e, right_e, right_unsigned);
+    } elif right_boxed and left_num {
+        same = self._emit_jacval_number_eq(right_e, left_e, left_unsigned);
+    } elif left_boxed or right_boxed {
+        if left_view is not None and left_view != left_e.type {
+            left_e = b.bitcast(left_e, left_view, name="lmix.va");
+        }
+        if right_view is not None and right_view != right_e.type {
+            right_e = b.bitcast(right_e, right_view, name="lmix.vb");
+        }
+        elem_eq: (ir.Value | None) = self._emit_comparison(
+            Tok.EE, left_e, right_e, False
         );
+        if elem_eq is None {
+            self.emit(
+                E5090,
+                kind="comparison",
+                name="list element",
+                help_text="This list element does not lower to a comparable representation."
+            );
+            return None;
+        }
+        same = self._to_bool(elem_eq);
     } else {
-        left_e = self._widen_list_number(left_e, left_key, as_float);
-        right_e = self._widen_list_number(right_e, right_key, as_float);
-        differ = b.fcmp_unordered("!=", left_e, right_e, name="lmix.ene")
-            if as_float
-            else b.icmp_signed("!=", left_e, right_e, name="lmix.ene");
+        same = self._emit_exact_number_eq(
+            left_e, right_e, left_unsigned, right_unsigned
+        );
     }
     next_index = b.add(index, ir.Constant(i64, 1), name="lmix.ni");
     index.add_incoming(next_index, b.basic_block);
-    b.cbranch(differ, false_bb, loop_bb);
+    b.cbranch(same, loop_bb, false_bb);
     b.position_at_start(false_bb);
     b.branch(done_bb);
     b.position_at_start(done_bb);
@@ -4296,32 +4323,150 @@ impl NaIRGenPass._emit_mixed_list_eq(
     return equal;
 }
 
-impl NaIRGenPass._widen_list_number(
-    value: ir.Value, list_key: str, as_float: bool
+impl NaIRGenPass._checked_list_elem(
+    value: ir.Value, ty: (TypeBase | None)
+) -> (TypeBase | None) {
+    if ty is None {
+        return None;
+    }
+    list_ty: TypeBase = self._opt_sole_member(ty) or ty;
+    args = self._agg_key_args(list_ty, "list");
+    if not args {
+        return None;
+    }
+    lowered = self._lower_type(list_ty);
+    if lowered is None or lowered != value.type {
+        return None;
+    }
+    return args[0];
+}
+
+impl NaIRGenPass._is_number_slot(
+    elem_type: ir.Type, elem_ty: (TypeBase | None)
+) -> bool {
+    import from jaclang.compiler.types.type_utils { primitive_type_name_of }
+    shape = self._scalar_shape_named(primitive_type_name_of(elem_ty));
+    if shape is None {
+        return False;
+    }
+    if shape.is_float {
+        return isinstance(elem_type, (ir.DoubleType, ir.FloatType));
+    }
+    return isinstance(elem_type, ir.IntType);
+}
+
+impl NaIRGenPass._erased_elem_view(elem_ty: (TypeBase | None)) -> (ir.Type | None) {
+    if elem_ty is None {
+        return None;
+    }
+    held_ty: TypeBase = self._opt_sole_member(elem_ty) or elem_ty;
+    if not isinstance(held_ty, ClassType) {
+        return None;
+    }
+    if self._container_class_name(held_ty) == "str" {
+        return ir.IntType(8).as_pointer();
+    }
+    view = self._lower_type(held_ty);
+    if isinstance(view, ir.PointerType) and self._ptr_box_kind(view) in (3, 4, 5, 6) {
+        return view;
+    }
+    return None;
+}
+
+impl NaIRGenPass._emit_jacval_number_eq(
+    boxed: ir.Value, number: ir.Value, unsigned: bool
+) -> ir.Value {
+    i8 = ir.IntType(8);
+    b = self.builder;
+    tag = b.extract_value(boxed, 0, name="lmix.jv.tag");
+    payload = b.extract_value(boxed, 1, name="lmix.jv.pay");
+    is_float = b.icmp_unsigned("==", tag, ir.Constant(i8, 1), name="lmix.jv.isflt");
+    is_whole = b.or_(
+        b.icmp_unsigned("==", tag, ir.Constant(i8, 0), name="lmix.jv.isint"),
+        b.icmp_unsigned("==", tag, ir.Constant(i8, 7), name="lmix.jv.isbool"),
+        name="lmix.jv.iswhole"
+    );
+    as_whole = self._emit_exact_number_eq(payload, number, False, unsigned);
+    as_float = self._emit_exact_number_eq(
+        b.bitcast(payload, ir.DoubleType(), name="lmix.jv.fbits"),
+        number,
+        False,
+        unsigned
+    );
+    return b.select(
+        is_float,
+        as_float,
+        b.and_(is_whole, as_whole, name="lmix.jv.whole"),
+        name="lmix.jv.eq"
+    );
+}
+
+impl NaIRGenPass._emit_exact_number_eq(
+    left: ir.Value, right: ir.Value, left_unsigned: bool, right_unsigned: bool
 ) -> ir.Value {
     i64 = ir.IntType(64);
     f64 = ir.DoubleType();
     b = self.builder;
-    if isinstance(value.type, ir.DoubleType) {
+    left_float = isinstance(left.type, (ir.DoubleType, ir.FloatType));
+    right_float = isinstance(right.type, (ir.DoubleType, ir.FloatType));
+    if left_float and right_float {
+        return b.fcmp_ordered(
+            "==",
+            self._to_float_type(left, f64, False),
+            self._to_float_type(right, f64, False),
+            name="lmix.feq"
+        );
+    }
+    if not left_float and not right_float {
+        left_wide = self._widen_list_int(left, left_unsigned);
+        right_wide = self._widen_list_int(right, right_unsigned);
+        same = b.icmp_unsigned("==", left_wide, right_wide, name="lmix.ieq");
+        if left_unsigned != right_unsigned {
+            same = b.and_(
+                same,
+                b.icmp_signed(">=", left_wide, ir.Constant(i64, 0), name="lmix.ipos"),
+                name="lmix.ieq.pos"
+            );
+        }
+        return same;
+    }
+    unsigned = right_unsigned if left_float else left_unsigned;
+    part = self._to_float_type(left if left_float else right, f64, False);
+    wide = self._widen_list_int(right if left_float else left, unsigned);
+    low = 0.0 if unsigned else -9223372036854775808.0;
+    high = 18446744073709551616.0 if unsigned else 9223372036854775808.0;
+    in_range = b.and_(
+        b.fcmp_ordered(">=", part, ir.Constant(f64, low), name="lmix.flo"),
+        b.fcmp_ordered("<", part, ir.Constant(f64, high), name="lmix.fhi"),
+        name="lmix.frange"
+    );
+    safe = b.select(in_range, part, ir.Constant(f64, 0.0), name="lmix.fsafe");
+    as_int = b.fptoui(safe, i64, name="lmix.ftou")
+        if unsigned
+        else b.fptosi(safe, i64, name="lmix.ftoi");
+    back = b.uitofp(as_int, f64, name="lmix.utof")
+        if unsigned
+        else b.sitofp(as_int, f64, name="lmix.itof");
+    return b.and_(
+        in_range,
+        b.and_(
+            b.fcmp_ordered("==", back, safe, name="lmix.fwhole"),
+            b.icmp_unsigned("==", as_int, wide, name="lmix.fieq"),
+            name="lmix.fexact"
+        ),
+        name="lmix.fsame"
+    );
+}
+
+impl NaIRGenPass._widen_list_int(value: ir.Value, unsigned: bool) -> ir.Value {
+    i64 = ir.IntType(64);
+    if not isinstance(value.type, ir.IntType) or value.type.width >= 64 {
         return value;
     }
-    if isinstance(value.type, ir.FloatType) {
-        return b.fpext(value, f64, name="lmix.fpext");
+    if unsigned or value.type.width == 1 {
+        return self.builder.zext(value, i64, name="lmix.zext");
     }
-    unsigned = list_key.startswith("u");
-    wide: ir.Value = value;
-    if isinstance(value.type, ir.IntType) and value.type.width < 64 {
-        unsigned = unsigned or value.type.width == 1;
-        wide = b.zext(value, i64, name="lmix.zext")
-            if unsigned
-            else b.sext(value, i64, name="lmix.sext");
-    }
-    if as_float {
-        return b.uitofp(wide, f64, name="lmix.utof")
-            if unsigned
-            else b.sitofp(wide, f64, name="lmix.itof");
-    }
-    return wide;
+    return self.builder.sext(value, i64, name="lmix.sext");
 }
 
 impl NaIRGenPass._emit_comparison(
@@ -4601,16 +4746,6 @@ impl NaIRGenPass._emit_comparison(
                 return self.builder.icmp_signed(">=", cmp_result, zero, name="strge");
             }
             return None;
-        }
-
-        if op == Tok.EE or op == Tok.NE {
-            mixed_equal = self._emit_mixed_list_eq(left, right);
-            if mixed_equal is not None {
-                if op == Tok.NE {
-                    return self.builder.not_(mixed_equal, name="lmix.ne");
-                }
-                return mixed_equal;
-            }
         }
 
         for (lcmp_key, lcmp_type) in self.list_types.items() {
