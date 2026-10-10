@@ -375,6 +375,29 @@ test "a python-side C binding loads its library when a function is first called"
     assert raised , "calling into an unloadable library must say so";
 }
 
+test "a python-side C binding finds a system library by its bare name" {
+    import from jaclang.runtime.cinterop { clib_bind }
+    import json;
+    # `import from c { ... }` names the library `c`. Where the file that name
+    # spells out is not the library itself (glibc's `libc.so` is a linker
+    # script), the binding asks the system which file the name means.
+    desc = {
+        "lib": {"names": ["c"], "level": 0},
+        "structs": [],
+        "opaque": [],
+        "functions": [
+            {
+                "name": "labs",
+                "params": [["x", ["s", "i64"]]],
+                "ret": ["s", "i64"],
+                "variadic": False
+            }
+        ]
+    };
+    bound = clib_bind({"__file__": ""}, json.dumps(desc));
+    assert bound["labs"](-7) == 7;
+}
+
 test "the emitter unit no longer names the driver" {
     impl_dir = PKG_PATH / "compiler" / "backends" / "py" / "jcir_gen_pass.impl";
     text = "\n".join(
