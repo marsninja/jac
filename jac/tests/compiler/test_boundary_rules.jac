@@ -145,5 +145,6 @@ test "placement does not put a str call across the native boundary" {
         "the boundary diagnostic accepts a str, as main does"
     );
     found = signature_refusals(texty, TARGET_NATIVE, TARGET_SERVER, True);
-    assert [what for (what, _spelled, _why) in found] == ["parameter 's'", "the return"] , found;
+    assert [what for (what, _spelled, _why) in found]
+        == ["parameter 's'", "the return"] , found;
 }
