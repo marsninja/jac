@@ -1,13 +1,12 @@
 """`bytes.join` lowers natively and agrees with Python.
 
-`bytes.join` had no native emitter, so a function joining bytes was demoted to
-Python and a native program depending on it could not be built. A list of
-bytes shares the erased pointer list with a list of str, so the emitter reads
-the argument's checked element type to tell them apart. The fixture joins
-with empty, one-byte and longer separators, empty and one-element lists,
-embedded NULs and comprehension-built parts, and checks `str.join` still
-takes its own path; a native build refuses any demoted function, so identity
-with the Python backend also proves the native path was taken.
+A list of bytes shares the erased pointer list with a list of str, so the
+two joins have to be told apart by what the list was checked to hold. The
+fixture joins with empty, one-byte and longer separators, empty and
+one-element lists, embedded NULs and comprehension-built parts, and checks
+`str.join` still takes its own path; a native build refuses any demoted
+function, so identity with the Python backend under every memory profile
+also proves the native path was taken.
 """
 import from pathlib { Path }
 import from tests.support { assert_native_identity }
