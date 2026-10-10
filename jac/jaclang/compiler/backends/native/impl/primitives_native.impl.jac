@@ -3509,8 +3509,7 @@ impl NativeListEmitter.emit_sort(
     b.cbranch(needs_swap, swap_bb, no_swap);
 
     b.position_at_start(swap_bb);
-    # As in emit_reverse: a swap through the "set" helper would free `ej`
-    # before storing it back.
+
     _sw_dpp = b.gep(
         target, [ir.Constant(i32, 0), ir.Constant(i32, 2)], name="sort.dpp"
     );
@@ -3775,10 +3774,7 @@ impl NativeListEmitter.emit_reverse(
     b.position_at_start(body_bb);
     val_i = b.call(helpers["get"], [target, i_phi], name="rev.val.i");
     val_j = b.call(helpers["get"], [target, j_phi], name="rev.val.j");
-    # A swap moves two elements without changing who owns them. Going through
-    # the "set" helper would release the element it overwrites: the first
-    # store frees `val_i` while it is held only here, and the second stores
-    # the freed element back.
+
     _rev_dpp = b.gep(
         target, [ir.Constant(i32, 0), ir.Constant(i32, 2)], name="rev.dpp"
     );
