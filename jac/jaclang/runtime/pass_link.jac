@@ -10,22 +10,19 @@ class GlobalCell {
         self.name = name;
     }
 
-    @property
-    def cell_contents(self: GlobalCell) -> object {
-        if self.name not in self.namespace {
-            raise NameError(f"name '{self.name}' is not defined");
+    has cell_contents: object {
+        getter {
+            if self.name not in self.namespace {
+                raise NameError(f"name '{self.name}' is not defined");
+            }
+            return self.namespace[self.name];
         }
-        return self.namespace[self.name];
-    }
-
-    @cell_contents.setter
-    def cell_contents(self: GlobalCell, value: object) -> None {
-        self.namespace[self.name] = value;
-    }
-
-    @cell_contents.deleter
-    def cell_contents(self: GlobalCell) -> None {
-        del self.namespace[self.name];
+        setter(self: GlobalCell, value: object) {
+            self.namespace[self.name] = value;
+        }
+        deleter {
+            del self.namespace[self.name];
+        }
     }
 }
 
