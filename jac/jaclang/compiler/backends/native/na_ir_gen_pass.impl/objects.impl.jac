@@ -5089,6 +5089,9 @@ impl NaIRGenPass._report_unreachable_overrides -> None {
         reported: set[str] = set();
         shadowed: set[str] = set();
         seen: set[str] = set();
+        ancestors: dict[str, uni.Archetype] = {};
+        spelled: dict[str, str] = {};
+        reached: list[str] = [];
         queue: list[uni.Expr] = list(arch.base_classes or []);
         while queue {
             base_expr = queue.pop(0);
@@ -5107,13 +5110,34 @@ impl NaIRGenPass._report_unreachable_overrides -> None {
             seen.add(bname);
             sym = base_expr.sym if isinstance(base_expr, uni.NameAtom) else None;
             decl = sym.decl if sym is not None else None;
-            base_arch = decl.find_parent_of_type(uni.Archetype)
+            found_arch = decl.find_parent_of_type(uni.Archetype)
                 if decl is not None
                 else None;
-            if base_arch is None {
+            if found_arch is None {
                 continue;
             }
-            queue.extend(base_arch.base_classes or []);
+            queue.extend(found_arch.base_classes or []);
+            found_key = self._arch_key(found_arch);
+            if found_key not in ancestors {
+                ancestors[found_key] = found_arch;
+                spelled[found_key] = bname;
+                reached.append(found_key);
+            }
+        }
+        walk: list[str] = [];
+        for ranked in (reg.mro_order.get(self._arch_key(arch)) or []) {
+            if ranked in ancestors and ranked not in walk {
+                walk.append(ranked);
+            }
+        }
+        for found_key in reached {
+            if found_key not in walk {
+                walk.append(found_key);
+            }
+        }
+        for base_key in walk {
+            base_arch = ancestors[base_key];
+            bname = spelled[base_key];
             members = ModuleFacts.unwrap_body(base_arch) or [];
             inherited: list[uni.UniNode] = [];
             for member in members {
@@ -5128,7 +5152,7 @@ impl NaIRGenPass._report_unreachable_overrides -> None {
                     shadowed.add(member.name_ref.sym_name);
                 }
             }
-            base_lay = reg.get_layout(self._arch_key(base_arch));
+            base_lay = reg.get_layout(base_key);
             if base_lay is None or base_lay.has_vtable or base_lay.is_osp {
                 continue;
             }

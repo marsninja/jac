@@ -41,6 +41,7 @@ glob FIXTURES = os.path.join(
      OPEN_FIXTURE = "xmod_open_override_main.jac",
      SPLIT_FIXTURE = "xmod_flat_split_override_main.jac",
      QUALIFIED_FIXTURE = "xmod_flat_qualified_main.jac",
+     MIXIN_FIXTURE = "xmod_flat_mixin_main.jac",
      _RUN_MEMO: dict[(str, str)] = {};
 
 """Build a fixture natively: the compiler's exit code and everything it
@@ -129,6 +130,18 @@ test "the refusal reaches a base named through its module" {
     assert code != 0 , f"the build must refuse the lost override; got: {log[-900:]}";
     assert "E5113" in log , f"the refusal must be E5113, got: {log[-900:]}";
     assert "'QualTree.trace' overrides 'FlatSource.trace'" in log , log[-900:];
+    assert "'FlatSource.spot' calls" in log , log[-900:];
+}
+
+test "the refusal follows the order methods are inherited in" {
+    # `Both(Via, Other)`: `Other.spot` is declared closer to `Both` in the
+    # source than `FlatSource.spot`, but `Via` comes first, so the `spot`
+    # `Both` inherits is the flat base's, and it skips `Both.trace`.
+    assert run_lines(MIXIN_FIXTURE, False) == ["spot=8"];
+    (code, log, _) = na_build(MIXIN_FIXTURE);
+    assert code != 0 , f"the build must refuse the lost override; got: {log[-900:]}";
+    assert "E5113" in log , f"the refusal must be E5113, got: {log[-900:]}";
+    assert "'Both.trace' overrides 'FlatSource.trace'" in log , log[-900:];
     assert "'FlatSource.spot' calls" in log , log[-900:];
 }
 
