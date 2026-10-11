@@ -694,6 +694,13 @@ impl JacProgram.stamp_native_import_facts(self: JacProgram, mod: uni.Module) -> 
             }
             drop = not any(name in py_refs for name in import_bound_names(imp));
         }
+        if drop and mod.decided_codespace == 'native' {
+            for decl in imp.clib_decls or [] {
+                if isinstance(decl, uni.Archetype) {
+                    drop = False;
+                }
+            }
+        }
         imp.native_only_drop = drop;
     }
 

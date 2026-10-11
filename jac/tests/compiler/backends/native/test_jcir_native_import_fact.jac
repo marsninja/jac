@@ -75,6 +75,9 @@ glob FIXTURES = os.path.join(
          + "obj Holder {\n    has outer: Outer | None = None,\n        n: int = 3;\n}\n\n"
          + "def held(x: int) -> int {\n    return Holder().n + int(llabs(x)) + inner_width(2, 7);\n}\n"
      ),
+     EMBED_BARE_DECL = (
+         "import from c {\n    obj Inner {\n        has lo: i64,\n            hi: i64;\n    }\n}\n"
+     ),
      EMBED_MAIN = (
          "import from embed_user { held }\n\n"
          + "with entry {\n    print(held(-4));\n}\n"
@@ -295,8 +298,14 @@ test "a python importer binds a C struct re-exported by an inferred-native modul
 `embed_user` declares `Outer`, which holds an `Inner` by value, and names
 `Outer` (never `Inner`) in code its Python side emits; `main` is pinned to
 the server, so it reaches `embed_user` through that Python side."""
-def _embed_project(proj: str, alias: str = "") {
+def _embed_project(proj: str, alias: str = "", bare: bool = False) {
     user = EMBED_USER;
+    if bare {
+        user = user.replace("import from embed_decl { inner_width }\n", "").replace(
+            " + inner_width(2, 7)", ""
+        );
+        assert "inner_width" not in user;
+    }
     if alias {
         user = user.replace("{ Inner }", f"{{ Inner as {alias} }}").replace(
             "inner: Inner", f"inner: {alias}"
@@ -305,7 +314,7 @@ def _embed_project(proj: str, alias: str = "") {
     }
     files = {
         "jac.toml": '[project]\nname = "embed"\n\n[placement.pins]\nmain = "server"\n',
-        "embed_decl.jac": EMBED_DECL,
+        "embed_decl.jac": EMBED_BARE_DECL if bare else EMBED_DECL,
         "embed_user.jac": user,
         "main.jac": EMBED_MAIN
     };
@@ -364,6 +373,33 @@ test "a python caller binds an embedded C record imported under another name" {
         # type the way the module spells it.
         _embed_project(proj, alias="Held");
         assert _run_anchor_main(proj) == "12";
+    }
+}
+
+test "a module that only declares a C record still binds it on its python side" {
+    with tempfile.TemporaryDirectory() as tmp {
+        proj = os.path.realpath(tmp);
+        # `embed_decl` holds nothing but the record: no statement on its
+        # Python side names `Inner`, yet another module's kept C block does.
+        _embed_project(proj, bare=True);
+        prog = JacProgram();
+        mod = prog.compile(
+            file_path=os.path.join(proj, "embed_decl.jac"), options=CompileOptions()
+        );
+        assert mod.decided_codespace == "native" , mod.decided_codespace;
+        assert not python_side_name_refs(mod) , (
+            "the premise is gone: embed_decl's python side names something"
+        );
+        blocks = [
+            imp
+            for imp in mod.get_all_sub_nodes(uni.Import)
+            if imp.clib_decls
+        ];
+        assert len(blocks) == 1 and not blocks[0].native_only_drop , (
+            "a record is a name other modules import: its block stays bound"
+        );
+        # Holder().n + llabs(-4).
+        assert _run_anchor_main(proj) == "7";
     }
 }
 
