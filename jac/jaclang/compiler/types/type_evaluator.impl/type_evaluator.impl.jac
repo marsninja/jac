@@ -4649,8 +4649,7 @@ impl TypeEvaluator.get_narrowed_type(
     }
     flow_node = _find_cfg_node_for(at_node);
     pending = (sym_id, id(flow_node) if flow_node is not None else 0);
-    if pending in self._flow_pending_symbols
-        or len(self._flow_pending_symbols) > 32 {
+    if pending in self._flow_pending_symbols or len(self._flow_pending_symbols) > 32 {
         return None;
     }
     symbol_type = self.get_type_of_symbol(symbol);
