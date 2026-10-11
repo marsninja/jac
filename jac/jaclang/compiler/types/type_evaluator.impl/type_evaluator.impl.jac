@@ -4647,7 +4647,10 @@ impl TypeEvaluator.get_narrowed_type(
     if sym_id in self._and_narrowing_overrides {
         return self._and_narrowing_overrides[sym_id];
     }
-    if sym_id in self._flow_pending_symbols {
+    flow_node = _find_cfg_node_for(at_node);
+    pending = (sym_id, id(flow_node) if flow_node is not None else 0);
+    if pending in self._flow_pending_symbols
+        or len(self._flow_pending_symbols) > 32 {
         return None;
     }
     symbol_type = self.get_type_of_symbol(symbol);
@@ -4656,18 +4659,17 @@ impl TypeEvaluator.get_narrowed_type(
     ) {
         return None;
     }
-    self._flow_pending_symbols.add(sym_id);
+    self._flow_pending_symbols.add(pending);
     try {
         narrowing_target = NarrowingTarget(
             key=symbol.sym_name, declared_type=symbol_type, symbol=symbol
         );
-        flow_node = _find_cfg_node_for(at_node);
         if flow_node is not None {
             return self._get_type_from_flow_node(narrowing_target, flow_node, set());
         }
         return None;
     } finally {
-        self._flow_pending_symbols.discard(sym_id);
+        self._flow_pending_symbols.discard(pending);
     }
 }
 
