@@ -463,7 +463,6 @@ Build configuration:
 ```toml
 [build]
 dir = ".jac"                # Build artifacts directory
-native_closure_cap = 256    # Largest native closure the whole-module path will link
 ```
 
 The `dir` setting controls where all build artifacts are stored:
