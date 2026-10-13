@@ -1265,18 +1265,22 @@ impl JacCompiler.release_compile_state(target_program: JacProgram) -> None {
     if os.environ.get("JAC_NO_UNIT_EVICT") {
         return;
     }
-    owner = target_program.context_root or target_program;
-    internal = self._selfhost.peek_program() if self._selfhost is not None else None;
-    if self._reentrant_depth
-        or owner.scratch.compile_depth
-        or (internal is not None and internal.scratch.compile_depth) {
-        raise RuntimeError("Cannot release compiler state during compilation");
+    import from jaclang.compiler.driver.session_compile { COMPILER_LOCK }
+    with COMPILER_LOCK {
+        owner = target_program.context_root or target_program;
+        internal = self._selfhost.peek_program()
+            if self._selfhost is not None
+            else None;
+        if self._reentrant_depth
+            or owner.scratch.compile_depth
+            or (internal is not None and internal.scratch.compile_depth) {
+            raise RuntimeError("Cannot release compiler state during compilation");
+        }
+        owner.release_compile_closure(collect=False, retain_stubs=False);
+        if internal is not None and internal is not owner {
+            internal.release_compile_closure(collect=False, retain_stubs=False);
+        }
+        import gc;
+        gc.collect();
     }
-    owner.release_compile_closure(collect=False, retain_stubs=False);
-    if internal is not None and internal is not owner {
-        internal.release_compile_closure(collect=False, retain_stubs=False);
-    }
-
-    import gc;
-    gc.collect();
 }

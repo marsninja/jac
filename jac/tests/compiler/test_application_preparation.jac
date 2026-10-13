@@ -791,6 +791,146 @@ test "an in-process prepare releases the compiler state it built" {
     }
 }
 
+test "a preparation on another thread neither breaks nor wedges an in-process prepare" {
+    import threading;
+    import jaclang.compiler.driver.application as application;
+    with tempfile.TemporaryDirectory(prefix='jac-prepare-threads-') as tmp {
+        base = Path(tmp);
+        path = base / 'main.jac';
+        extra = base / 'extra.jac';
+        path.write_text("def:pub hello -> int { return 1; }\n");
+        extra.write_text("def:pub other -> int { return 2; }\n");
+        program = JacProgram();
+        compiler = program._get_compiler();
+        first = prepare_application(str(path), program, tmp);
+        releasing = threading.Event();
+        compiling = threading.Event();
+        released = threading.Event();
+        original_release = application._release_compile_state;
+        original_enter = JacCompiler.enter_compile;
+        def held_release(owner: any) {
+            releasing.set();
+            compiling.wait(5);
+            try {
+                original_release(owner);
+            } finally {
+                released.set();
+            }
+        }
+        def held_enter(self: any, ctx: any) -> any {
+            frame = original_enter(self, ctx);
+            if threading.current_thread().name == 'dynamic-import'
+                and not compiling.is_set() {
+                compiling.set();
+                released.wait(5);
+            }
+            return frame;
+        }
+        errors: list[str] = [];
+        def reprepare {
+            try {
+                application.reprepare_application(first, program);
+            } except Exception as e {
+                errors.append(f"reprepare: {e}");
+            }
+        }
+        def dynamic {
+            releasing.wait(120);
+            try {
+                application.prepare_dynamic_module(str(extra), program, first);
+            } except Exception as e {
+                errors.append(f"dynamic import: {e}");
+            }
+        }
+        path.write_text("def:pub hello -> int { return 3; }\n");
+        try {
+            with patch.object(application, '_release_compile_state', held_release) {
+                with patch.object(JacCompiler, 'enter_compile', held_enter) {
+                    threads = [
+                        threading.Thread(target=reprepare, name='hmr-reprepare'),
+                        threading.Thread(target=dynamic, name='dynamic-import')
+                    ];
+                    for thread in threads {
+                        thread.start();
+                    }
+                    for thread in threads {
+                        thread.join(300);
+                    }
+                }
+            }
+            assert not errors , errors;
+            assert compiler._reentrant_depth == 0 , (
+                f"the compiler was left {compiler._reentrant_depth} compiles deep"
+            );
+            path.write_text("def:pub hello -> int { return 4; }\n");
+            assert application.reprepare_application(first, program).code;
+        } finally {
+            forget(str(path));
+        }
+    }
+}
+
+test "compiles on two threads leave the compiler free to release" {
+    import threading;
+    with tempfile.TemporaryDirectory(prefix='jac-compile-threads-') as tmp {
+        base = Path(tmp);
+        first = base / 'first.jac';
+        second = base / 'second.jac';
+        first.write_text("def:pub one -> int { return 1; }\n");
+        second.write_text("def:pub two -> int { return 2; }\n");
+        program = JacProgram();
+        compiler = program._get_compiler();
+        first_entered = threading.Event();
+        second_entered = threading.Event();
+        first_done = threading.Event();
+        original_enter = JacCompiler.enter_compile;
+        def held_enter(self: any, ctx: any) -> any {
+            frame = original_enter(self, ctx);
+            name = threading.current_thread().name;
+            if name == 'first' and not first_entered.is_set() {
+                first_entered.set();
+                second_entered.wait(2);
+            } elif name == 'second' and not second_entered.is_set() {
+                second_entered.set();
+                first_done.wait(2);
+            }
+            return frame;
+        }
+        errors: list[str] = [];
+        def compile_one(path: Path) {
+            try {
+                if path == second {
+                    first_entered.wait(60);
+                }
+                compiler.compile(str(path), program);
+            } except Exception as e {
+                errors.append(f"{path.name}: {e}");
+            } finally {
+                if path == first {
+                    first_done.set();
+                }
+            }
+        }
+        with patch.object(JacCompiler, 'enter_compile', held_enter) {
+            threads = [
+                threading.Thread(target=compile_one, args=(first, ), name='first'),
+                threading.Thread(target=compile_one, args=(second, ), name='second')
+            ];
+            for thread in threads {
+                thread.start();
+            }
+            for thread in threads {
+                thread.join(300);
+            }
+        }
+        assert not errors , errors;
+        assert compiler._reentrant_depth == 0 , (
+            f"the compiler was left {compiler._reentrant_depth} compiles deep"
+        );
+        compiler.release_compile_state(program);
+    }
+}
+
 test "prepared applications are reused by content, not by timestamp" {
     import time;
     with tempfile.TemporaryDirectory() as tmp {
