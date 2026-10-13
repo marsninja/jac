@@ -4,7 +4,6 @@ import dis;
 import os;
 import shutil;
 import tempfile;
-import time;
 import from pathlib { Path }
 import from unittest.mock { patch }
 import from jaclang.compiler.driver.application { prepare_application }
@@ -977,9 +976,12 @@ test "a dev reload waits for the preparation lock before it takes the import loc
     import from jaclang.compiler.driver.application { PREPARATION_LOCK }
     import from jaclang.server.server { JacAPIServer }
     holding = threading.Event();
+    requesting = threading.Event();
+    reloading = threading.Event();
     waiting: list[bool] = [];
     def reload_under_import_lock {
         _imp.acquire_lock();
+        reloading.set();
         try {
             took = PREPARATION_LOCK.acquire(timeout=5);
             waiting.append(not took);
@@ -993,7 +995,8 @@ test "a dev reload waits for the preparation lock before it takes the import loc
     def watcher {
         with PREPARATION_LOCK {
             holding.set();
-            time.sleep(0.5);
+            assert requesting.wait(60) , "the request never started";
+            reloading.wait(5);
             _imp.acquire_lock();
             _imp.release_lock();
         }
@@ -1004,6 +1007,7 @@ test "a dev reload waits for the preparation lock before it takes the import loc
             introspector=_ReloadingIntrospector(reload=reload_under_import_lock)
         );
         refresh: any = JacAPIServer._refresh_dev_endpoints;
+        requesting.set();
         refresh(server);
     }
     threads = [
