@@ -355,6 +355,7 @@ test "a shared annex folder reports only the annexes of watched modules" {
             "impl/shared.extra.impl.jac",
             "test/shared.test.jac",
             "impl/local.impl.jac",
+            "impl/local.extra.impl.jac",
             "impl/plain.jac",
             "web/page.impl.jac"
         ] {
@@ -363,6 +364,7 @@ test "a shared annex folder reports only the annexes of watched modules" {
         seen = sorted(str(Path(p).relative_to(top)) for p in watcher._pending_events);
         assert seen
             == [
+                "impl/local.extra.impl.jac",
                 "impl/local.impl.jac",
                 "impl/plain.jac",
                 "impl/shared.extra.impl.jac",

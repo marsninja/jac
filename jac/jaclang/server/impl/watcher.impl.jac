@@ -211,9 +211,18 @@ impl JacFileWatcher._foreign_shared_annex(path: str) -> bool {
     if not files {
         return False;
     }
-    own_module = changed[:-len(suffix)] + JAC_SUFFIX;
-    return not os.path.isfile(own_module)
-        and not any(is_annex_path_of(changed, f) for f in files);
+    try {
+        names = os.listdir(folder);
+    } except OSError {
+        names = [];
+    }
+    local = [
+        os.path.join(folder, name)
+        for name in names
+        if name.endswith(JAC_SUFFIX)
+            and not any(name.endswith(annex) for annex in ANNEX_FOLDER)
+    ];
+    return not any(is_annex_path_of(changed, module) for module in [*local, *files]);
 }
 
 impl JacFileWatcher._on_change(
