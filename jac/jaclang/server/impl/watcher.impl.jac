@@ -55,9 +55,12 @@ impl watch_roots(base: str, app_root: str, sources: list[str]) -> list[str] {
 }
 
 impl application_watch_roots(base: str, application: any, program: any) -> list[str] {
-    return watch_roots(
-        base, application.`root, [str(key) for key in program.mod.hub.keys()]
-    );
+    sources = [str(key) for key in program.mod.hub.keys()];
+    for part in [application, *application.applications] {
+        sources.extend(part.code);
+        sources.extend(part.manifests);
+    }
+    return watch_roots(base, application.`root, sources);
 }
 
 impl JacFileWatcher.start -> None {
