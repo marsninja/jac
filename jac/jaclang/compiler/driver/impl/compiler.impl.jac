@@ -799,7 +799,7 @@ impl JacCompiler.enter_compile(ctx: SessionContext) -> CompileFrame {
     frame = HostCompileFrame(
         nested=self._reentrant_depth > 0, depth_prev=self._reentrant_depth
     );
-    self._reentrant_depth = frame.depth_prev + 1;
+    self._reentrant_depth += 1;
     if frame.depth_prev == 0 {
         self._closure_opts = ctx.options;
     }
@@ -856,7 +856,9 @@ impl JacCompiler.assemble_native(
 
 impl JacCompiler.leave_compile(ctx: SessionContext, frame: CompileFrame) {
     depth_prev = frame.depth_prev if isinstance(frame, HostCompileFrame) else 0;
-    self._reentrant_depth = depth_prev;
+    self._reentrant_depth = max(self._reentrant_depth - 1, 0)
+        if isinstance(frame, HostCompileFrame)
+        else 0;
     if depth_prev == 0 {
         self._closure_opts = None;
         if ctx.caller is not ctx.target {
@@ -1265,22 +1267,18 @@ impl JacCompiler.release_compile_state(target_program: JacProgram) -> None {
     if os.environ.get("JAC_NO_UNIT_EVICT") {
         return;
     }
-    import from jaclang.compiler.driver.session_compile { COMPILER_LOCK }
-    with COMPILER_LOCK {
-        owner = target_program.context_root or target_program;
-        internal = self._selfhost.peek_program()
-            if self._selfhost is not None
-            else None;
-        if self._reentrant_depth
-            or owner.scratch.compile_depth
-            or (internal is not None and internal.scratch.compile_depth) {
-            raise RuntimeError("Cannot release compiler state during compilation");
-        }
-        owner.release_compile_closure(collect=False, retain_stubs=False);
-        if internal is not None and internal is not owner {
-            internal.release_compile_closure(collect=False, retain_stubs=False);
-        }
-        import gc;
-        gc.collect();
+    owner = target_program.context_root or target_program;
+    internal = self._selfhost.peek_program() if self._selfhost is not None else None;
+    if self._reentrant_depth
+        or owner.scratch.compile_depth
+        or (internal is not None and internal.scratch.compile_depth) {
+        raise RuntimeError("Cannot release compiler state during compilation");
     }
+    owner.release_compile_closure(collect=False, retain_stubs=False);
+    if internal is not None and internal is not owner {
+        internal.release_compile_closure(collect=False, retain_stubs=False);
+    }
+
+    import gc;
+    gc.collect();
 }

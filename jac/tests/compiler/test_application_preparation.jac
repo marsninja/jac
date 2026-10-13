@@ -791,10 +791,23 @@ test "an in-process prepare releases the compiler state it built" {
     }
 }
 
+def _join_all(threads: list[any]) -> list[str] {
+    for thread in threads {
+        thread.join(300);
+    }
+    return [
+        thread.name
+        for thread in threads
+        if thread.is_alive()
+    ];
+}
+
 test "a preparation on another thread neither breaks nor wedges an in-process prepare" {
     import threading;
     import jaclang.compiler.driver.application as application;
-    with tempfile.TemporaryDirectory(prefix='jac-prepare-threads-') as tmp {
+    tmp = tempfile.mkdtemp(prefix='jac-prepare-threads-');
+    stuck: list[str] = [];
+    try {
         base = Path(tmp);
         path = base / 'main.jac';
         extra = base / 'extra.jac';
@@ -853,11 +866,10 @@ test "a preparation on another thread neither breaks nor wedges an in-process pr
                     for thread in threads {
                         thread.start();
                     }
-                    for thread in threads {
-                        thread.join(300);
-                    }
+                    stuck.extend(_join_all(threads));
                 }
             }
+            assert not stuck , f"workers still running: {stuck}";
             assert not errors , errors;
             assert compiler._reentrant_depth == 0 , (
                 f"the compiler was left {compiler._reentrant_depth} compiles deep"
@@ -865,14 +877,22 @@ test "a preparation on another thread neither breaks nor wedges an in-process pr
             path.write_text("def:pub hello -> int { return 4; }\n");
             assert application.reprepare_application(first, program).code;
         } finally {
-            forget(str(path));
+            if not stuck {
+                forget(str(path));
+            }
+        }
+    } finally {
+        if not stuck {
+            shutil.rmtree(tmp, ignore_errors=True);
         }
     }
 }
 
 test "compiles on two threads leave the compiler free to release" {
     import threading;
-    with tempfile.TemporaryDirectory(prefix='jac-compile-threads-') as tmp {
+    tmp = tempfile.mkdtemp(prefix='jac-compile-threads-');
+    stuck: list[str] = [];
+    try {
         base = Path(tmp);
         first = base / 'first.jac';
         second = base / 'second.jac';
@@ -919,15 +939,18 @@ test "compiles on two threads leave the compiler free to release" {
             for thread in threads {
                 thread.start();
             }
-            for thread in threads {
-                thread.join(300);
-            }
+            stuck.extend(_join_all(threads));
         }
+        assert not stuck , f"workers still running: {stuck}";
         assert not errors , errors;
         assert compiler._reentrant_depth == 0 , (
             f"the compiler was left {compiler._reentrant_depth} compiles deep"
         );
         compiler.release_compile_state(program);
+    } finally {
+        if not stuck {
+            shutil.rmtree(tmp, ignore_errors=True);
+        }
     }
 }
 
