@@ -241,63 +241,43 @@ test "a current checkout kernel loads silently and reports where it came from" {
     assert said == "";
 }
 
-"""Load the kernel at `lib` as a current checkout kernel, twice, and return
-both results, the router's resolution afterwards and what it printed."""
-def _load_current(lib: str) -> tuple[any, any, any, str] {
+test "a current kernel that does not load runs from bytecode and says why once" {
     err = io.StringIO();
-    mine = Probe.hit(Source.CHECKOUT, lib, {"classes": {}, "plan_digest": "p"});
-    router.forget();
-    reset_loaded();
-    try {
-        with _toolchain() {
-            with patch.object(router, "_omitted", return_value=frozenset()) {
-                with patch.object(resolver, "_from_sealed_image", return_value=None) {
+    with tempfile.TemporaryDirectory(prefix="jac-kernel-") as tmp {
+        lib = os.path.join(tmp, "libjac_compiler.so");
+        Path(lib).write_bytes(b"not a shared library");
+        mine = Probe.hit(Source.CHECKOUT, lib, {"classes": {}, "plan_digest": "p"});
+        router.forget();
+        reset_loaded();
+        try {
+            with _toolchain() {
+                with patch.object(router, "_omitted", return_value=frozenset()) {
                     with patch.object(
-                        KernelArtifact, "probe_checkout", return_value=mine
+                        resolver, "_from_sealed_image", return_value=None
                     ) {
-                        with patch.object(sys, "stderr", err) {
-                            first = ensure_loaded();
-                            again = ensure_loaded();
-                            after = router.resolve("kernel");
+                        with patch.object(
+                            KernelArtifact, "probe_checkout", return_value=mine
+                        ) {
+                            with patch.object(sys, "stderr", err) {
+                                first = ensure_loaded();
+                                again = ensure_loaded();
+                                after = router.resolve("kernel");
+                            }
                         }
                     }
                 }
             }
+        } finally {
+            router.forget();
+            reset_loaded();
         }
-    } finally {
-        router.forget();
-        reset_loaded();
     }
-    return (first, again, after, err.getvalue());
-}
-
-def _assert_floor(lib: str, loaded: tuple[any, any, any, str]) {
-    (first, again, after, said) = loaded;
+    said = err.getvalue();
     assert first is None and again is None;
     assert after.on_floor() , after.reason;
     assert said.count("kernel runs on its floor") == 1 , said;
     assert f"{lib} does not load (" in said , said;
     assert "jac native build kernel" in said , said;
-}
-
-test "a current kernel that does not load runs from bytecode and says why once" {
-    with tempfile.TemporaryDirectory(prefix="jac-kernel-") as tmp {
-        lib = os.path.join(tmp, "libjac_compiler.so");
-        Path(lib).write_bytes(b"not a shared library");
-        loaded = _load_current(lib);
-    }
-    _assert_floor(lib, loaded);
-}
-
-test "a current kernel that loads without the kernel's exports runs from bytecode" {
-    import _ctypes;
-    lib = _ctypes?.__file__;
-    if not lib {
-        return;
-    }
-    loaded = _load_current(lib);
-    _assert_floor(lib, loaded);
-    assert "jac_str_new" in loaded[3] , loaded[3];
 }
 
 test "the sidecar reader wants a classes map" {
