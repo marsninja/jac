@@ -617,16 +617,8 @@ def ensure_loaded -> (NativeCompiler | None) {
     lib_path = os.path.realpath(found.lib_path);
     k = _LOADED.get(lib_path);
     if k is None {
-        try {
-            loaded = NativeCompiler(lib_path, found.layout);
-        } except (OSError, AttributeError) as e {
-            import from jaclang.artifacts.router { demote }
-            demote("kernel", f"{found.lib_path} does not load ({e})");
-            _RESOLVED.append(None);
-            return None;
-        }
-        _LOADED[lib_path] = loaded;
-        k = loaded;
+        k = NativeCompiler(lib_path, found.layout);
+        _LOADED[lib_path] = k;
     }
     _KERNEL_CELL.append(k);
     return k;
