@@ -1,25 +1,3 @@
-import from jaclang.compiler.frontend.unitree {
-    Ability,
-    Archetype,
-    AtomTrailer,
-    AtomUnit,
-    BinaryExpr,
-    Ellipsis,
-    Enum,
-    FuncSignature,
-    HasVar,
-    IndexSlice,
-    Module,
-    NameAtom,
-    Null,
-    String,
-    Token,
-    TupleVal,
-    UniNode,
-    resolved_decl_of
-}
-import from jaclang.compiler.capability_notes { TARGET_NATIVE, TARGET_SERVER }
-
 glob PYTHON_NATIVE_WIRE: tuple[str, ...] = ('int', 'float', 'bool', 'str'),
      JSON_SCALARS: tuple[str, ...] = (
          'str',
@@ -64,7 +42,6 @@ glob PYTHON_NATIVE_WIRE: tuple[str, ...] = ('int', 'float', 'bool', 'str'),
      );
 
 def python_native_wire -> set[str] {
-    import from jaclang.runtime.scalars { sized_scalar_names }
     return set(PYTHON_NATIVE_WIRE) | set(sized_scalar_names());
 }
 
@@ -179,6 +156,72 @@ def declared_type(scope: (Module | None), name: str) -> (Archetype | Enum | None
     return target if isinstance(target, (Archetype, Enum)) else None;
 }
 
+def alias_value(scope: (Module | None), name: str) -> (UniNode | None) {
+    if scope is None or scope.sym_tab is None {
+        return None;
+    }
+    sym = scope.sym_tab.lookup(name, deep=True);
+    if sym is None {
+        return None;
+    }
+    found: (UniNode | None) = sym.defn[0] if sym.defn else None;
+    resolved = resolved_decl_of(sym);
+    if resolved is not None {
+        found = resolved;
+    }
+    if isinstance(found, NameAtom) {
+        if isinstance(found.name_of, TypeAlias) {
+            return found.name_of.value;
+        }
+        if isinstance(found.parent, Assignment) {
+            return found.parent.value;
+        }
+    }
+    return None;
+}
+
+def non_string_key(
+    tag: (UniNode | None), scope: (Module | None), depth: int
+) -> (str | None) {
+    (key, key_args) = annotation_shape(tag);
+    if key in ('', '...', 'str', 'any', 'Any') {
+        return None;
+    }
+    if key in ('|', 'Union', 'Optional') {
+        for branch in key_args {
+            bad = non_string_key(branch, scope, depth);
+            if bad is not None {
+                return bad;
+            }
+        }
+        return 'None' if key == 'Optional' else None;
+    }
+    if key == 'Literal' {
+        for value in key_args {
+            if not isinstance(value, (String, MultiString)) {
+                return key;
+            }
+        }
+        return None;
+    }
+    if key in JSON_SCALARS
+        or key in sized_scalar_names()
+        or key in JSON_SEQUENCES
+        or key in JSON_MAPPINGS {
+        return key;
+    }
+    if depth < 8 {
+        target = alias_value(scope, key);
+        if target is not None {
+            return non_string_key(target, scope, depth + 1);
+        }
+    }
+    if declared_type(scope, key) is not None {
+        return key;
+    }
+    return None;
+}
+
 def json_refusal(
     tag: (UniNode | None),
     scope: (Module | None),
@@ -186,8 +229,6 @@ def json_refusal(
     to_server: bool,
     seen: set[str]
 ) -> (tuple[str, str] | None) {
-    import from jaclang.compiler.frontend.unparse { unparse_node }
-    import from jaclang.runtime.scalars { sized_scalar_names }
     (head, args) = annotation_shape(tag);
     spelled = unparse_node(tag) if tag is not None else 'any';
     if head == '' or head == '...' {
@@ -216,8 +257,8 @@ def json_refusal(
     }
     if head in JSON_MAPPINGS {
         if len(args) > 0 {
-            (key, _key_args) = annotation_shape(args[0]);
-            if key not in ('str', 'any', 'Any') {
+            key = non_string_key(args[0], scope, 0);
+            if key is not None {
                 return (
                     spelled,
                     f"a JSON object has string keys, so '{key}' keys arrive as "
@@ -295,7 +336,6 @@ def json_refusal(
 def signature_refusals(
     decl: Ability, src: str, dst: str, placing: bool = False
 ) -> list[tuple[str, str, str]] {
-    import from jaclang.compiler.frontend.unparse { unparse_node }
     out: list[tuple[str, str, str]] = [];
     sig = decl.signature;
     if not isinstance(sig, FuncSignature) or src == dst {
@@ -355,7 +395,6 @@ def archetype_refusals(
 }
 
 def archetype_fields(decl: Archetype) -> list[tuple[HasVar, (Module | None)]] {
-    import from jaclang.compiler.passes.layout_pass { referenced_archetype }
     out: list[tuple[HasVar, (Module | None)]] = [];
     seen: set[int] = set();
     pending: list[Archetype] = [decl];

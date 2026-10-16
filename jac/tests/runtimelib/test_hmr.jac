@@ -3,6 +3,7 @@
 Tests for the file watcher and HotReloader functionality.
 """
 
+import os;
 import tempfile;
 import threading;
 import time;
@@ -228,6 +229,91 @@ test "watch roots cover the directories the application's modules come from" {
     }
 }
 
+test "a served workspace app watches the directories its prepared modules come from" {
+    import os;
+    import sys;
+    import from jaclang.runtime.runtime { JacRuntime as Jac }
+    import from jaclang.compiler.driver.application { prepare_application }
+    import from jaclang.runtime.prepared { initialize_application, forget }
+    with tempfile.TemporaryDirectory() as tmp {
+        top = os.path.realpath(tmp);
+        web = os.path.join(top, "web");
+        for rel in ["web", "core", "svc"] {
+            os.makedirs(os.path.join(top, rel));
+        }
+        Path(top, "core", "shared.jac").write_text('def value -> int { return 1; }\n');
+        Path(top, "svc", "api.jac").write_text('def:pub ping -> int { return 1; }\n');
+        source_path = os.path.join(web, "main.jac");
+        Path(source_path).write_text(
+            'import from core.shared { value }\n\ndef doubled -> int { return value() * 2; }\n'
+        );
+        service = os.path.join(top, "svc", "api.jac");
+        expected = [web, os.path.join(top, "core"), os.path.join(top, "svc")];
+        for attempt in ["prepared", "restored"] {
+            application = prepare_application(
+                source_path, Jac.get_program(), top, [service]
+            );
+            module = initialize_application(application);
+            prefix = module.__name__.split('.')[0];
+            try {
+                roots = application_watch_roots(web, application, Jac.get_program());
+                assert roots == expected , f"{attempt}: {roots}";
+            } finally {
+                forget(source_path);
+                for name in list(sys.modules) {
+                    if name == prefix or name.startswith(prefix + '.') {
+                        sys.modules.pop(name, None);
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "a client-only sibling directory is watched on a fresh and a restored start" {
+    import os;
+    import sys;
+    import from jaclang.runtime.runtime { JacRuntime as Jac }
+    import from jaclang.compiler.driver.application { prepare_application }
+    import from jaclang.runtime.prepared { initialize_application, forget }
+    with tempfile.TemporaryDirectory() as tmp {
+        top = os.path.realpath(tmp);
+        web = os.path.join(top, "web");
+        for rel in ["web", "ui"] {
+            os.makedirs(os.path.join(top, rel));
+        }
+        Path(top, "jac.toml").write_text('[project]\nname = "client-sibling"\n');
+        Path(top, "ui", "Badge.jac").write_text(
+            'def:pub Badge -> JsxElement {\n    return <span>ok</span>;\n}\n'
+        );
+        source_path = os.path.join(web, "main.jac");
+        Path(source_path).write_text(
+            'import from ui.Badge { Badge }\n\ndef:pub app -> JsxElement {\n    return <Badge/>;\n}\n'
+        );
+        for attempt in ["prepared", "restored"] {
+            application = prepare_application(
+                source_path, Jac.get_program(), top, (), True
+            );
+            module = initialize_application(application);
+            prefix = module.__name__.split('.')[0];
+            try {
+                assert os.path.join(top, "ui", "Badge.jac") not in application.code , (
+                    "the client-only module is executable server code"
+                );
+                roots = application_watch_roots(web, application, Jac.get_program());
+                assert roots == [web, os.path.join(top, "ui")] , f"{attempt}: {roots}";
+            } finally {
+                forget(source_path);
+                for name in list(sys.modules) {
+                    if name == prefix or name.startswith(prefix + '.') {
+                        sys.modules.pop(name, None);
+                    }
+                }
+            }
+        }
+    }
+}
+
 test "the compiler's own modules never make a watch root, wherever its checkout sits" {
     import copy;
     import os;
@@ -314,119 +400,6 @@ test "nothing under site-packages or a hidden directory becomes a watch root" {
             os.path.join(top, "core", "__pycache__", "m.jac")
         ];
         assert watch_roots(base, top, sources) == [base];
-    }
-}
-
-# The dev server hands the watcher the prepared application's root and the
-# modules the program loaded. On a workspace-shaped project that has to reach
-# the sibling directory the entry imports from.
-test "the watch roots of a prepared workspace app include its shared directory" {
-    import os;
-    import from jaclang.runtime.runtime { JacRuntime as Jac }
-    import from jaclang.compiler.driver.application { prepare_application }
-    import from jaclang.runtime.prepared { forget }
-    with tempfile.TemporaryDirectory() as tmp {
-        top = os.path.realpath(tmp);
-        web = os.path.join(top, "web");
-        os.makedirs(web);
-        os.makedirs(os.path.join(top, "core"));
-        Path(top, "core", "shared.jac").write_text('def value -> int { return 1; }\n');
-        source_path = Path(web, "main.jac");
-        source_path.write_text(
-            'import from core.shared { value }\n\ndef doubled -> int { return value() * 2; }\n'
-        );
-        application = prepare_application(str(source_path), Jac.get_program(), top);
-        try {
-            roots = application_watch_roots(web, application, Jac.get_program());
-            assert roots == [web, os.path.join(top, "core")] , str(roots);
-        } finally {
-            forget(str(source_path));
-        }
-    }
-}
-
-test "a served workspace app watches the directories its prepared modules come from" {
-    import os;
-    import sys;
-    import from jaclang.runtime.runtime { JacRuntime as Jac }
-    import from jaclang.compiler.driver.application { prepare_application }
-    import from jaclang.runtime.prepared { initialize_application, forget }
-    with tempfile.TemporaryDirectory() as tmp {
-        top = os.path.realpath(tmp);
-        web = os.path.join(top, "web");
-        for rel in ["web", "core", "svc"] {
-            os.makedirs(os.path.join(top, rel));
-        }
-        Path(top, "core", "shared.jac").write_text('def value -> int { return 1; }\n');
-        Path(top, "svc", "api.jac").write_text('def:pub ping -> int { return 1; }\n');
-        source_path = os.path.join(web, "main.jac");
-        Path(source_path).write_text(
-            'import from core.shared { value }\n\ndef doubled -> int { return value() * 2; }\n'
-        );
-        service = os.path.join(top, "svc", "api.jac");
-        expected = [web, os.path.join(top, "core"), os.path.join(top, "svc")];
-        for attempt in ["prepared", "restored"] {
-            application = prepare_application(
-                source_path, Jac.get_program(), top, [service]
-            );
-            module = initialize_application(application);
-            prefix = module.__name__.split('.')[0];
-            try {
-                roots = application_watch_roots(web, application, Jac.get_program());
-                assert roots == expected , f"{attempt}: {roots}";
-            } finally {
-                forget(source_path);
-                for name in list(sys.modules) {
-                    if name == prefix or name.startswith(prefix + '.') {
-                        sys.modules.pop(name, None);
-                    }
-                }
-            }
-        }
-    }
-}
-
-test "a client-only sibling directory is watched on a fresh and a restored start" {
-    import os;
-    import sys;
-    import from jaclang.runtime.runtime { JacRuntime as Jac }
-    import from jaclang.compiler.driver.application { prepare_application }
-    import from jaclang.runtime.prepared { initialize_application, forget }
-    with tempfile.TemporaryDirectory() as tmp {
-        top = os.path.realpath(tmp);
-        web = os.path.join(top, "web");
-        for rel in ["web", "ui"] {
-            os.makedirs(os.path.join(top, rel));
-        }
-        Path(top, "jac.toml").write_text('[project]\nname = "client-sibling"\n');
-        Path(top, "ui", "Badge.jac").write_text(
-            'def:pub Badge -> JsxElement {\n    return <span>ok</span>;\n}\n'
-        );
-        source_path = os.path.join(web, "main.jac");
-        Path(source_path).write_text(
-            'import from ui.Badge { Badge }\n\ndef:pub app -> JsxElement {\n    return <Badge/>;\n}\n'
-        );
-        for attempt in ["prepared", "restored"] {
-            application = prepare_application(
-                source_path, Jac.get_program(), top, (), True
-            );
-            module = initialize_application(application);
-            prefix = module.__name__.split('.')[0];
-            try {
-                assert os.path.join(top, "ui", "Badge.jac") not in application.code , (
-                    "the client-only module is executable server code"
-                );
-                roots = application_watch_roots(web, application, Jac.get_program());
-                assert roots == [web, os.path.join(top, "ui")] , f"{attempt}: {roots}";
-            } finally {
-                forget(source_path);
-                for name in list(sys.modules) {
-                    if name == prefix or name.startswith(prefix + '.') {
-                        sys.modules.pop(name, None);
-                    }
-                }
-            }
-        }
     }
 }
 
