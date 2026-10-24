@@ -611,3 +611,68 @@ test "an in-process host targets the program it serves, so its jac.toml config a
         shutil.rmtree(tmp, ignore_errors=True);
     }
 }
+
+
+"""An app upgraded across the target fix keeps its database.
+
+Before the runtime targeted the served program, an embedded app's database was
+`jac_main_<digest of its base path>`; now it is named from the app's own
+project. The host renames the old one at boot, so users and graph carry over.
+"""
+test "an embedded boot renames the app's pre-target database to its current name" {
+    import from jaclang.data.dbcatalog {
+        MAINTENANCE_DB,
+        connect_admin,
+        list_databases,
+        record_database,
+        DbKind
+    }
+    import from jaclang.data.pgembed { PgRuntime }
+    import from jaclang.server.session { project_database, shared_pg_data_dir }
+    os.environ["JAC_SCALE_RUNTIME"] = "1";
+    proj = _project();
+    tmp = os.path.dirname(proj);
+    ctx: any = None;
+    try {
+        app_dir = _app_dir(tmp);
+        data = os.path.join(tmp, "data");
+        os.environ["JAC_DATA_PATH"] = data;
+        entry_path = os.path.join(proj, "main.jac");
+        base = os.path.join(data, ".jac", "desktop", "graph");
+        os.makedirs(base, exist_ok=True);
+        legacy = host_boot.legacy_database_name(base);
+        current = project_database(base, entry_path).name;
+        assert legacy != current , (legacy, current);
+
+        host_boot._enter_embedded_env(host_boot.embedded_store_env(app_dir, data, ""));
+        rt = PgRuntime(data_dir=shared_pg_data_dir(), database=MAINTENANCE_DB);
+        conn: any = connect_admin(rt.ensure());
+        try {
+            conn.run(f'CREATE DATABASE "{legacy}"');
+            record_database(conn, legacy, DbKind.PROJECT, base);
+        } finally {
+            conn.close();
+        }
+        host_boot._leave_embedded_env();
+
+        ctx = host_boot.boot(_config(app_dir, {"entry": entry_path}));
+        (code, body) = _post(
+            f"http://127.0.0.1:{ctx.port}/walker/greet", {"name": "kept"}
+        );
+        assert code == 200 , (code, body);
+        conn = connect_admin(rt.ensure());
+        try {
+            names = {r.database for r in list_databases(conn, with_size=False)};
+        } finally {
+            conn.close();
+        }
+        assert current in names and legacy not in names , names;
+    } finally {
+        if ctx is not None {
+            ctx.shutdown();
+        }
+        os.environ.pop("JAC_DATA_PATH", None);
+        set_config(None);
+        shutil.rmtree(tmp, ignore_errors=True);
+    }
+}
