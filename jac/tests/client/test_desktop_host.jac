@@ -416,3 +416,59 @@ test "desktop release colocates services without an unrelated web app" {
         shutil.rmtree(tmp, ignore_errors=True);
     }
 }
+
+
+"""The served program is the runtime's target, as under `jac run`.
+
+Project-relative plugin config resolves from the runtime's target path: with
+none set it falls back to the process's cwd, which for a desktop host is the
+app's output directory. byLLM then ignored the app's `[byllm.model]` and sent
+every `by llm` call to its default model.
+"""
+test "an in-process host targets the program it serves, so its jac.toml config applies" {
+    os.environ["JAC_SCALE_RUNTIME"] = "1";
+    proj = _project();
+    tmp = os.path.dirname(proj);
+    toml = Path(proj) / "jac.toml";
+    toml.write_text(
+        toml.read_text()
+            + "\n[byllm.model]\ndefault_model = \"anthropic/claude-test\"\n"
+    );
+    (Path(proj) / "main.jac").write_text(
+        _APP_SRC
+            + "\nimport from jaclang.byllm.config_loader { JacByllmConfig }\n"
+            + "import from jaclang { JacRuntime }\n\n"
+            + "def:pub configured_model -> str {\n"
+            + "    return JacByllmConfig().get_model_config()[\"default_model\"];\n"
+            + "}\n\n"
+            + "def:pub target -> str {\n"
+            + "    return str(JacRuntime.get_full_target_path() or \"\");\n"
+            + "}\n"
+    );
+    ctx: any = None;
+    prior_cwd = os.getcwd();
+    try {
+        app_dir = _app_dir(tmp);
+        os.chdir(app_dir);
+        os.environ["JAC_DATA_PATH"] = os.path.join(tmp, "data");
+        ctx = host_boot.boot(
+            _config(app_dir, {"entry": os.path.join(proj, "main.jac")})
+        );
+        origin = f"http://127.0.0.1:{ctx.port}";
+        (code, body) = _post(f"{origin}/function/target", {});
+        assert code == 200 , (code, body);
+        assert json.loads(body)["data"]["result"]
+            == os.path.join(proj, "main.jac") , body;
+        (code, body) = _post(f"{origin}/function/configured_model", {});
+        assert code == 200 , (code, body);
+        assert json.loads(body)["data"]["result"] == "anthropic/claude-test" , body;
+    } finally {
+        os.chdir(prior_cwd);
+        if ctx is not None {
+            ctx.shutdown();
+        }
+        os.environ.pop("JAC_DATA_PATH", None);
+        set_config(None);
+        shutil.rmtree(tmp, ignore_errors=True);
+    }
+}

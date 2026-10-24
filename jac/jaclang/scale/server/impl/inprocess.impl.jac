@@ -52,6 +52,9 @@ impl prepare_inprocess_runtime(
     os.makedirs(base_path, exist_ok=True);
     mark_scale_runtime();
     Jac.set_base_path(base_path);
+    if not static_only {
+        Jac.set_full_target_path(os.path.abspath(jac_file));
+    }
 
     prior_ctx = Jac.exec_ctx;
     mach = Jac.create_j_context(user_root=None);
