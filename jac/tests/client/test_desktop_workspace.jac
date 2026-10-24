@@ -330,3 +330,36 @@ test "a backend choice stages the assets a remote pick serves and seals the loca
         shutil.rmtree(d, ignore_errors=True);
     }
 }
+
+
+test "[desktop] profiles needs an embedded backend" {
+    d = _workspace();
+    try {
+        toml = Path(d) / "jac.toml";
+        toml.write_text(_TOML + "\n[apps.kiosk.desktop]\nprofiles = true\n");
+        _target(d, "kiosk");
+        assert get_desktop_config(project_dir=Path(d)).get_profiles() == True;
+        toml.write_text(
+            _TOML
+                + "\n[apps.kiosk.desktop]\nprofiles = true\n\n[apps.kiosk.desktop.backends]\nlocal = \"embedded\"\nweb = \"https://web.example\"\n"
+        );
+        _target(d, "kiosk");
+        assert get_desktop_config(project_dir=Path(d)).get_profiles() == True;
+        _target(d, "shell");
+        assert get_desktop_config(project_dir=Path(d)).get_profiles() == False;
+        _rejects(
+            d,
+            "kiosk",
+            "\n[apps.kiosk.desktop]\nprofiles = true\nbackend = \"https://web.example\"\n",
+            "profiles needs an embedded backend"
+        );
+        _rejects(
+            d, "kiosk", "\n[apps.kiosk.desktop]\nprofiles = \"yes\"\n", "true or false"
+        );
+    } finally {
+        reset_desktop_config();
+        set_config(None);
+        Jac.set_full_target_path("");
+        shutil.rmtree(d, ignore_errors=True);
+    }
+}
