@@ -5270,6 +5270,10 @@ graph import client.targets.desktop.native {
         },
         host_boot.boot { SessionStore },
     ]
+    profile_store ++> [
+        broker_extension { ProfileStore, clean_profile_name, new_profile_id },
+        host_boot.boot { ProfileStore },
+    ]
     webview.webview ++> plugin_bridge { respond }
 }
 
