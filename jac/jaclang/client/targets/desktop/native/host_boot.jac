@@ -72,6 +72,12 @@ def _leave_embedded_env;
 def _stop_embedded_store(home: str) -> None;
 
 
+def legacy_database_name(base_path: str) -> str;
+
+
+def _migrate_legacy_database(base_path: str, entry_file: str) -> None;
+
+
 def _apply_extra_deps;
 
 
@@ -342,6 +348,57 @@ impl _stop_embedded_store(home: str) -> None {
     }
 }
 
+impl legacy_database_name(base_path: str) -> str {
+    """The database an embedded app used before its runtime targeted the served
+    program: with no target there is no workspace, so the namespace was `main`.
+    Mirrors `project_database` for that case.""";
+    digest = hashlib.sha1(os.path.realpath(base_path).encode("utf-8")).hexdigest()[:8];
+    return f"jac_main_{digest}";
+}
+
+impl _migrate_legacy_database(base_path: str, entry_file: str) -> None {
+    """Carry an embedded app's database over to the name its workspace gives it.
+
+    Once the runtime targets the served program, the database is named from the
+    app's own `[persistence]` namespace (its project name by default) instead of
+    `main`. Rename the old database once, before the server opens either, so an
+    upgrade keeps its users and graph. Nothing happens when the names agree, when
+    there is no old database, or when the new one already exists; a rename that
+    fails (a peer instance still connected) leaves both as they are.
+    """;
+    if not entry_file {
+        return;
+    }
+    try {
+        import from jaclang.data.dbcatalog {
+            MAINTENANCE_DB,
+            connect_admin,
+            list_databases,
+            rename_database
+        }
+        import from jaclang.data.pgembed { PgRuntime }
+        import from jaclang.server.session { project_database, shared_pg_data_dir }
+    } except Exception as e {
+        sys.stderr.write("host_boot: database migration unavailable: " + str(e) + "\n");
+        return;
+    }
+    legacy = legacy_database_name(base_path);
+    current = project_database(base_path, entry_file).name;
+    if legacy == current {
+        return;
+    }
+    rt = PgRuntime(data_dir=shared_pg_data_dir(), database=MAINTENANCE_DB);
+    conn: any = connect_admin(rt.ensure());
+    try {
+        names = {r.database for r in list_databases(conn, with_size=False)};
+        if legacy in names and current not in names {
+            rename_database(conn, legacy, current);
+        }
+    } finally {
+        conn.close();
+    }
+}
+
 impl _apply_extra_deps {
     extra = os.environ.get("JAC_DESKTOP_DEPS", "");
     if not extra {
@@ -503,6 +560,11 @@ impl boot(config_json: str) -> HostContext {
         }
 
         entry_file = resolve_program(program, app_dir) if backend == EMBEDDED else "";
+        if entry_file {
+            _migrate_legacy_database(
+                os.path.join(data_dir, ".jac", "desktop", "graph"), entry_file
+            );
+        }
         store = SessionStore(os.path.join(data_dir, ".jac", "desktop", "session.json"));
         (runtime, port, stop) = serve_program(
             entry_file,
