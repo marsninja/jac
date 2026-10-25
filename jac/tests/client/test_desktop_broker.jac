@@ -605,3 +605,50 @@ test "a damaged profile list still opens: bad entries are skipped or repaired" {
         shutil.rmtree(tmp, ignore_errors=True);
     }
 }
+
+
+"""Two running instances of an app share one profile list: each change takes the
+file lock and rereads the list first, so neither drops the other's profiles."""
+test "two app instances creating profiles at once keep every profile" {
+    import threading;
+    tmp = tempfile.mkdtemp(prefix="jac_profiles_two_");
+    try {
+        path = os.path.join(tmp, "profiles.json");
+        first = ProfileStore.load(path);
+        second = ProfileStore.load(path);
+        first.add("Work", "u-work", "p-work");
+        second.add("Play", "u-play", "p-play");
+        assert [p.name for p in ProfileStore.load(path).profiles] == ["Work", "Play"];
+
+        errors: list[any] = [];
+        def make(store: ProfileStore, n: int) {
+            try {
+                store.add(f"P{n}", f"u{n}", f"p{n}");
+            } except Exception as e {
+                errors.append(e);
+            }
+        }
+        threads = [
+            threading.Thread(target=make, args=(first if n % 2 else second, n))
+            for n in range(20)
+        ];
+        for t in threads {
+            t.start();
+        }
+        for t in threads {
+            t.join();
+        }
+        assert errors == [] , errors;
+        assert len(ProfileStore.load(path).profiles) == 22 , "no profile is lost";
+        second.select("p-work");
+        assert ProfileStore.load(path).active == "p-work";
+        assert [
+            n
+            for n in os.listdir(tmp)
+            if n.endswith(".tmp")
+        ]
+            == [] , os.listdir(tmp);
+    } finally {
+        shutil.rmtree(tmp, ignore_errors=True);
+    }
+}
