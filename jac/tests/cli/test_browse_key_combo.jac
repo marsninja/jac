@@ -3,7 +3,7 @@ modifier names into CDP modifier flags (Alt 1, Control 2, Meta 4, Shift 8).
 Before this the whole string went to Input.dispatchKeyEvent as the key with no
 modifiers, so a page's Ctrl and Cmd shortcuts could not be driven headlessly."""
 
-import from jaclang.cli.browser_engine { _parse_key_combo, _key_down }
+import from jaclang.cli.browser_engine { _parse_key_combo, _key_down, _type_steps }
 
 test "modifier names become cdp flags" {
     assert _parse_key_combo("Control+b") == ("b", 2);
@@ -28,4 +28,16 @@ test "Enter carries a carriage return so it submits forms and breaks lines" {
     assert "text" not in _key_down("Tab");
     assert _key_down("a")["text"] == "a" and _key_down("a")["code"] == "KeyA";
     assert "text" not in _key_down("a", 2);
+}
+
+test "typed newlines press Enter so multi-line text reaches a textarea" {
+    steps = _type_steps("a\nb");
+    assert [s["type"] for s in steps]
+        == ["keyDown", "keyUp", "keyDown", "keyUp", "keyDown", "keyUp"];
+    assert steps[0]["text"] == "a" and steps[4]["text"] == "b";
+    assert steps[2]["key"] == "Enter" and steps[2]["text"] == "\r";
+    assert steps[3]["key"] == "Enter";
+    assert len(_type_steps("x\r\ny")) == 6;
+    assert _type_steps("x\ry")[2]["key"] == "Enter";
+    assert _type_steps("") == [];
 }
