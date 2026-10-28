@@ -4597,7 +4597,8 @@ graph import compiler.driver {
     context_passes --> compiler.driver.pipeline { NativeImportFactsPass }
     ifacecache --> cli.commands.analysis.check { prime_iface_codec }
     jir --> client.jac_client_compiler.JacClientCompiler.emit_dependencies {
-        compute_content_sha256
+        compute_content_sha256,
+        source_digests
     }
     jir --> client.targets.desktop._dev_launch._dev_roots_from_env { dev_source }
     jir --> compiler.backends.native.kernel_resolve.KernelArtifact.build {

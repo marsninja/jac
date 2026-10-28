@@ -1156,6 +1156,15 @@ def ct_dep_digest(path: str, with_annexes: bool = False) -> str {
     }
 }
 
+def source_digests(path: str) -> dict[str, str] {
+    src = Path(path).resolve();
+    digests = {str(src): compute_content_sha256(str(src))};
+    for (rel, digest) in _related_files(str(src)) {
+        digests[str((src.parent / rel).resolve())] = digest;
+    }
+    return digests;
+}
+
 def _ct_pkg_ref(path: str) -> str {
     """A dependency inside the package being compiled is named by its place in
     that package, so a unit cached from one staging of the tree still reads as
