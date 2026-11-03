@@ -6239,6 +6239,7 @@ graph import compiler {
             WireRec,
             WiringSpec,
             is_positional_import,
+            is_stdlib_module,
             scope_path_of,
             wiring_for_path
         },
@@ -6583,7 +6584,10 @@ graph import compiler {
             InteropContext,
             InteropManifest
         },
-        driver.wiring.WiringSpec.import_provider { is_bundled_native_module },
+        driver.wiring.WiringSpec.import_provider
+            | tools.jac_auto_lint_pass.JacAutoLintPass._native_import_supported {
+            is_bundled_native_module
+        },
         driver.wiring.variant_base_file { native_variant_base },
         erased_imports.erased_identity_call_arg { NATIVE_ERASED_IDENTITY_CALLS },
         erased_imports.erased_import_binds { NATIVE_ERASED_IMPORTS },
@@ -6811,6 +6815,7 @@ graph import compiler {
         backends.native.na_ir_gen_pass.NaIRGenPass._ct_fold
             | passes.capability_check_pass.PortabilityWarnPass._check_js_globals
             | passes.import_wiring_pass
+            | tools.jac_auto_lint_pass.JacAutoLintPass._native_type_only
             | tools.reactive_use_walk { ExprCtx },
         backends.native.na_ir_gen_pass.NaIRGenPass._flow_future_licensed
             | backends.native.primitives_native
@@ -7291,7 +7296,8 @@ graph import compiler {
             W3053,
             W3054,
             W3055,
-            W3056
+            W3056,
+            W3057
         },
         tools.jac_auto_lint_pass.JacAutoLintPass._check_filter_compare_tautology {
             W3040
@@ -9674,6 +9680,12 @@ graph import compiler {
             static_fstring_spec_text
         },
         driver.pipeline.analysis_passes { PortabilityWarnPass },
+        tools.jac_auto_lint_pass.JacAutoLintPass._native_import_supported {
+            classify_native_import
+        },
+        tools.jac_auto_lint_pass.JacAutoLintPass._native_type_only {
+            name_erased_natively
+        },
     ]
     passes.capability_check_pass --> backends.native.na_ir_gen_pass.NaIRGenPass._process_clib_imports {
         classify_native_import

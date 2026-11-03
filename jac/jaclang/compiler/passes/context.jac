@@ -21,7 +21,8 @@ glob INLINE_LOCKED_CODES: set[str] = {
          "E2091",
          "E2094",
          "E2099"
-     };
+     },
+     EXPLICIT_ONLY_LINT_CODES: set[str] = {"W3057"};
 
 obj DiagnosticPolicy {
     has suppress_codes: list[str] = [],

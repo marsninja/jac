@@ -60,6 +60,9 @@ impl DiagnosticPolicy.is_suppressed(
     if diag.category.value in self.suppress_categories {
         return True;
     }
+    if not self.lint_active and diag.code in EXPLICIT_ONLY_LINT_CODES {
+        return True;
+    }
     if self.lint_active and diag.category.value == "lint" {
         reverse_aliases: dict[str, str] = {v: k for (k, v) in LINT_ALIASES.items()};
         kebab_name = reverse_aliases.get(diag.code, None);
@@ -74,7 +77,9 @@ impl DiagnosticPolicy.is_suppressed(
 
         non_default_codes: set[str] = {"E3012", "W3050", "W3051", "W3055", "W3056"};
         enabled = False;
-        if "all" in self.lint_select {
+        if diag.code in EXPLICIT_ONLY_LINT_CODES {
+            enabled = code_in_select;
+        } elif "all" in self.lint_select {
             enabled = True;
         } elif "default" in self.lint_select {
             enabled = (diag.code not in non_default_codes) or code_in_select;

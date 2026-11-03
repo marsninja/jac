@@ -2170,6 +2170,17 @@ glob E0001 = _err("E0001", Category.SYNTAX, "Expected '{expected}', got '{got}'"
          " dotted stem such as a platform variant), never in the module itself or"
          " beside it. `jac fmt --lintfix` moves the impls and relocates the annex."
      ),
+     W3057 = _warn(
+         "W3057",
+         Category.LINT,
+         "{what} [native-clean]",
+         help="On only when \"native-clean\" is named in [check.lint] select;"
+         " neither \"default\" nor \"all\" turns it on. It flags code that leans on"
+         " Python semantics the native backend cannot compile: `any`/`object` as a"
+         " type, getattr/setattr/hasattr/delattr, eval/exec/compile/__import__,"
+         " importlib, *args/**kwargs, and Python standard-library imports the bundled"
+         " native standard library does not provide. It has no automatic fix."
+     ),
      LINT_ALIASES: dict[str, str] = {
          "staticmethod-to-static": "W3001",
          "combine-has": "W3002",
@@ -2204,7 +2215,8 @@ glob E0001 = _err("E0001", Category.SYNTAX, "Expected '{expected}', got '{got}'"
          "remove-wired-import": "W3053",
          "remove-dead-import": "W3054",
          "separate-impls": "W3055",
-         "impls-in-annex": "W3056"
+         "impls-in-annex": "W3056",
+         "native-clean": "W3057"
      },
      E5001 = _err(
          "E5001",

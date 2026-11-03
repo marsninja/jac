@@ -635,8 +635,11 @@ Emitted by `jac check --lint`. Rules can be configured in [`jac.toml`](config/in
 | `W3054` | `remove-dead-import` | Import of '{name}' from '{module}' is neither wired nor read | default |
 | `W3055` | `separate-impls` | Body of '{name}' belongs in a separate impl | all |
 | `W3056` | `impls-in-annex` | impl '{name}' belongs in an annex inside an impl folder (or: Annex '{file}' belongs inside an impl folder) | all |
+| `W3057` | `native-clean` | {what} -- names the construct and why the native backend cannot compile it, e.g. 'any' as a type needs Python's dynamic typing; native code needs a concrete type | explicit |
 
 > **all group**: `strip-comments`, `strip-docstrings`, `separate-impls` and `impls-in-annex` are on under `select = ["all"]` and off under `["default"]`. The first two delete comments and docstrings (`strip-docstrings` also deletes a string written as a statement inside a body); `separate-impls` moves bodies into `impl` blocks, and `impls-in-annex` moves those blocks into an annex inside an impl folder. Each can be named explicitly or listed in `ignore`; see the [config reference](config/index.md#checklint).
+
+> **explicit group**: `native-clean` is on only when it is named in `select` (`select = ["native-clean"]`, or `["default", "native-clean"]`); neither `"default"` nor `"all"` turns it on. It reports code that cannot compile on the native backend without Python semantics: `any`, `Any` or `object` written as a type (in a parameter, return, `has`, `glob` or local annotation, including nested ones such as `dict[str, any]` and `T | any`); calls to `getattr`, `setattr`, `hasattr` and `delattr`; calls to `eval`, `exec`, `compile` and `__import__`, and imports of `importlib`; `*args` and `**kwargs` parameters; and imports of Python standard-library modules that the bundled native standard library does not provide. It only reports; `--lintfix` changes nothing for it. See the [config reference](config/index.md#checklint).
 
 ---
 
