@@ -681,6 +681,7 @@ select = ["combine-has", "remove-empty-parens"]
 | `strip-docstrings` | `W3051` | Remove **all** docstrings, and strings written as statements inside a body | all |
 | `separate-impls` | `W3055` | Move every function, method and ability body into an `impl` in its module's `.impl.jac` annex | all |
 | `impls-in-annex` | `W3056` | Keep every `impl` in an annex inside an impl folder: none in the module itself, no annex beside it | all |
+| `native-clean` | `W3057` | Report code that needs Python semantics the native backend cannot compile (report only, no fix) | explicit |
 
 Diagnostic codes can be suppressed inline with `# jac:ignore[CODE]` comments. See the full [Errors & Warnings](../diagnostics.md) reference for all diagnostic codes.
 
@@ -704,6 +705,27 @@ ignore = ["separate-impls"]
 ```
 
 The deslop rules are independent, so you can strip comments while keeping docstrings (or vice versa). With a rule selected, `jac fmt --lintfix` applies it and `jac check` reports it. They are also the rules driving [`jac precommit`](../cli/index.md#jac-precommit) when configured.
+
+**Rules only naming turns on:**
+
+`native-clean` (`W3057`) is for code that must compile on the native backend with no dependence on Python semantics, such as sources a native-only toolchain also compiles. It is on only when `select` names it; `"default"` and `"all"` leave it off, so a project that selects `"all"` does not suddenly fail on its `any` annotations:
+
+```toml
+[check.lint]
+select = ["default", "native-clean"]
+```
+
+It reports, as warnings:
+
+| Construct | Example | Why |
+|-----------|---------|-----|
+| `any`, `Any` or `object` written as a type | `def f(x: any) -> Any`, `has data: dict[str, any]`, `glob g: T \| any` | the native backend needs a concrete type |
+| Dynamic reflection | `getattr(o, "x")`, `setattr`, `hasattr`, `delattr` | fields are resolved at compile time |
+| Dynamic code and imports | `eval`, `exec`, `compile`, `__import__`, `import importlib` | there is no interpreter to run or load code at runtime |
+| Variadic parameters | `def f(*args: int, **kwargs: str)` | every parameter must be declared |
+| Python standard-library imports the bundled native standard library does not provide | `import dataclasses;` | the module exists only in Python |
+
+The standard-library check asks the compiler the same question native compilation does: a module is fine when it is in the bundled native standard library (`jaclang/runtime/na_stdlib/`) or natively supported, and a name imported from a module such as `typing` is fine when it is only used in type positions, where native compilation erases it. A call to a module-level function or import that shadows a builtin, such as your own `def compile(...)`, is not reported. The rule only reports: `jac fmt --lintfix` and `jac check --lint --fix` change nothing on its account. Silence a single line with `# jac:ignore[native-clean]`.
 
 **Excluding files from lint:**
 
