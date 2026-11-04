@@ -332,9 +332,7 @@ test "lintfix moves separate-impls bodies into the module's impl annex" {
             fresh_annex = (Path(repo) / "impl" / "fresh.impl.jac").read_text();
             mod_text = mod.read_text();
             annex_text = annex.read_text();
-            variant_annex = (
-                Path(repo) / "fresh.native.impl" / "fresh.native.impl.jac"
-            ).read_text();
+            variant_annex = (Path(repo) / "impl" / "fresh.native.impl.jac").read_text();
             blocked_text = blocked.read_text();
             files.remove(str(blocked));
             files.remove(str(stuck));
@@ -353,8 +351,8 @@ test "lintfix moves separate-impls bodies into the module's impl annex" {
         assert not stuck_annex_left , f"[jobs={jobs}] an annex written for a module "
         "that then fails to save is rolled back";
         assert "return x + 1" in variant_annex , (
-            f"[jobs={jobs}] a platform variant gets its own annex folder, so the "
-            "portable module does not claim its bodies"
+            f"[jobs={jobs}] a platform variant gets its own annex in impl/, which "
+            "the portable module does not claim"
         );
         assert fresh_text == "def f(x: int) -> int;\n" , f"[jobs={jobs}] the module "
         f"keeps only the declaration, got:\n{fresh_text!r}";
@@ -394,6 +392,13 @@ test "lintfix moves impls-in-annex impls and sibling annexes into an impl folder
             (proj / "both.impl.jac").write_text(ANNEX_SRC);
             (proj / "plat.native.jac").write_text(decl);
             (proj / "plat.native.impl.jac").write_text(ANNEX_SRC);
+            (proj / "grp.native.jac").write_text(
+                "obj Foo {\n    def bar -> int;\n    def baz -> int;\n}\n"
+            );
+            (proj / "grp.native.impl.jac").write_text(ANNEX_SRC);
+            (proj / "grp.native.impl").mkdir();
+            grp_part = "impl Foo.baz -> int {\n    return 2;\n}\n";
+            (proj / "grp.native.impl" / "grp.native.part.impl.jac").write_text(grp_part);
             (proj / "settled.jac").write_text(decl);
             (proj / "impl").mkdir();
             settled_src = "impl Foo.bar -> int {\n    return 1;\n}\n";
@@ -413,9 +418,8 @@ test "lintfix moves impls-in-annex impls and sibling annexes into an impl folder
             side_annex = (proj / "impl" / "side.impl.jac").read_text();
             both_text = (proj / "both.jac").read_text();
             both_annex = (proj / "impl" / "both.impl.jac").read_text();
-            plat_annex = (
-                proj / "plat.native.impl" / "plat.native.impl.jac"
-            ).read_text();
+            plat_annex = (proj / "impl" / "plat.native.impl.jac").read_text();
+            grp_annex = (proj / "grp.native.impl" / "grp.native.impl.jac").read_text();
             settled_annex = (proj / "impl" / "settled.impl.jac").read_text();
             reset_state();
             inputs = [str(p) for p in sorted(proj.glob("**/*.jac"))];
@@ -436,7 +440,10 @@ test "lintfix moves impls-in-annex impls and sibling annexes into an impl folder
         assert "Foo.bar" in both_annex and "Foo.baz" in both_annex , (
             f"[{mode}] the moved impl joins the relocated annex, got:\n{both_annex!r}"
         );
-        assert "return 1" in plat_annex , f"[{mode}] a dotted stem keeps its folder";
+        assert "return 1" in plat_annex , f"[{mode}] a platform variant moves to impl/";
+        assert "return 1" in grp_annex , (
+            f"[{mode}] a module with its own impl folder keeps using it"
+        );
         assert settled_annex == settled_src , f"[{mode}] a placed annex is untouched";
         assert again == 0 , f"[{mode}] a second run must find nothing to move";
     }
@@ -466,7 +473,7 @@ def annex_project -> str {
 glob DECL = "obj Foo {\n    def bar -> int;\n}\n",
      IMPL = "impl Foo.bar -> int {\n    return 1;\n}\n";
 
-test "lintfix gives a variant's sibling annex one home, beside the variant" {
+test "lintfix gives a variant's sibling annex one home, in impl/" {
     for mode in ("fmt-0", "fmt-2", "lint") {
         repo = annex_project();
         old = os.getcwd();
@@ -485,7 +492,7 @@ test "lintfix gives a variant's sibling annex one home, beside the variant" {
             shutil.rmtree(repo, ignore_errors=True);
         }
         assert ret == 0 , f"[{mode}] got {ret}";
-        assert homes == ["foo.native.impl/foo.native.impl.jac"] , f"[{mode}] {homes}";
+        assert homes == ["impl/foo.native.impl.jac"] , f"[{mode}] {homes}";
     }
 }
 

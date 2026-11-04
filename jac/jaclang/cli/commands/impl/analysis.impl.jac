@@ -671,9 +671,10 @@ impl _annex_home(file_path: str, annex_path: str) -> str {
 
     stem = os.path.basename(file_path)[:-len(".jac")];
     parent = os.path.dirname(file_path);
-    folder = os.path.join(parent, stem + ".impl")
-        if "." in stem
-        else os.path.join(parent, "impl");
+    folder = os.path.join(parent, stem + ".impl");
+    if not os.path.isdir(folder) {
+        folder = os.path.join(parent, "impl");
+    }
     return os.path.join(folder, os.path.basename(annex_path));
 }
 
@@ -843,9 +844,6 @@ impl _float_impls_to_annex(
     if owned {
         target = moves.get(owned[0], owned[0]);
         source = owned[0];
-    } elif "." in stem {
-        target = os.path.join(folder, stem + ".impl.jac");
-        source = target;
     } else {
         target = os.path.join(os.path.dirname(file_path), "impl", stem + ".impl.jac");
         source = target;

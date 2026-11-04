@@ -2158,8 +2158,8 @@ glob E0001 = _err("E0001", Category.SYNTAX, "Expected '{expected}', got '{got}'"
          "{what} [impls-in-annex]",
          help="On under select = [\"all\"] (not [\"default\"]) or when "
          "\"impls-in-annex\" is named in [check.lint] select. Every impl lives in"
-         " its module's `impl/<module>.impl.jac` annex (or `<module>.impl/` for a"
-         " dotted stem such as a platform variant), never in the module itself or"
+         " its module's `impl/<module>.impl.jac` annex (or in the module's own"
+         " `<module>.impl/` folder when it has one), never in the module itself or"
          " beside it. `jac fmt --lintfix` moves the impls and relocates the annex."
      ),
      LINT_ALIASES: dict[str, str] = {
