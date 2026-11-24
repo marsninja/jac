@@ -1724,6 +1724,131 @@ test "W3056 impls-in-annex is on under all and off under default" {
     assert format_impls_in_annex(IMPLS_IN_MODULE, ["separate-impls"])[1] == 0;
 }
 
+"""Lint-format `source` as mod.jac; return the formatted text and its W3057 hits."""
+def native_clean_hits(
+    source: str, select: list[str], ignore: (list[str] | None) = None
+) -> tuple[str, list[tuple[int, str]]] {
+    config = JacConfig();
+    config.check = CheckConfig(lint=LintConfig(select=select, ignore=ignore or []));
+    set_config(config);
+    try {
+        with tempfile.TemporaryDirectory() as tmpdir {
+            path = os.path.join(tmpdir, "mod.jac");
+            with open(path, "w") as f {
+                f.write(source);
+            }
+            prog = JacProgram.jac_file_formatter(path, auto_lint=True);
+            hits = [
+                (w.loc.first_line, w.msg)
+                for w in prog.warnings_had
+                if w.code is not None and w.code.code == "W3057"
+            ];
+            return (prog.mod.main.gen.jac, sorted(hits));
+        }
+    } finally {
+        set_config(None);
+    }
+}
+
+glob NOT_NATIVE_CLEAN = (
+         "import json;\n"
+         "import dataclasses;\n"
+         "import importlib;\n"
+         "import from typing { Any }\n"
+         "\n"
+         "glob registry: dict[str, any] = {};\n"
+         "\n"
+         "obj Box {\n"
+         "    has payload: object;\n"
+         "}\n"
+         "\n"
+         "def pick(a: int | any, *args: int, **kwargs: str) -> Any {\n"
+         "    setattr(a, \"x\", 1);\n"
+         "    b = getattr(a, \"x\");\n"
+         "    delattr(a, \"x\");\n"
+         "    ok = hasattr(a, \"y\");\n"
+         "    eval(\"1\");\n"
+         "    exec(\"x = 1\");\n"
+         "    code = compile(\"1\", \"f\", \"eval\");\n"
+         "    mod = __import__(\"os\");\n"
+         "    local: list[any] = [];\n"
+         "    return b;\n"
+         "}\n"
+     ),
+     NATIVE_CLEAN = (
+         "import json;\n"
+         "import math;\n"
+         "import from os { path }\n"
+         "import from typing { Optional }\n"
+         "\n"
+         "glob limit: int = 3;\n"
+         "\n"
+         "obj Box {\n"
+         "    has payload: list[int] = [],\n"
+         "        label: Optional[str] = None;\n"
+         "}\n"
+         "\n"
+         "def total(xs: list[int], scale: float = 1.0) -> float {\n"
+         "    acc: float = 0.0;\n"
+         "    for x in xs {\n"
+         "        acc += x * scale;\n"
+         "    }\n"
+         "    return acc + math.sqrt(len(xs));\n"
+         "}\n"
+         "\n"
+         "def compile(text: str) -> str {\n"
+         "    return json.dumps(text);\n"
+         "}\n"
+         "\n"
+         "with entry {\n"
+         "    compile(\"x\");\n"
+         "}\n"
+     );
+
+test "W3057 native-clean flags each Python-dependent construct when selected" {
+    (formatted, hits) = native_clean_hits(NOT_NATIVE_CLEAN, ["native-clean"]);
+    lines = [ln for (ln, _) in hits];
+    # json is in the bundled native stdlib and Any is only used as a type,
+    # which native compilation erases, so lines 1 and 4 stay clean.
+    assert lines
+        == [2, 3, 6, 9, 12, 12, 12, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21] , hits;
+    text = "\n".join(msg for (_, msg) in hits);
+    assert "Import of 'dataclasses' needs Python" in text , text;
+    assert "Import of 'importlib' loads modules at runtime" in text , text;
+    for name in ["any", "Any", "object"] {
+        assert f"'{name}' as a type" in text , text;
+    }
+    for name in ["getattr", "setattr", "hasattr", "delattr"] {
+        assert f"'{name}()' is dynamic reflection" in text , text;
+    }
+    for name in ["eval", "exec", "compile", "__import__"] {
+        assert f"'{name}()' runs or loads code at runtime" in text , text;
+    }
+    assert "'*args' collects arguments" in text , text;
+    assert "'**kwargs' collects keyword arguments" in text , text;
+    assert all(msg.endswith("[native-clean]") for (_, msg) in hits) , text;
+    # Report only: --lintfix leaves every flagged construct in place.
+    for kept in ["import dataclasses;", "*args: int", "setattr(a", "eval(\"1\")"] {
+        assert kept in formatted , formatted;
+    }
+}
+
+test "W3057 native-clean is off unless named, even under all" {
+    assert native_clean_hits(NOT_NATIVE_CLEAN, ["default"])[1] == [];
+    assert native_clean_hits(NOT_NATIVE_CLEAN, ["all"])[1] == [];
+    assert native_clean_hits(NOT_NATIVE_CLEAN, ["default", "strip-comments"])[1] == [];
+    assert native_clean_hits(NOT_NATIVE_CLEAN, ["W3057"])[1] != [];
+    assert len(native_clean_hits(NOT_NATIVE_CLEAN, ["all", "native-clean"])[1]) == 17;
+    ignored = native_clean_hits(
+        NOT_NATIVE_CLEAN, ["native-clean"], ignore=["native-clean"]
+    );
+    assert ignored[1] == [];
+}
+
+test "W3057 native-clean passes a native-clean module" {
+    assert native_clean_hits(NATIVE_CLEAN, ["native-clean"])[1] == [];
+}
+
 test "deslop rules are disabled under default select" {
     input_path = auto_lint_fixture_path("deslop.jac");
     config = JacConfig();

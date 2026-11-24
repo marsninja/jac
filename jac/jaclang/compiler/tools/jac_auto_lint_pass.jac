@@ -14,7 +14,9 @@ walker JacAutoLintPass(TreePass) {
         _pending_setters: list[dict[str, str]] = [],
         _base_decl_cache: list[uni.Archetype] = [],
         _base_decls_loaded: bool = False,
-        _floated_ids: set[int] = set();
+        _floated_ids: set[int] = set(),
+        _native_on: bool = False,
+        _native_shadowed: set[str] = set();
 
     def postinit -> None;
     def _is_file_excluded(file_path: str) -> bool;
@@ -201,6 +203,17 @@ walker JacAutoLintPass(TreePass) {
 
     def _impl_property_kind(nd: uni.ImplDef) -> str;
     def _convert_property_impl(nd: uni.ImplDef) -> None;
+    can enter_has_var with uni.HasVar entry;
+    can enter_assignment with uni.Assignment entry;
+    can enter_import with uni.Import entry;
+    def _native_clean_on(nd: uni.UniNode) -> bool;
+    def _native_shadowed_names(module: uni.Module) -> set[str];
+    def _check_native_type(type_expr: (uni.Expr | None)) -> None;
+    def _check_native_call(nd: uni.FuncCall) -> None;
+    def _check_native_param(nd: uni.ParamVar) -> None;
+    def _check_native_import(nd: uni.Import) -> None;
+    def _native_import_supported(item: (uni.ModuleItem | uni.ModulePath)) -> bool;
+    def _native_type_only(nd: uni.Import, item: uni.ModuleItem) -> bool;
 }
 
 walker JacLintCheckPass(JacAutoLintPass) {

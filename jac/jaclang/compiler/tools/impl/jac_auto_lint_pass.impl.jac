@@ -527,6 +527,10 @@ impl JacAutoLintPass.enter_module with uni.Module entry {
     if not self.lint_enabled {
         return;
     }
+    self._native_on = not self.ctx._is_suppressed(W3057);
+    if self._native_on {
+        self._native_shadowed |= self._native_shadowed_names(here);
+    }
     if self.report_only {
         self._separate_impls(here, here.body);
         self._sink_impls(here, list(here.body));
@@ -783,6 +787,7 @@ impl JacAutoLintPass.exit_func_call with uni.FuncCall exit {
         return;
     }
     self._check_no_print(here);
+    self._check_native_call(here);
 
     if not self.ctx._is_suppressed(W3007) {
         replacement = self._convert_hasattr_to_null_ok(here);
@@ -1964,6 +1969,9 @@ impl JacAutoLintPass.exit_func_signature with uni.FuncSignature exit {
         return;
     }
     self._check_too_many_params(here);
+    if self._native_clean_on(here) {
+        self._check_native_type(here.return_type);
+    }
 }
 
 impl JacAutoLintPass.enter_param_var with uni.ParamVar entry {
@@ -1971,6 +1979,7 @@ impl JacAutoLintPass.enter_param_var with uni.ParamVar entry {
         return;
     }
     self._check_mutable_default(here);
+    self._check_native_param(here);
 }
 
 impl JacAutoLintPass.exit_archetype with uni.Archetype exit {
@@ -3702,4 +3711,180 @@ impl JacAutoLintPass._convert_property_impl(nd: uni.ImplDef) -> None {
         }
     }
     nd._invalidate_sub_node_tab();
+}
+
+impl JacAutoLintPass.enter_has_var with uni.HasVar entry {
+    if self._native_clean_on(here) and here.type_tag is not None {
+        self._check_native_type(here.type_tag.tag);
+    }
+}
+
+impl JacAutoLintPass.enter_assignment with uni.Assignment entry {
+    if self._native_clean_on(here) and here.type_tag is not None {
+        self._check_native_type(here.type_tag.tag);
+    }
+}
+
+impl JacAutoLintPass.enter_import with uni.Import entry {
+    if self._native_clean_on(here) {
+        self._check_native_import(here);
+    }
+}
+
+impl JacAutoLintPass._native_clean_on(nd: uni.UniNode) -> bool {
+    return self._native_on
+        and self.lint_enabled
+        and not self._is_file_excluded(nd.loc.mod_path);
+}
+
+impl JacAutoLintPass._native_shadowed_names(module: uni.Module) -> set[str] {
+    names: set[str] = set();
+    for stmt in module.body {
+        if isinstance(stmt, uni.Ability) and isinstance(stmt.name_ref, uni.Name) {
+            names.add(stmt.name_ref.value);
+        } elif isinstance(stmt, uni.Import) {
+            for item in stmt.items {
+                if isinstance(item, uni.ModuleItem) {
+                    bound = item.alias or item.name;
+                    if isinstance(bound, uni.Name) {
+                        names.add(bound.value);
+                    }
+                }
+            }
+        }
+    }
+    return names;
+}
+
+impl JacAutoLintPass._check_native_type(type_expr: (uni.Expr | None)) -> None {
+    if type_expr is None {
+        return;
+    }
+    found = [type_expr] if isinstance(type_expr, uni.Name) else [];
+    found.extend(type_expr.get_all_sub_nodes(uni.Name));
+    found.extend(type_expr.get_all_sub_nodes(uni.BuiltinType));
+    for nm in found {
+        if nm.value in ("any", "Any", "object") {
+            self.ctx.emit(
+                W3057,
+                node_override=nm,
+                what=f"'{nm.value}' as a type needs Python's dynamic typing; "
+                "native code needs a concrete type"
+            );
+        }
+    }
+}
+
+impl JacAutoLintPass._check_native_call(nd: uni.FuncCall) -> None {
+    if not isinstance(nd.target, uni.Name)
+        or nd.target.value in self._native_shadowed
+        or not self._native_clean_on(nd) {
+        return;
+    }
+    name = nd.target.value;
+    if name in ("getattr", "setattr", "hasattr", "delattr") {
+        self.ctx.emit(
+            W3057,
+            node_override=nd,
+            what=f"'{name}()' is dynamic reflection, which the native backend "
+            "cannot compile; name the field directly"
+        );
+    } elif name in ("eval", "exec", "compile", "__import__") {
+        self.ctx.emit(
+            W3057,
+            node_override=nd,
+            what=f"'{name}()' runs or loads code at runtime, which the native "
+            "backend cannot compile"
+        );
+    }
+}
+
+impl JacAutoLintPass._check_native_param(nd: uni.ParamVar) -> None {
+    if not self._native_clean_on(nd) {
+        return;
+    }
+    if nd.is_vararg {
+        self.ctx.emit(
+            W3057,
+            node_override=nd,
+            what=f"'*{nd.name.value}' collects arguments dynamically; native "
+            "code needs each parameter declared"
+        );
+    } elif nd.is_kwargs {
+        self.ctx.emit(
+            W3057,
+            node_override=nd,
+            what=f"'**{nd.name.value}' collects keyword arguments dynamically; "
+            "native code needs each parameter declared"
+        );
+    }
+    if nd.type_tag is not None {
+        self._check_native_type(nd.type_tag.tag);
+    }
+}
+
+impl JacAutoLintPass._check_native_import(nd: uni.Import) -> None {
+    if nd.has_clib_decls or nd.has_string_path {
+        return;
+    }
+    for item in nd.items {
+        path = nd.from_loc if isinstance(item, uni.ModuleItem) else item;
+        if not isinstance(path, uni.ModulePath) or path.level != 0 or not path.path {
+            continue;
+        }
+        mod_name = path.dot_path_str;
+        top = mod_name.split(".")[0];
+        what = (
+            f"Import of '{item.name.value}' from '{mod_name}'"
+                if isinstance(item, uni.ModuleItem) and isinstance(item.name, uni.Name)
+                else f"Import of '{mod_name}'"
+        );
+        if top == "importlib" {
+            self.ctx.emit(
+                W3057,
+                node_override=item,
+                what=f"{what} loads modules at runtime, which the native backend "
+                "cannot compile"
+            );
+        } elif is_stdlib_module(top)
+            and not self._native_import_supported(item)
+            and not (
+                isinstance(item, uni.ModuleItem) and self._native_type_only(nd, item)
+            ) {
+            self.ctx.emit(
+                W3057,
+                node_override=item,
+                what=f"{what} needs Python: the bundled native standard library "
+                "does not provide it"
+            );
+        }
+    }
+}
+
+impl JacAutoLintPass._native_import_supported(
+    item: (uni.ModuleItem | uni.ModulePath)
+) -> bool {
+    (mod_name, supported) = classify_native_import(item);
+    return supported or (mod_name is not None and is_bundled_native_module(mod_name));
+}
+
+impl JacAutoLintPass._native_type_only(nd: uni.Import, item: uni.ModuleItem) -> bool {
+    bound = item.alias or item.name;
+    module = nd.find_parent_of_type(uni.Module);
+    if not isinstance(bound, uni.Name) or module is None {
+        return False;
+    }
+    type_used = False;
+    for nm in module.get_all_sub_nodes(uni.Name) {
+        if nm.value != bound.value
+            or nm.expr_ctx != ExprCtx.LOAD
+            or nm.find_parent_of_type(uni.Import) is not None {
+            continue;
+        }
+        if not name_erased_natively(nm) {
+            return False;
+        }
+        type_used = True;
+    }
+    return type_used;
 }

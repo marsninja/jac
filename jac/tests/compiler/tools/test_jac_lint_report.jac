@@ -118,3 +118,33 @@ test "lint report path preserves every diagnostic the mutation pass emits" {
         set_config(None);
     }
 }
+
+test "lint report path reports native-clean like the mutation pass" {
+    src = (
+        "import dataclasses;\n"
+        "import from importlib { import_module }\n"
+        "obj Box {\n    has payload: object;\n}\n"
+        "def pick(a: dict[str, any], *args: int, **kwargs: str) -> any {\n"
+        "    ok = hasattr(a, \"x\") and a.x;\n"
+        "    return eval(\"1\");\n"
+        "}\n"
+    );
+    config = JacConfig();
+    config.check = CheckConfig(lint=LintConfig(select=["native-clean"]));
+    set_config(config);
+    path = _write_tmp(src);
+    try {
+        prog = JacProgram.jac_file_linter(path);
+        rep_keys = _diag_keys(prog);
+        native = [
+            k
+            for k in rep_keys
+            if "[native-clean]" in k
+        ];
+        assert len(native) == 9 , rep_keys;
+        assert rep_keys == _full_pass_diags(src, path) , rep_keys;
+    } finally {
+        os.remove(path);
+        set_config(None);
+    }
+}
